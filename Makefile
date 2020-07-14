@@ -1,4 +1,4 @@
-Debug := 1
+Debug := 0
 Includes := -I$(CURDIR)\ettsrc
 
 ifeq ($(OS),Windows_NT)

@@ -49,22 +49,22 @@ EffectMasks calculate_effects(CalcInfo *ci, NoteData *note_data)
 {
     SkillsetRatings default_ratings = {};
     Calc *calc = ci->handle;
-    int num_mod_params = ci->num_mod_params;
+    int num_params = ci->num_params;
     float *default_mods = calc->mod_params;
 
     calc_go(calc, note_data, 1.0f, 0.93f, &default_ratings);
 
-    float *mods = (float *)calloc(num_mod_params, sizeof(float));
-    memcpy(mods, default_mods, num_mod_params * sizeof(float));
+    float *mods = (float *)calloc(num_params, sizeof(float));
+    memcpy(mods, default_mods, num_params * sizeof(float));
 
     b32 changed[NumSkillsetRatings] = {};
 
     EffectMasks result;
-    result.weak = (unsigned int *)calloc(num_mod_params, sizeof(unsigned int));
-    result.strong = (unsigned int *)calloc(num_mod_params, sizeof(unsigned int));
+    result.weak = (unsigned int *)calloc(num_params, sizeof(unsigned int));
+    result.strong = (unsigned int *)calloc(num_params, sizeof(unsigned int));
 
     SkillsetRatings ratings = {};
-    for (int i = 0; i < num_mod_params; i++) {
+    for (int i = 0; i < num_params; i++) {
         // stronk
         {
             mods[i] = default_mods[i] * 0.8f;
@@ -209,37 +209,75 @@ CalcInfo calc_init()
     n += (result.num_params_for_mod[i++] = (int)shalhoub._tt._params.size());
     n += (result.num_params_for_mod[i++] = (int)shalhoub._tt2._params.size());
 
-    result.mod_params = (float *)calloc(n, sizeof(float));
-    result.mod_param_names = (const char **)calloc(n, sizeof(char *));
-    float *mp = result.mod_params;
-    const char **mpn = result.mod_param_names;
+    result.params = (float *)calloc(n, sizeof(float));
+    result.param_names = (const char **)calloc(n, sizeof(char *));
+    result.param_info = (ParamInfo *)calloc(n, sizeof(ParamInfo));
+    float *mp = result.params;
+    const char **mpn = result.param_names;
+    float *paramparam[256] = {0};
+    float **paramparamparam = paramparam;
 
     // (Stupud hack related) In this iteration we want to store the p.second
     // pointers. But they are pointers into Ulbu, who exists on the stack in
-    // real runs.
-    for (const auto &p : shalhoub._s._params)     { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._js._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._hs._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._cj._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._cjd._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._ohj._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._cjohj._params) { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._bal._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._oht._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._voht._params)  { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._ch._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._rm._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._wrb._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._wrr._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._wrjt._params)  { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._wra._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._fj._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._tt._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
-    for (const auto &p : shalhoub._tt2._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
+    // real runs. We take them now anyway to figure out lower/upper bounds.
+    for (const auto &p : shalhoub._s._params)     { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._js._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._hs._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._cj._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._cjd._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._ohj._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._cjohj._params) { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._bal._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._oht._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._voht._params)  { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._ch._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._rm._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._wrb._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._wrr._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._wrjt._params)  { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._wra._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._fj._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._tt._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
+    for (const auto &p : shalhoub._tt2._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
 
-    result.handle->mod_params = result.mod_params;
+    // Test for clamping and int-ing
+    for (isize i = 0; i < n; i++) {
+        *paramparam[i] = result.params[i] * 100.5438f;
+    }
+
+    result.shalhoub->setup_agnostic_pmods();
+    result.shalhoub->setup_dependent_mods();
+
+    for (isize i = 0; i < n; i++) {
+        f32 a = (result.params[i] * 100.5438f);
+        if (a != *paramparam[i]) {
+            result.param_info[i].high = *paramparam[i];
+        } else {
+            // Be conservative I guess?
+            result.param_info[i].high = result.params[i] * 2.f;
+        }
+
+        result.param_info[i].integer = ((float)(int)a) == *paramparam[i];
+    }
+
+    for (isize i = 0; i < n; i++) {
+        *paramparam[i] = 0.0f;
+    }
+
+    result.shalhoub->setup_agnostic_pmods();
+    result.shalhoub->setup_dependent_mods();
+
+    for (isize i = 0; i < n; i++) {
+        if (0.f != *paramparam[i]) {
+            result.param_info[i].low = *paramparam[i];
+        } else {
+            result.param_info[i].low = 0.0f;
+        }
+    }
+
+    result.handle->mod_params = result.params;
     result.num_mods = NumMods;
-    result.num_mod_params = n;
+    result.num_params = n;
     return result;
 }
 

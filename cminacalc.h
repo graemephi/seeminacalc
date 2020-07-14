@@ -43,15 +43,23 @@ typedef struct EffectMasks
     unsigned int *strong;
 } EffectMasks;
 
+typedef struct ParamInfo
+{
+    f32 low;
+    f32 high;
+    b32 integer;
+} ParamInfo;
+
 typedef struct CalcInfo
 {
     Calc *handle;
     int num_mods;
-    int num_mod_params;
+    int num_params;
     int *num_params_for_mod;
-    float *mod_params;
+    float *params;
     const char **mod_names;
-    const char **mod_param_names;
+    const char **param_names;
+    ParamInfo *param_info;
 
     TheGreatBazoinkazoinkInTheSky *shalhoub;
 } CalcInfo;

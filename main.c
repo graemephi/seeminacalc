@@ -100,6 +100,8 @@ typedef struct State
 
     CalcInfo ci;
     SimFileWindow sm;
+
+    int update_index;
 } State;
 static State state;
 f32 xs[19];
@@ -183,7 +185,7 @@ bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label
 
 static bool ipBeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
 {
-    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){-1, 0}, ImPlotFlags_Default | ImPlotFlags_AntiAliased, ImPlotAxisFlags_Default, ImPlotAxisFlags_Default, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
+    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){-1, 0}, ImPlotFlags_Default, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
 }
 
 void frame(void)
@@ -195,7 +197,6 @@ void frame(void)
 
     ipShowDemoWindow(0);
 
-    ipPushStyleVarFloat(ImPlotStyleVar_LineWeight, 1.5f);
     igBegin(state.sm.title.buf, &state.sm.open, 0);
     {
         igText(state.sm.diff.buf);
@@ -203,7 +204,7 @@ void frame(void)
         igText(state.sm.chartkey.buf);
 
         ipSetNextPlotLimits(82, 100, state.sm.min_rating - 1.f, state.sm.max_rating + 2.f, ImGuiCond_Once);
-        if (ipBeginPlotDefaults("Rating", "%", "SSR")) {
+        if (ipBeginPlotDefaults("Rating", "Wife%", "SSR")) {
             for (i32 r = 0; r < NumSkillsetRatings; r++) {
                 ipPlotLineFloatPtrFloatPtr(SkillsetNames[r], xs, state.sm.skillsets[r], 19, 0, sizeof(float));
             }
@@ -211,7 +212,7 @@ void frame(void)
         }
 
         ipSetNextPlotLimits(82, 100, state.sm.min_relative_rating - 0.05f, state.sm.max_relative_rating + 0.05f, ImGuiCond_Once);
-        if (ipBeginPlotDefaults("Relative Rating", "%", "SSR / Overall")) {
+        if (ipBeginPlotDefaults("Relative Rating", "Wife%", "SSR / Overall")) {
             for (i32 r = 1; r < NumSkillsetRatings; r++) {
                 ipPlotLineFloatPtrFloatPtr(SkillsetNames[r], xs, state.sm.relative_skillsets[r], 19, 0, sizeof(float));
             }
@@ -220,12 +221,55 @@ void frame(void)
     }
     igEnd();
 
-    igShowDemoWindow(0);
+    igBegin("Mod Parameters", 0, 0);
+    {
+        i32 n = 0;
+        for (i32 i = 0; i < state.ci.num_mods; i++) {
+            if (igCollapsingHeaderTreeNodeFlags(state.ci.mod_names[i], ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (i32 j = 0; j < state.ci.num_params_for_mod[i]; j++) {
+                    // Reaching into ci's params, which is directly on the calc. Don't?
+                    i32 mp = n + j;
+                    if (state.ci.param_info[mp].integer) {
+                        int value = state.ci.params[mp];
+                        int low = (int)state.ci.param_info[mp].low;
+                        int high = (int)state.ci.param_info[mp].high;
+                        igSliderInt(state.ci.param_names[mp], &value, low, high, "%d");
+                        state.ci.params[mp] = (float)value;
+                    } else {
+                        igSliderFloat(state.ci.param_names[mp], &state.ci.params[mp], state.ci.param_info[mp].low, state.ci.param_info[mp].high, "%f", 1.0f);
+                    }
+                }
+            }
+            n += state.ci.num_params_for_mod[i];
+        }
+    }
+    igEnd();
 
     sg_begin_default_pass(&state.pass_action, width, height);
     simgui_render();
     sg_end_pass();
     sg_commit();
+
+    for (i32 i = state.update_index; i < state.update_index + 1; i++) {
+        f32 goal = 0.82f + ((f32)i / 100.f);
+        xs[i] = goal * 100.f;
+        SkillsetRatings ssr;
+        calc_go(state.ci.handle, state.sm.notes, 1.0f, goal, &ssr);
+        for (i32 r = 0; r < NumSkillsetRatings; r++) {
+            state.sm.skillsets[r][i] = ssr.E[r];
+            state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);
+            state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
+
+            f32 relative_rating = ssr.E[r] / ssr.overall;
+            state.sm.relative_skillsets[r][i] = relative_rating;
+            state.sm.min_relative_rating = min(relative_rating, state.sm.min_relative_rating);
+            state.sm.max_relative_rating = max(relative_rating, state.sm.max_relative_rating);
+        }
+    }
+    state.update_index += 1;
+    if (state.update_index >= 19) {
+        state.update_index = 0;
+    }
 }
 
 void cleanup(void)
@@ -255,6 +299,7 @@ sapp_desc sokol_main(int argc, char* argv[])
         .event_cb = input,
         .width = 1024,
         .height = 768,
+        .sample_count = 8,
         .gl_force_gles2 = true,
         .window_title = "SeeMinaCalc",
         .ios_keyboard_resizes_canvas = false
