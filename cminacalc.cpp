@@ -13,7 +13,7 @@ using std::vector;
 
 #include "sm.h"
 
-char *ModNames[] = {
+const char *ModNames[] = {
     "StreamMod",
     "JSMod",
     "HSMod",
@@ -179,7 +179,7 @@ CalcInfo calc_init()
 {
     CalcInfo result = {};
     result.handle = new Calc;
-    result.mod_names = (const char **)ModNames;
+    result.mod_names = ModNames;
     result.num_params_for_mod = (int *)calloc(NumMods, sizeof(int));
 
     // We keep this just so the param strings aren't freed :)
@@ -213,6 +213,10 @@ CalcInfo calc_init()
     result.mod_param_names = (const char **)calloc(n, sizeof(char *));
     float *mp = result.mod_params;
     const char **mpn = result.mod_param_names;
+
+    // (Stupud hack related) In this iteration we want to store the p.second
+    // pointers. But they are pointers into Ulbu, who exists on the stack in
+    // real runs.
     for (const auto &p : shalhoub._s._params)     { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
     for (const auto &p : shalhoub._js._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
     for (const auto &p : shalhoub._hs._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); }
@@ -241,8 +245,9 @@ CalcInfo calc_init()
 
 void calc_set_mods(Calc *calc, float *mods)
 {
-    // In principle we SHOULD be able to set the internal parameters out here, once, instead of doing it later inside ulbu every time.
-    // SO the API will remain as it is *bangs gavel*
+    // (Stupid hack related) In principle we SHOULD be able to set the internal
+    // parameters out here, once, instead of doing it later inside ulbu every
+    // time. SO the API will remain as it is *bangs gavel*
     calc->mod_params = mods;
 }
 

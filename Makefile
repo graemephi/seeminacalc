@@ -12,17 +12,24 @@ ifeq ($(OS),Windows_NT)
 	endif
 
 	CompilerOptions := $(OptimisationLevel) $(Includes) -Fdbuild/ -Fobuild/ -Febuild/ -Oi -nologo -std:c++latest -fp:fast -EHsc
+	OurCodeOptions := -W4 -WX
+	ExternalCodeOptions := -w
 else
 	todo
 endif
 
-all: build/main.exe
+all: build build/main.exe
+
+clean:
+	rm -r build
 
 build:
 	@mkdir build || true
 
-build/cminacalc.obj: sm.h cminacalc.h *.cpp build
-	cl $(CompilerOptions) -c cminacalc.cpp
+build/cpp.obj: *.h *.cpp
+	cl $(CompilerOptions) $(ExternalCodeOptions) -c cpp.cpp
 
-build/main.exe: *.c *.h build/cminacalc.obj
-	cl $(CompilerOptions) main.c build/cminacalc.obj
+build/main.exe: *.h *.c build/cpp.obj
+	cl $(CompilerOptions) $(OurCodeOptions) main.c build/cpp.obj
+
+.PHONY: all clean

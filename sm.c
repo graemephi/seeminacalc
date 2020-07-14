@@ -1,13 +1,3 @@
-static i32 seconds_to_ticks(f32 seconds)
-{
-    return seconds;
-}
-
-static f32 ticks_to_seconds(i32 ticks)
-{
-    return ticks;
-}
-
 static void die(SmParser *ctx)
 {
     i32 current_line = 1;
@@ -566,7 +556,7 @@ static SmFile parse_sm(Buffer data)
         die(ctx);
     }
 
-    buf_push(inserted_beats, DBL_MAX);
+    buf_push(inserted_beats, FLT_MAX);
 
     result.n_bpms = (i32)buf_len(result.bpms);
 

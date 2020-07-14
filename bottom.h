@@ -8,12 +8,6 @@
 
 #ifdef _MSC_VER
 
-#pragma warning(disable : 4116) // unnamed type definition in parentheses
-#pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
-#pragma warning(disable : 4204) // nonstandard extension used: non-constant aggregate initializer
-#pragma warning(disable : 4221) // nonstandard extension used: cannot be initialized using address of automatic variable
-#pragma warning(disable : 4057) // 'initializing': 'char *' differs in indirection to slightly different base types from 'u8 *'
-
 #define alignof _Alignof
 
 #define no_inline __declspec(noinline)

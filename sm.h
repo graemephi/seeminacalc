@@ -1,4 +1,3 @@
-
 typedef struct SmParser
 {
     char *buf;
@@ -75,7 +74,7 @@ typedef struct BPMChange
 } BPMChange;
 
 // FLT_MAX w/o header
-static const BPMChange SentinelBPM = { .beat = 3.402823466e+38F , .row = 3.402823466e+38F , .time = 3.402823466e+38F  };
+static const BPMChange SentinelBPM = { .beat = 3.402823466e+38f, .row = 3.402823466e+38f, .time = 3.402823466e+38f };
 
 typedef struct SmStop
 {

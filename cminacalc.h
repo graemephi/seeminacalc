@@ -25,6 +25,18 @@ typedef union SkillsetRatings
 } SkillsetRatings;
 static_assert(sizeof(SkillsetRatings) == (NumSkillsetRatings * sizeof(float)), "size mismatch");
 
+const char *SkillsetNames[] = {
+    "Overall",
+    "Stream",
+    "Jumpstream",
+    "Handstream",
+    "Stamina",
+    "Jackspeed",
+    "Chordjacks",
+    "Technical",
+};
+static_assert(sizeof(SkillsetNames) == (NumSkillsetRatings * sizeof(const char *)), "size mismatch");
+
 typedef struct EffectMasks
 {
     unsigned int *weak;
