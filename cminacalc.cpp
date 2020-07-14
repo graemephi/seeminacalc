@@ -8,8 +8,8 @@
 using std::vector;
 
 // Note on updating the calc: not quite drag-and-drop. grep for "Stupud hack"
-#include "Etterna/Globals/MinaCalc.h"
-#include "Etterna/Globals/MinaCalc.cpp"
+#include "Etterna/MinaCalc/MinaCalc.h"
+#include "Etterna/MinaCalc/MinaCalc.cpp"
 
 #include "sm.h"
 
