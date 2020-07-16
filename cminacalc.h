@@ -58,6 +58,8 @@ typedef struct EffectMasks
 typedef struct ParamSet
 {
     float *params;
+    float *min;
+    float *max;
     size_t num_params;
 } ParamSet;
 
@@ -73,8 +75,8 @@ typedef struct ParamInfo
     const char *name;
     int mod;
     float default_value;
-    float low;
-    float high;
+    float min;
+    float max;
     bool integer;
 } ParamInfo;
 
