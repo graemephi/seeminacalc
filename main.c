@@ -83,7 +83,7 @@ typedef struct SimFileWindow
     NoteData *notes;
     EffectMasks effects;
 
-    f32 *skillsets[NumSkillsetRatings];
+    f32 *skillsets_over_wife[NumSkillsetRatings];
     f32 *relative_skillsets[NumSkillsetRatings];
     f32 min_rating;
     f32 max_rating;
@@ -101,6 +101,7 @@ typedef struct State
     CalcInfo info;
     SeeCalc calc;
     SimFileWindow sm;
+    ParamSet ps;
 
     int update_index;
 } State;
@@ -163,15 +164,21 @@ void init(void)
     buf_fit(state.sm.effects.strong, state.info.num_params);
     calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
 
+    buf_fit(state.ps.params, state.info.num_params);
+    for (size_t i = 0; i < state.info.num_params; i++) {
+        buf_push(state.ps.params, state.info.defaults.params[i]);
+    }
+    state.ps.num_params = state.info.num_params;
+
     state.sm.min_rating = 40;
     state.sm.min_relative_rating = 2;
     for (i32 i = 0; i < 19; i++) {
         f32 goal = 0.82f + ((f32)i / 100.f);
         xs[i] = goal * 100.f;
         SkillsetRatings ssr;
-        calc_go(&state.calc, state.sm.notes, 1.0f, goal, &ssr);
+        calc_go(&state.calc, &state.info.defaults, state.sm.notes, 1.0f, goal, &ssr);
         for (i32 r = 0; r < NumSkillsetRatings; r++) {
-            buf_push(state.sm.skillsets[r], ssr.E[r]);
+            buf_push(state.sm.skillsets_over_wife[r], ssr.E[r]);
             state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);
             state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
 
@@ -207,7 +214,7 @@ void frame(void)
         ipSetNextPlotLimits(82, 100, state.sm.min_rating - 1.f, state.sm.max_rating + 2.f, ImGuiCond_Once);
         if (ipBeginPlotDefaults("Rating", "Wife%", "SSR")) {
             for (i32 r = 0; r < NumSkillsetRatings; r++) {
-                ipPlotLineFloatPtrFloatPtr(SkillsetNames[r], xs, state.sm.skillsets[r], 19, 0, sizeof(float));
+                ipPlotLineFloatPtrFloatPtr(SkillsetNames[r], xs, state.sm.skillsets_over_wife[r], 19, 0, sizeof(float));
             }
             ipEndPlot();
         }
@@ -224,24 +231,23 @@ void frame(void)
 
     igBegin("Mod Parameters", 0, 0);
     {
-        i32 n = 0;
         for (i32 i = 0; i < state.info.num_mods; i++) {
             if (igCollapsingHeaderTreeNodeFlags(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                 for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
-                    // Reaching into info's params, which is directly on the calc. Don't?
-                    i32 mp = n + j;
+                    i32 mp = state.info.mods[i].index + j;
+                    igPushIDInt(mp);
                     if (state.info.params[mp].integer) {
-                        int value = (int)state.calc.params[mp];
+                        int value = (int)state.ps.params[mp];
                         int low = (int)state.info.params[mp].low;
                         int high = (int)state.info.params[mp].high;
                         igSliderInt(state.info.params[mp].name, &value, low, high, "%d");
-                        state.calc.params[mp] = (float)value;
+                        state.ps.params[mp] = (float)value;
                     } else {
-                        igSliderFloat(state.info.params[mp].name, &state.calc.params[mp], state.info.params[mp].low, state.info.params[mp].high, "%f", 1.0f);
+                        igSliderFloat(state.info.params[mp].name, &state.ps.params[mp], state.info.params[mp].low, state.info.params[mp].high, "%f", 1.0f);
                     }
+                    igPopID();
                 }
             }
-            n += state.info.mods[i].num_params;
         }
     }
     igEnd();
@@ -255,9 +261,9 @@ void frame(void)
         f32 goal = 0.82f + ((f32)i / 100.f);
         xs[i] = goal * 100.f;
         SkillsetRatings ssr;
-        calc_go(&state.calc, state.sm.notes, 1.0f, goal, &ssr);
+        calc_go(&state.calc, &state.ps, state.sm.notes, 1.0f, goal, &ssr);
         for (i32 r = 0; r < NumSkillsetRatings; r++) {
-            state.sm.skillsets[r][i] = ssr.E[r];
+            state.sm.skillsets_over_wife[r][i] = ssr.E[r];
             state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);
             state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
 

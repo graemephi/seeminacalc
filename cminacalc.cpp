@@ -56,11 +56,14 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
     assert(masks->strong);
 
     SkillsetRatings default_ratings = {};
-    calc_go(calc, note_data, 1.0f, 0.93f, &default_ratings);
+    calc_go(calc, &info->defaults, note_data, 1.0f, 0.93f, &default_ratings);
 
-    int num_params = info->num_params;
-    float *params = (float *)calloc(num_params, sizeof(float));
-    memcpy(params, calc->params, num_params * sizeof(float));
+    size_t num_params = info->num_params;
+    f32 *params = (f32 *)calloc(num_params, sizeof(f32));
+    memcpy(params, info->defaults.params, num_params * sizeof(f32));
+    ParamSet params_set = {};
+    params_set.params = params;
+    params_set.num_params = num_params;
 
     b8 changed[NumSkillsetRatings] = {};
 
@@ -76,8 +79,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
                 params[i] = info->params[i].default_value * 1.05f;
             }
 
-            calc_set_params(calc, params, num_params);
-            calc_go(calc, note_data, 1.0f, 0.93f, &ratings);
+            calc_go(calc, &params_set, note_data, 1.0f, 0.93f, &ratings);
 
             for (int r = 0; r < NumSkillsetRatings; r++) {
                 masks->strong[i] |= (changed[r] << r);
@@ -86,8 +88,8 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
 
         // weak. they react to big changes at 96.5%, and not small changes at 93%
         {
-            float distance_from_low = info->params[i].default_value - info->params[i].low;
-            float distance_from_high = info->params[i].high - info->params[i].high;
+            f32 distance_from_low = info->params[i].default_value - info->params[i].low;
+            f32 distance_from_high = info->params[i].high - info->params[i].high;
             assert(info->params[i].high >= info->params[i].low);
             if (info->params[i].default_value == 0) {
                 params[i] = 100;
@@ -97,10 +99,9 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
                 params[i] = info->params[i].high;
             }
 
-            calc_set_params(calc, params, num_params);
-            calc_go(calc, note_data, 1.0f, 0.93f, &ratings);
+            calc_go(calc, &params_set, note_data, 1.0f, 0.93f, &ratings);
 
-            for (int r = 0; r < NumSkillsetRatings; r++) {
+            for (i32 r = 0; r < NumSkillsetRatings; r++) {
                 masks->weak[i] |= masks->strong[i] || (changed[r] << r);
             }
         }
@@ -126,6 +127,15 @@ NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
 {
     return frobble_serialized_note_data((char *)note_data, length * sizeof(NoteInfo));
+}
+
+static const f32 BigNArbitrary = 100.5438f;
+static f32 make_test_value(f32 default_value)
+{
+    if (default_value == 0.0f) {
+        return BigNArbitrary;
+    }
+    return absolute_value(default_value) * BigNArbitrary;
 }
 
 CalcInfo calc_info()
@@ -178,7 +188,7 @@ CalcInfo calc_info()
     for (isize i = 0; i < NumMods; i++) {
         for (const auto& p : *params[i]) {
             param_info_cursor->name = p.first.c_str();
-            param_info_cursor->mod = i;
+            param_info_cursor->mod = (i32)i;
             param_info_cursor->default_value = *p.second;
             param_info_cursor++;
 
@@ -188,19 +198,19 @@ CalcInfo calc_info()
 
     // Test for clamping and int-ing
     for (isize i = 0; i < num_params; i++) {
-        *param_pointers[i] = absolute_value(param_info[i].default_value) * 100.5438f;
+        *param_pointers[i] = make_test_value(param_info[i].default_value);
     }
 
     shalhoub.setup_agnostic_pmods();
     shalhoub.setup_dependent_mods();
 
     for (isize i = 0; i < num_params; i++) {
-        f32 test_value = absolute_value(param_info[i].default_value) * 100.5438f;
+        f32 test_value = make_test_value(param_info[i].default_value);
         if (test_value != *param_pointers[i]) {
             param_info[i].high = *param_pointers[i];
         } else {
             f32 a = absolute_value(param_info[i].default_value);
-            if (a < 1.0f) {
+            if (a < 0.5f) {
                 param_info[i].high = 1.0f;
             } else {
                 param_info[i].high = absolute_value(param_info[i].default_value) * 2.0f;
@@ -212,14 +222,14 @@ CalcInfo calc_info()
 
     // Test for clamping low
     for (isize i = 0; i < num_params; i++) {
-        *param_pointers[i] = absolute_value(param_info[i].default_value) * -100.5438f;
+        *param_pointers[i] = -1.0f * make_test_value(param_info[i].default_value);
     }
 
     shalhoub.setup_agnostic_pmods();
     shalhoub.setup_dependent_mods();
 
     for (isize i = 0; i < num_params; i++) {
-        f32 test_value = absolute_value(param_info[i].default_value) * -100.5438f;
+        f32 test_value = -1.0f * make_test_value(param_info[i].default_value);
         if (test_value != *param_pointers[i]) {
             param_info[i].low = *param_pointers[i];
         } else {
@@ -233,12 +243,20 @@ CalcInfo calc_info()
         }
     }
 
+    ParamSet defaults = {};
+    defaults.params = (f32 *)calloc(num_params, sizeof(f32));
+    defaults.num_params = num_params;
+    for (size_t i = 0; i < num_params; i++) {
+        defaults.params[i] = param_info[i].default_value;
+    }
+
     CalcInfo result = {};
     result.version = GetCalcVersion();
     result.num_mods = NumMods;
     result.num_params = num_params;
     result.mods = mod_info;
     result.params = param_info;
+    result.defaults = defaults;
     return result;
 }
 
@@ -246,38 +264,18 @@ SeeCalc calc_init(CalcInfo *info)
 {
     SeeCalc result = {};
     result.handle = new Calc();
-    result.params = (float *)calloc(info->num_params, sizeof(float));
-    result.num_params = info->num_params;
-    result.handle->mod_params = result.params;
-    for (isize i = 0; i < result.num_params; i++) {
-        result.params[i] = info->params[i].default_value;
+    result.handle->mod_params = (f32 *)calloc(info->num_params, sizeof(f32));
+    for (size_t i = 0; i < info->num_params; i++) {
+        result.handle->mod_params[i] = info->params[i].default_value;
     }
     return result;
 }
 
-void calc_set_params(SeeCalc *calc, float *params, size_t num_params)
+void calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, SkillsetRatings *out)
 {
-    // (Stupud hack related) In principle we SHOULD be able to set the internal
-    // parameters out here, once, instead of doing it later inside ulbu every
-    // time. SO the API will remain as it is *bangs gavel*
-    if (NEVER(num_params != calc->num_params)) {
-        return;
-    }
-
-    memcpy(calc->params, params, sizeof(f32) * num_params);
-}
-
-void calc_set_param(SeeCalc *calc, i32 index, float value)
-{
-    if (NEVER(index < 0 || index >= calc->num_params)) {
-        return;
-    }
-
-    calc->params[index] = value;
-}
-
-void calc_go(SeeCalc *calc, NoteData *note_data, float rate, float goal, SkillsetRatings *out)
-{
+    // Stupud hack related. If that wasn't necessary, we could do better than
+    // memcpying every time, but it probably doesn't matter
+    memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
     for (int i = 0; i < NumSkillsetRatings; i++) {
         out->E[i] = ratings[i];

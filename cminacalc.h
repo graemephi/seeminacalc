@@ -1,9 +1,13 @@
 #include <stddef.h>
 
-typedef struct SmFile SmFile;
-typedef struct Calc Calc;
 typedef struct NoteData NoteData;
 typedef struct TheGreatBazoinkazoinkInTheSky TheGreatBazoinkazoinkInTheSky;
+
+#ifdef __cplusplus
+class Calc;
+#else
+typedef struct Calc Calc;
+#endif
 
 enum {
     NumSkillsetRatings = 8
@@ -51,6 +55,12 @@ typedef struct EffectMasks
     unsigned char *strong;
 } EffectMasks;
 
+typedef struct ParamSet
+{
+    float *params;
+    size_t num_params;
+} ParamSet;
+
 typedef struct ModInfo
 {
     const char *name;
@@ -71,8 +81,6 @@ typedef struct ParamInfo
 typedef struct SeeCalc
 {
     Calc *handle;
-    float *params;
-    size_t num_params;
 } SeeCalc;
 
 typedef struct CalcInfo
@@ -82,6 +90,7 @@ typedef struct CalcInfo
     size_t num_params;
     ModInfo *mods;
     ParamInfo *params;
+    ParamSet defaults;
 } CalcInfo;
 
 #ifdef __cplusplus
@@ -96,9 +105,7 @@ NoteData *frobble_note_data(NoteData *note_data, size_t length);
 
 CalcInfo calc_info();
 SeeCalc calc_init(CalcInfo *info);
-void calc_set_params(SeeCalc *calc, float *params, size_t num_params);
-void calc_set_param(SeeCalc *calc, size_t param, float value);
-void calc_go(SeeCalc *calc, NoteData *note_data, float rate, float goal, SkillsetRatings *out);
+void calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, SkillsetRatings *out);
 
 void nddump(NoteData *nd, NoteData *nd2);
 
