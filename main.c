@@ -98,7 +98,8 @@ typedef struct State
     u64 last_time;
     sg_pass_action pass_action;
 
-    CalcInfo ci;
+    CalcInfo info;
+    SeeCalc calc;
     SimFileWindow sm;
 
     int update_index;
@@ -145,21 +146,22 @@ void init(void)
         io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
     }
 
-
     isize bignumber = 100*1024*1024;
     scratch = stack_make(malloc(bignumber), bignumber);
-    permanent_memory = stack_make(malloc(bignumber), bignumber);
 
     CacheDB db = cachedb_init(db_path);
     Buffer cached = get_steps_from_db(&db, "X9a609c6dd132d807b2abc5882338cb9ebbec320d");
     // leak db
 
-    state.ci = calc_init();
+    state.info = calc_info();
+    state.calc = calc_init(&state.info);
     state.sm.title = S("-Image-Material- (V0)");
     state.sm.diff = S("Challenge");
     state.sm.chartkey = S("X9a609c6dd132d807b2abc5882338cb9ebbec320d");
     state.sm.notes = frobble_serialized_note_data(cached.buf, cached.len);
-    // state.sm.effects = calculate_effects(&state.ci, state.sm.notes);
+    buf_fit(state.sm.effects.weak, state.info.num_params);
+    buf_fit(state.sm.effects.strong, state.info.num_params);
+    calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
 
     state.sm.min_rating = 40;
     state.sm.min_relative_rating = 2;
@@ -167,7 +169,7 @@ void init(void)
         f32 goal = 0.82f + ((f32)i / 100.f);
         xs[i] = goal * 100.f;
         SkillsetRatings ssr;
-        calc_go(state.ci.handle, state.sm.notes, 1.0f, goal, &ssr);
+        calc_go(&state.calc, state.sm.notes, 1.0f, goal, &ssr);
         for (i32 r = 0; r < NumSkillsetRatings; r++) {
             buf_push(state.sm.skillsets[r], ssr.E[r]);
             state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);
@@ -181,10 +183,9 @@ void init(void)
     }
 }
 
-bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
-
 static bool ipBeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
 {
+    bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
     return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){-1, 0}, ImPlotFlags_Default, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
 }
 
@@ -224,23 +225,23 @@ void frame(void)
     igBegin("Mod Parameters", 0, 0);
     {
         i32 n = 0;
-        for (i32 i = 0; i < state.ci.num_mods; i++) {
-            if (igCollapsingHeaderTreeNodeFlags(state.ci.mod_names[i], ImGuiTreeNodeFlags_DefaultOpen)) {
-                for (i32 j = 0; j < state.ci.num_params_for_mod[i]; j++) {
-                    // Reaching into ci's params, which is directly on the calc. Don't?
+        for (i32 i = 0; i < state.info.num_mods; i++) {
+            if (igCollapsingHeaderTreeNodeFlags(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
+                    // Reaching into info's params, which is directly on the calc. Don't?
                     i32 mp = n + j;
-                    if (state.ci.param_info[mp].integer) {
-                        int value = state.ci.params[mp];
-                        int low = (int)state.ci.param_info[mp].low;
-                        int high = (int)state.ci.param_info[mp].high;
-                        igSliderInt(state.ci.param_names[mp], &value, low, high, "%d");
-                        state.ci.params[mp] = (float)value;
+                    if (state.info.params[mp].integer) {
+                        int value = (int)state.calc.params[mp];
+                        int low = (int)state.info.params[mp].low;
+                        int high = (int)state.info.params[mp].high;
+                        igSliderInt(state.info.params[mp].name, &value, low, high, "%d");
+                        state.calc.params[mp] = (float)value;
                     } else {
-                        igSliderFloat(state.ci.param_names[mp], &state.ci.params[mp], state.ci.param_info[mp].low, state.ci.param_info[mp].high, "%f", 1.0f);
+                        igSliderFloat(state.info.params[mp].name, &state.calc.params[mp], state.info.params[mp].low, state.info.params[mp].high, "%f", 1.0f);
                     }
                 }
             }
-            n += state.ci.num_params_for_mod[i];
+            n += state.info.mods[i].num_params;
         }
     }
     igEnd();
@@ -254,7 +255,7 @@ void frame(void)
         f32 goal = 0.82f + ((f32)i / 100.f);
         xs[i] = goal * 100.f;
         SkillsetRatings ssr;
-        calc_go(state.ci.handle, state.sm.notes, 1.0f, goal, &ssr);
+        calc_go(&state.calc, state.sm.notes, 1.0f, goal, &ssr);
         for (i32 r = 0; r < NumSkillsetRatings; r++) {
             state.sm.skillsets[r][i] = ssr.E[r];
             state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);

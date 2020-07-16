@@ -1,9 +1,8 @@
 
+#include <memory>
 #include <vector>
 #include <string_view>
-
-#include "basetypes.h"
-#include "cminacalc.h"
+#include <cstddef>
 
 using std::vector;
 
@@ -11,7 +10,13 @@ using std::vector;
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/MinaCalc.cpp"
 
-#include "sm.h"
+#include "common.h"
+#include "cminacalc.h"
+
+static f32 absolute_value(f32 a)
+{
+    return (a >= 0) ? a : -a;
+}
 
 const char *ModNames[] = {
     "StreamMod",
@@ -45,253 +50,235 @@ struct NoteData
     const vector<NoteInfo> ref;
 };
 
-EffectMasks calculate_effects(CalcInfo *ci, NoteData *note_data)
+void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, EffectMasks *masks)
 {
-    SkillsetRatings default_ratings = {};
-    Calc *calc = ci->handle;
-    int num_params = ci->num_params;
-    float *default_mods = calc->mod_params;
+    assert(masks->weak);
+    assert(masks->strong);
 
+    SkillsetRatings default_ratings = {};
     calc_go(calc, note_data, 1.0f, 0.93f, &default_ratings);
 
-    float *mods = (float *)calloc(num_params, sizeof(float));
-    memcpy(mods, default_mods, num_params * sizeof(float));
+    int num_params = info->num_params;
+    float *params = (float *)calloc(num_params, sizeof(float));
+    memcpy(params, calc->params, num_params * sizeof(float));
 
-    b32 changed[NumSkillsetRatings] = {};
-
-    EffectMasks result;
-    result.weak = (unsigned int *)calloc(num_params, sizeof(unsigned int));
-    result.strong = (unsigned int *)calloc(num_params, sizeof(unsigned int));
+    b8 changed[NumSkillsetRatings] = {};
 
     SkillsetRatings ratings = {};
     for (int i = 0; i < num_params; i++) {
-        // stronk
+        // stronk. they react to small changes at 93%
         {
-            mods[i] = default_mods[i] * 0.8f;
-            calc_set_mods(calc, mods);
-            for (int r = 0; r < NumSkillsetRatings; r++) {
-                changed[r] = 0;
+            if (info->params[i].default_value == 0) {
+                params[i] = 1;
+            } else if (info->params[i].default_value > info->params[i].low) {
+                params[i] = info->params[i].default_value * 0.95f;
+            } else {
+                params[i] = info->params[i].default_value * 1.05f;
             }
 
+            calc_set_params(calc, params, num_params);
             calc_go(calc, note_data, 1.0f, 0.93f, &ratings);
 
             for (int r = 0; r < NumSkillsetRatings; r++) {
-                changed[r] |= (ratings.E[r] != default_ratings.E[r]);
-            }
-
-            mods[i] = default_mods[i] * 1.2f;
-            calc_set_mods(calc, mods);
-            calc_go(calc, note_data, 1.0f, 0.93f, &ratings);
-
-            for (int r = 0; r < NumSkillsetRatings; r++) {
-                changed[r] |= (ratings.E[r] != default_ratings.E[r]);
-            }
-
-            for (int r = 0; r < NumSkillsetRatings; r++) {
-                result.strong[i] |= (changed[r] << r);
+                masks->strong[i] |= (changed[r] << r);
             }
         }
 
-        // weak
+        // weak. they react to big changes at 96.5%, and not small changes at 93%
         {
-            mods[i] = 0.f;
-            calc_set_mods(calc, mods);
-            for (int r = 0; r < NumSkillsetRatings; r++) {
-                changed[r] = 0;
+            float distance_from_low = info->params[i].default_value - info->params[i].low;
+            float distance_from_high = info->params[i].high - info->params[i].high;
+            assert(info->params[i].high >= info->params[i].low);
+            if (info->params[i].default_value == 0) {
+                params[i] = 100;
+            } else if (distance_from_low > distance_from_high) {
+                params[i] = info->params[i].low;
+            } else {
+                params[i] = info->params[i].high;
             }
 
+            calc_set_params(calc, params, num_params);
             calc_go(calc, note_data, 1.0f, 0.93f, &ratings);
 
             for (int r = 0; r < NumSkillsetRatings; r++) {
-                changed[r] |= (ratings.E[r] != default_ratings.E[r]);
-            }
-
-            mods[i] = default_mods[i] * 10.f;
-            calc_set_mods(calc, mods);
-            calc_go(calc, note_data, 1.0f, 0.93f, &ratings);
-
-            for (int r = 0; r < NumSkillsetRatings; r++) {
-                changed[r] |= (ratings.E[r] != default_ratings.E[r]);
-            }
-
-            for (int r = 0; r < NumSkillsetRatings; r++) {
-                result.weak[i] |= result.strong[i] || (changed[r] << r);
+                masks->weak[i] |= masks->strong[i] || (changed[r] << r);
             }
         }
 
-        mods[i] = default_mods[i];
+        params[i] = info->params[i].default_value;
     }
 
-    free(mods);
-    return result;
+    free(params);
 }
 
 // Turns the SQLite binary blob from the `serializednotedata` column in the `steps`
-// table of the cache db into an opaque handle to C++ whateverisms
+// table of the cache db into an opaque handle to C++ whateverisms.
 NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 {
     auto result = new std::vector<NoteInfo>((NoteInfo *)note_data, (NoteInfo *)(note_data + length));
     return (NoteData *)result;
 }
 
-static unsigned int row_bits(SmRow r)
+// Turns arbitrary NoteInfo into an opaque handle to C++ whateverisms.
+// Note that if you aren't getting this from cache.db you probably want to
+// use Etterna's code because the calc is *very* sensitive to rounding error.
+// __If your note data is not bit-for-bit identical you will see error__
+NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
 {
-    return ((unsigned int)((r.columns[0] & NoteTap) != 0) << 0)  // left
-         + ((unsigned int)((r.columns[1] & NoteTap) != 0) << 1)  // left
-         + ((unsigned int)((r.columns[2] & NoteTap) != 0) << 2)  // right
-         + ((unsigned int)((r.columns[3] & NoteTap) != 0) << 3); // right
+    return frobble_serialized_note_data((char *)note_data, length * sizeof(NoteInfo));
 }
 
-#pragma float_control(precise, on, push)
-NoteData *frobble_sm(SmFile *sm, int diff)
+CalcInfo calc_info()
 {
-    auto result = new std::vector<NoteInfo>(sm->diffs[diff].n_rows);
+    ModInfo *mod_info = (ModInfo *)calloc(NumMods, sizeof(ModInfo));
 
-    SmRow *r = sm->diffs[diff].rows;
+    // make_unique cause the calc is too big to fit on the stack :)
+    auto dummy_calc = std::make_unique<Calc>();
+    // static just so the param strings aren't freed :)
+    static auto shalhoub = TheGreatBazoinkazoinkInTheSky(*dummy_calc);
 
-    SmString offset_str = sm->tag_values[Tag_Offset];
-    float offset = strtof(&sm->sm.buf[offset_str.index], 0);
+    const std::vector<std::pair<std::string,float*>> *params[NumMods] = {
+        &shalhoub._s._params,
+        &shalhoub._js._params,
+        &shalhoub._hs._params,
+        &shalhoub._cj._params,
+        &shalhoub._cjd._params,
+        &shalhoub._ohj._params,
+        &shalhoub._cjohj._params,
+        &shalhoub._bal._params,
+        &shalhoub._oht._params,
+        &shalhoub._voht._params,
+        &shalhoub._ch._params,
+        &shalhoub._rm._params,
+        &shalhoub._wrb._params,
+        &shalhoub._wrr._params,
+        &shalhoub._wrjt._params,
+        &shalhoub._wra._params,
+        &shalhoub._fj._params,
+        &shalhoub._tt._params,
+        &shalhoub._tt2._params
+    };
 
-    for (int i = 0; i < sm->diffs[diff].n_rows; i++) {
-        if (row_bits(r[i])) {
-            offset += r[i].time;
-            break;
-        }
+    i32 last_param_start_index = 0;
+    i32 num_params = 0;
+    for (isize i = 0; i < NumMods; i++) {
+        mod_info[i].name = ModNames[i];
+        mod_info[i].num_params = (i32)params[i]->size();
+        mod_info[i].index = num_params;
+        last_param_start_index = num_params;
+        num_params += mod_info[i].num_params;
     }
 
-    int inserted_index = 0;
-    for (int i = 0; i < sm->diffs[diff].n_rows; i++) {
-        unsigned int notes = row_bits(r[i]);
-        if (notes) {
-            result->at(inserted_index++) = {
-                .notes = notes,
-                .rowTime = (r[i].time - offset) + offset // HAHAHA
-            };
+    ParamInfo *param_info = (ParamInfo *)calloc(num_params, sizeof(ParamInfo));
+    ParamInfo *param_info_cursor = param_info;
+
+    std::vector<f32 *> param_pointers;
+    param_pointers.reserve(num_params);
+
+    for (isize i = 0; i < NumMods; i++) {
+        for (const auto& p : *params[i]) {
+            param_info_cursor->name = p.first.c_str();
+            param_info_cursor->mod = i;
+            param_info_cursor->default_value = *p.second;
+            param_info_cursor++;
+
+            param_pointers.push_back(p.second);
         }
     }
-
-    result->resize(inserted_index);
-    return (NoteData *)result;
-}
-#pragma float_control(pop)
-
-CalcInfo calc_init()
-{
-    CalcInfo result = {};
-    result.handle = new Calc;
-    result.mod_names = ModNames;
-    result.num_params_for_mod = (int *)calloc(NumMods, sizeof(int));
-
-    // We keep this just so the param strings aren't freed :)
-    result.shalhoub = new TheGreatBazoinkazoinkInTheSky(*result.handle);
-    const auto& shalhoub = *result.shalhoub;
-
-    // Yea yea. Blame minacalc
-    int i = 0;
-    int n = 0;
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._s._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._js._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._hs._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._cj._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._cjd._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._ohj._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._cjohj._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._bal._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._oht._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._voht._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._ch._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._rm._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._wrb._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._wrr._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._wrjt._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._wra._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._fj._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._tt._params.size());
-    n += (result.num_params_for_mod[i++] = (int)shalhoub._tt2._params.size());
-
-    result.params = (float *)calloc(n, sizeof(float));
-    result.param_names = (const char **)calloc(n, sizeof(char *));
-    result.param_info = (ParamInfo *)calloc(n, sizeof(ParamInfo));
-    float *mp = result.params;
-    const char **mpn = result.param_names;
-    float *paramparam[256] = {0};
-    float **paramparamparam = paramparam;
-
-    // (Stupud hack related) In this iteration we want to store the p.second
-    // pointers. But they are pointers into Ulbu, who exists on the stack in
-    // real runs. We take them now anyway to figure out lower/upper bounds.
-    for (const auto &p : shalhoub._s._params)     { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._js._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._hs._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._cj._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._cjd._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._ohj._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._cjohj._params) { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._bal._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._oht._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._voht._params)  { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._ch._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._rm._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._wrb._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._wrr._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._wrjt._params)  { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._wra._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._fj._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._tt._params)    { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
-    for (const auto &p : shalhoub._tt2._params)   { *mp++ = *p.second; *mpn++ = p.first.c_str(); *paramparamparam++ = p.second; }
 
     // Test for clamping and int-ing
-    for (isize i = 0; i < n; i++) {
-        *paramparam[i] = result.params[i] * 100.5438f;
+    for (isize i = 0; i < num_params; i++) {
+        *param_pointers[i] = absolute_value(param_info[i].default_value) * 100.5438f;
     }
 
-    result.shalhoub->setup_agnostic_pmods();
-    result.shalhoub->setup_dependent_mods();
+    shalhoub.setup_agnostic_pmods();
+    shalhoub.setup_dependent_mods();
 
-    for (isize i = 0; i < n; i++) {
-        f32 a = (result.params[i] * 100.5438f);
-        if (a != *paramparam[i]) {
-            result.param_info[i].high = *paramparam[i];
+    for (isize i = 0; i < num_params; i++) {
+        f32 test_value = absolute_value(param_info[i].default_value) * 100.5438f;
+        if (test_value != *param_pointers[i]) {
+            param_info[i].high = *param_pointers[i];
         } else {
-            // Be conservative I guess?
-            result.param_info[i].high = result.params[i] * 2.f;
+            f32 a = absolute_value(param_info[i].default_value);
+            if (a < 1.0f) {
+                param_info[i].high = 1.0f;
+            } else {
+                param_info[i].high = absolute_value(param_info[i].default_value) * 2.0f;
+            }
         }
 
-        result.param_info[i].integer = ((float)(int)a) == *paramparam[i];
+        param_info[i].integer = ((f32)(i32)test_value) == *param_pointers[i];
     }
 
-    for (isize i = 0; i < n; i++) {
-        *paramparam[i] = 0.0f;
+    // Test for clamping low
+    for (isize i = 0; i < num_params; i++) {
+        *param_pointers[i] = absolute_value(param_info[i].default_value) * -100.5438f;
     }
 
-    result.shalhoub->setup_agnostic_pmods();
-    result.shalhoub->setup_dependent_mods();
+    shalhoub.setup_agnostic_pmods();
+    shalhoub.setup_dependent_mods();
 
-    for (isize i = 0; i < n; i++) {
-        if (0.f != *paramparam[i]) {
-            result.param_info[i].low = *paramparam[i];
+    for (isize i = 0; i < num_params; i++) {
+        f32 test_value = absolute_value(param_info[i].default_value) * -100.5438f;
+        if (test_value != *param_pointers[i]) {
+            param_info[i].low = *param_pointers[i];
         } else {
-            result.param_info[i].low = 0.0f;
+            // Try to guess parameters that make sense to go below zero
+            f32 a = absolute_value(param_info[i].default_value);
+            if (a < 1.0f) {
+                param_info[i].low = -1.0f;
+            } else {
+                param_info[i].low = 0.0f;
+            }
         }
     }
 
-    result.handle->mod_params = result.params;
+    CalcInfo result = {};
+    result.version = GetCalcVersion();
     result.num_mods = NumMods;
-    result.num_params = n;
+    result.num_params = num_params;
+    result.mods = mod_info;
+    result.params = param_info;
     return result;
 }
 
-void calc_set_mods(Calc *calc, float *mods)
+SeeCalc calc_init(CalcInfo *info)
 {
-    // (Stupid hack related) In principle we SHOULD be able to set the internal
-    // parameters out here, once, instead of doing it later inside ulbu every
-    // time. SO the API will remain as it is *bangs gavel*
-    calc->mod_params = mods;
+    SeeCalc result = {};
+    result.handle = new Calc();
+    result.params = (float *)calloc(info->num_params, sizeof(float));
+    result.num_params = info->num_params;
+    result.handle->mod_params = result.params;
+    for (isize i = 0; i < result.num_params; i++) {
+        result.params[i] = info->params[i].default_value;
+    }
+    return result;
 }
 
-void calc_go(Calc *calc, NoteData *note_data, float rate, float goal, SkillsetRatings *out)
+void calc_set_params(SeeCalc *calc, float *params, size_t num_params)
 {
-    vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc);
+    // (Stupud hack related) In principle we SHOULD be able to set the internal
+    // parameters out here, once, instead of doing it later inside ulbu every
+    // time. SO the API will remain as it is *bangs gavel*
+    if (NEVER(num_params != calc->num_params)) {
+        return;
+    }
+
+    memcpy(calc->params, params, sizeof(f32) * num_params);
+}
+
+void calc_set_param(SeeCalc *calc, i32 index, float value)
+{
+    if (NEVER(index < 0 || index >= calc->num_params)) {
+        return;
+    }
+
+    calc->params[index] = value;
+}
+
+void calc_go(SeeCalc *calc, NoteData *note_data, float rate, float goal, SkillsetRatings *out)
+{
+    vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
     for (int i = 0; i < NumSkillsetRatings; i++) {
         out->E[i] = ratings[i];
     }

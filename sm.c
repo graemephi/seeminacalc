@@ -631,3 +631,43 @@ static SmFile parse_sm(Buffer data)
 
     return result;
 }
+
+static unsigned int row_bits(SmRow r)
+{
+    return ((unsigned int)((r.columns[0] & NoteTap) != 0) << 0)  // left
+         + ((unsigned int)((r.columns[1] & NoteTap) != 0) << 1)  // left
+         + ((unsigned int)((r.columns[2] & NoteTap) != 0) << 2)  // right
+         + ((unsigned int)((r.columns[3] & NoteTap) != 0) << 3); // right
+}
+
+#pragma float_control(precise, on, push)
+NoteInfo *sm_to_ett_note_info(SmFile *sm, i32 diff)
+{
+    NoteInfo *result = calloc(sm->diffs[diff].n_rows, sizeof(NoteInfo));
+
+    SmRow *r = sm->diffs[diff].rows;
+
+    SmString offset_str = sm->tag_values[Tag_Offset];
+    f32 offset = strtof(&sm->sm.buf[offset_str.index], 0);
+
+    for (i32 i = 0; i < sm->diffs[diff].n_rows; i++) {
+        if (row_bits(r[i])) {
+            offset += r[i].time;
+            break;
+        }
+    }
+
+    i32 inserted_index = 0;
+    for (i32 i = 0; i < sm->diffs[diff].n_rows; i++) {
+        u32 notes = row_bits(r[i]);
+        if (notes) {
+            result[inserted_index++] = (NoteInfo) {
+                .notes = notes,
+                .rowTime = (r[i].time - offset) + offset // HAHAHA
+            };
+        }
+    }
+
+    return result;
+}
+#pragma float_control(pop)

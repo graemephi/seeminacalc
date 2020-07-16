@@ -37,31 +37,51 @@ const char *SkillsetNames[] = {
 };
 static_assert(sizeof(SkillsetNames) == (NumSkillsetRatings * sizeof(const char *)), "size mismatch");
 
+#ifndef __NDSTRUCTS__
+typedef struct NoteInfo
+{
+    float rowTime;
+    int notes;
+} NoteInfo;
+#endif
+
 typedef struct EffectMasks
 {
-    unsigned int *weak;
-    unsigned int *strong;
+    unsigned char *weak;
+    unsigned char *strong;
 } EffectMasks;
+
+typedef struct ModInfo
+{
+    const char *name;
+    int num_params;
+    int index;
+} ModInfo;
 
 typedef struct ParamInfo
 {
-    f32 low;
-    f32 high;
-    b32 integer;
+    const char *name;
+    int mod;
+    float default_value;
+    float low;
+    float high;
+    bool integer;
 } ParamInfo;
+
+typedef struct SeeCalc
+{
+    Calc *handle;
+    float *params;
+    size_t num_params;
+} SeeCalc;
 
 typedef struct CalcInfo
 {
-    Calc *handle;
-    int num_mods;
-    int num_params;
-    int *num_params_for_mod;
-    float *params;
-    const char **mod_names;
-    const char **param_names;
-    ParamInfo *param_info;
-
-    TheGreatBazoinkazoinkInTheSky *shalhoub;
+    int version;
+    size_t num_mods;
+    size_t num_params;
+    ModInfo *mods;
+    ParamInfo *params;
 } CalcInfo;
 
 #ifdef __cplusplus
@@ -69,14 +89,16 @@ extern "C"
 {
 #endif
 
+void calculate_effects(CalcInfo *ci, SeeCalc *calc, NoteData *note_data, EffectMasks *masks);
+
 NoteData *frobble_serialized_note_data(char *note_data, size_t length);
-NoteData *frobble_sm(SmFile *sm, int diff);
+NoteData *frobble_note_data(NoteData *note_data, size_t length);
 
-CalcInfo calc_init();
-void calc_set_mods(Calc *calc, float *mods);
-void calc_go(Calc *calc, NoteData *note_data, float rate, float goal, SkillsetRatings *out);
-
-EffectMasks calculate_effects(CalcInfo *ci, NoteData *note_data);
+CalcInfo calc_info();
+SeeCalc calc_init(CalcInfo *info);
+void calc_set_params(SeeCalc *calc, float *params, size_t num_params);
+void calc_set_param(SeeCalc *calc, size_t param, float value);
+void calc_go(SeeCalc *calc, NoteData *note_data, float rate, float goal, SkillsetRatings *out);
 
 void nddump(NoteData *nd, NoteData *nd2);
 

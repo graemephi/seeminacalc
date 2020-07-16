@@ -1,4 +1,4 @@
-Debug := 0
+Debug := 1
 Includes := -I$(CURDIR)\ettsrc
 
 ifeq ($(OS),Windows_NT)
@@ -26,10 +26,10 @@ clean:
 build:
 	@mkdir build || true
 
-build/cpp.obj: *.h *.cpp
+build/cpp.obj: *.h *.cpp Makefile
 	cl $(CompilerOptions) $(ExternalCodeOptions) -c cpp.cpp
 
-build/main.exe: *.h *.c build/cpp.obj
+build/main.exe: *.h *.c build/cpp.obj Makefile
 	cl $(CompilerOptions) $(OurCodeOptions) main.c build/cpp.obj
 
 .PHONY: all clean

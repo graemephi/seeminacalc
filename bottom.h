@@ -1,15 +1,16 @@
-#include <assert.h>
+// Buncha top-of-the-file crap that will just confuse anyone trying to look at
+// main.c to see where the good stuff is.
+
 #include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef _MSC_VER
 
 #define alignof _Alignof
-
 #define no_inline __declspec(noinline)
 
 #if !defined(NDEBUG)
@@ -25,12 +26,7 @@
 #error ???
 #endif // _MSC_VER
 
-#include "basetypes.h"
-
-#define array_length(arr) (sizeof(arr) / sizeof(arr[0]))
-
-#define assert_implies(pred, cond) assert(!(pred) || (cond))
-#define assert_unreachable() assert(!"Unreachable codepath hit")
+#include "common.h"
 
 // Really strike confidence in the reader at the top of the file.
 static isize total_bytes_leaked = 0;
