@@ -78,6 +78,28 @@ Buffer get_steps_from_db(CacheDB *db, char *key)
     return result;
 }
 
+bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
+static bool BeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
+{
+    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
+}
+
+static ImVec4 GetColormapColor(int index)
+{
+    ImVec4 result;
+    ipGetColormapColor(&result, index);
+    return result;
+}
+
+static bool ItemDoubleClicked(int button)
+{
+    bool result = igIsItemHovered(0) && igIsMouseDoubleClicked(button);
+    if (result) {
+        igClearActiveID();
+    }
+    return result;
+}
+
 typedef struct SimFileWindow
 {
     String title;
@@ -88,7 +110,7 @@ typedef struct SimFileWindow
     EffectMasks effects;
 
     f32 *skillsets_over_wife[NumSkillsetRatings];
-    f32 *relative_skillsets[NumSkillsetRatings];
+    f32 *relative_skillsets_over_wife[NumSkillsetRatings];
     f32 min_rating;
     f32 max_rating;
     f32 min_relative_rating;
@@ -108,6 +130,8 @@ typedef struct State
     ParamSet ps;
 
     bool selected_skillsets[NumSkillsetRatings];
+    u32 skillset_colors[NumSkillsetRatings];
+    u32 skillset_colors_selectable[NumSkillsetRatings];
 
     int update_index;
 } State;
@@ -117,9 +141,9 @@ ParamSet copy_param_set(ParamSet *ps)
 {
     ParamSet result = {0};
     result.num_params = ps->num_params;
-    result.params = buf_fit(result.params, ps->num_params);
-    result.min = buf_fit(result.min, ps->num_params);
-    result.max = buf_fit(result.max, ps->num_params);
+    buf_fit(result.params, ps->num_params);
+    buf_fit(result.min, ps->num_params);
+    buf_fit(result.max, ps->num_params);
     for (size_t i = 0; i < ps->num_params; i++) {
         result.params[i] = ps->params[i];
         result.min[i] = ps->min[i];
@@ -127,7 +151,7 @@ ParamSet copy_param_set(ParamSet *ps)
     }
     return result;
 }
-float xs[19];
+float ssxs[19];
 void init(void)
 {
     sg_setup(&(sg_desc){
@@ -183,7 +207,7 @@ void init(void)
     state.sm.notes = frobble_serialized_note_data(cached.buf, cached.len);
     buf_fit(state.sm.effects.weak, state.info.num_params);
     buf_fit(state.sm.effects.strong, state.info.num_params);
-    calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
+    // calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
 
     state.ps = copy_param_set(&state.info.defaults);
 
@@ -191,7 +215,7 @@ void init(void)
     state.sm.min_relative_rating = 2;
     for (i32 i = 0; i < 19; i++) {
         f32 goal = 0.82f + ((f32)i / 100.f);
-        xs[i] = goal * 100.f;
+        ssxs[i] = goal * 100.f;
         SkillsetRatings ssr;
         calc_go(&state.calc, &state.info.defaults, state.sm.notes, 1.0f, goal, &ssr);
         for (i32 r = 0; r < NumSkillsetRatings; r++) {
@@ -200,7 +224,7 @@ void init(void)
             state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
 
             f32 relative_rating = ssr.E[r] / ssr.overall;
-            buf_push(state.sm.relative_skillsets[r], relative_rating);
+            buf_push(state.sm.relative_skillsets_over_wife[r], relative_rating);
             state.sm.min_relative_rating = min(relative_rating, state.sm.min_relative_rating);
             state.sm.max_relative_rating = max(relative_rating, state.sm.max_relative_rating);
         }
@@ -209,15 +233,15 @@ void init(void)
     for (isize i = 1; i < NumSkillsetRatings; i++) {
         state.selected_skillsets[i] = (0.9 <= (state.sm.skillsets_over_wife[i][18] / state.sm.skillsets_over_wife[0][18]));
     }
+    for (isize i = 0; i < NumSkillsetRatings; i++) {
+        ImVec4 c = GetColormapColor(i);
+        state.skillset_colors[i] = igColorConvertFloat4ToU32(c);
+        c.w *= 0.75;
+        state.skillset_colors_selectable[i] = igColorConvertFloat4ToU32(c);
+    }
 }
 
-bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
-static bool ipBeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
-{
-    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){-1, 0}, ImPlotFlags_Default, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
-}
-
-void param_slider_widget(i32 param_idx)
+static void param_slider_widget(i32 param_idx)
 {
     i32 mp = param_idx;
     igPushIDInt(mp);
@@ -238,8 +262,7 @@ void param_slider_widget(i32 param_idx)
         char slider_id[32];
         snprintf(slider_id, sizeof(slider_id), "##slider%d", mp);
         igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f);
-        if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
-            igClearActiveID();
+        if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
         }
         igSameLine(0, 4);
@@ -252,6 +275,22 @@ void param_slider_widget(i32 param_idx)
     igPopID();
 }
 
+static void skillset_line_plot(i32 ss, b32 highlight, f32 *xs, f32 *ys, i32 count)
+{
+    // Recreate highlighting cause ImPlot doesn't let you tell it to highlight lines
+    if (highlight) {
+        ipPushStyleVarFloat(ImPlotStyleVar_LineWeight,  ipGetStyle()->LineWeight * 2.0f);
+    }
+
+    ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[ss]);
+    ipPlotLineFloatPtrFloatPtr(SkillsetNames[ss], xs, ys, count, 0, sizeof(float));
+    ipPopStyleColor(1);
+
+    if (highlight) {
+        ipPopStyleVar(1);
+    }
+}
+
 void frame(void)
 {
     i32 width = sapp_width();
@@ -261,39 +300,31 @@ void frame(void)
 
     igShowDemoWindow(0);
 
-    if (igBegin(state.sm.title.buf, &state.sm.open, ImGuiWindowFlags_None)) {
-        igText(state.sm.diff.buf);
-        igSameLine(clamp_lowd(igGetWindowWidth() - 268, 100), 0);
-        igText(state.sm.chartkey.buf);
-
-        ipSetNextPlotLimits(82, 100, state.sm.min_rating - 1.f, state.sm.max_rating + 2.f, ImGuiCond_Once);
-        if (ipBeginPlotDefaults("Rating", "Wife%", "SSR")) {
-            for (i32 r = 0; r < NumSkillsetRatings; r++) {
-                ipPlotLineFloatPtrFloatPtr(SkillsetNames[r], xs, state.sm.skillsets_over_wife[r], 19, 0, sizeof(float));
-            }
-            ipEndPlot();
-        }
-
-        ipSetNextPlotLimits(82, 100, state.sm.min_relative_rating - 0.05f, state.sm.max_relative_rating + 0.05f, ImGuiCond_Once);
-        if (ipBeginPlotDefaults("Relative Rating", "Wife%", "SSR / Overall")) {
-            for (i32 r = 1; r < NumSkillsetRatings; r++) {
-                ipPlotLineFloatPtrFloatPtr(SkillsetNames[r], xs, state.sm.relative_skillsets[r], 19, 0, sizeof(float));
-            }
-            ipEndPlot();
-        }
-    }
-    igEnd();
+    bool ss_highlight[NumSkillsetRatings] = {0};
 
     igSetNextWindowSize((ImVec2) { 600, 0 }, ImGuiCond_Once);
     if (igBegin("Mod Parameters", 0, ImGuiWindowFlags_None)) {
         u32 mask = 0;
+        i32 clear_selections_to = -1;
         for (isize i = 0; i < NumSkillsetRatings; i++) {
-            // todo double click to single selection
+            igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[i]);
+            igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[i]);
             igSelectableBoolPtr(SkillsetNames[i], &state.selected_skillsets[i], 0, (ImVec2){ 500.0f / NumSkillsetRatings, 0});
+            igPopStyleColor(2);
+            if (ItemDoubleClicked(0)) {
+                clear_selections_to = i;
+            }
+            if (igIsItemHovered(0)) {
+                ss_highlight[i] = 1;
+            }
             igSameLine(0, 4);
             igDummy((ImVec2){4,0});
             igSameLine(0, 4);
             mask |= (state.selected_skillsets[i] << i);
+        }
+        if (clear_selections_to >= 0) {
+            memset(state.selected_skillsets, 0, sizeof(state.selected_skillsets));
+            state.selected_skillsets[clear_selections_to] = 1;
         }
         igNewLine();
 
@@ -347,6 +378,29 @@ void frame(void)
     }
     igEnd();
 
+    if (igBegin(state.sm.title.buf, &state.sm.open, ImGuiWindowFlags_None)) {
+        igText(state.sm.diff.buf);
+        igSameLine(clamp_lowd(igGetWindowWidth() - 268, 100), 0);
+        igText(state.sm.chartkey.buf);
+
+        ipSetNextPlotLimits(82, 100, state.sm.min_rating - 1.f, state.sm.max_rating + 2.f, ImGuiCond_Once);
+        if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
+            for (i32 r = 0; r < NumSkillsetRatings; r++) {
+                skillset_line_plot(r, ss_highlight[r], ssxs, state.sm.skillsets_over_wife[r], 19);
+            }
+            ipEndPlot();
+        }
+        igSameLine(0, 4);
+        ipSetNextPlotLimits(82, 100, state.sm.min_relative_rating - 0.05f, state.sm.max_relative_rating + 0.05f, ImGuiCond_Once);
+        if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
+            for (i32 r = 1; r < NumSkillsetRatings; r++) {
+                skillset_line_plot(r, ss_highlight[r], ssxs, state.sm.relative_skillsets_over_wife[r], 19);
+            }
+            ipEndPlot();
+        }
+    }
+    igEnd();
+
     sg_begin_default_pass(&state.pass_action, width, height);
     simgui_render();
     sg_end_pass();
@@ -354,7 +408,7 @@ void frame(void)
 
     for (i32 i = state.update_index; i < state.update_index + 1; i++) {
         f32 goal = 0.82f + ((f32)i / 100.f);
-        xs[i] = goal * 100.f;
+        ssxs[i] = goal * 100.f;
         SkillsetRatings ssr;
         calc_go(&state.calc, &state.ps, state.sm.notes, 1.0f, goal, &ssr);
         for (i32 r = 0; r < NumSkillsetRatings; r++) {
@@ -363,7 +417,7 @@ void frame(void)
             state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
 
             f32 relative_rating = ssr.E[r] / ssr.overall;
-            state.sm.relative_skillsets[r][i] = relative_rating;
+            state.sm.relative_skillsets_over_wife[r][i] = relative_rating;
             state.sm.min_relative_rating = min(relative_rating, state.sm.min_relative_rating);
             state.sm.max_relative_rating = max(relative_rating, state.sm.max_relative_rating);
         }
