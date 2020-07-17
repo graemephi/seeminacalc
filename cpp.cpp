@@ -15,6 +15,7 @@
 // ImPlot's zoom sucks??? So just hack away
 namespace ImPlot {
 
+// Copy n pasted from implot.cpp
 extern "C" bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* sizep, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags) {
 
     IM_ASSERT_USER_ERROR(gp.CurrentPlot == NULL, "Mismatched BeginPlot()/EndPlot()!");

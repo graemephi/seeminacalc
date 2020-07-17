@@ -30,8 +30,15 @@ static void advance_to(SmParser *ctx, char c)
 
 static void consume_whitespace(SmParser *ctx)
 {
+    static char whitespace[256] = {
+        [' '] = 1,
+        ['\r'] = 1,
+        ['\n'] = 1,
+        ['\t'] = 1
+    };
+
     char *p = ctx->p;
-    while (*p && (u8)*p <= (u8)' ' && p < ctx->end) {
+    while (whitespace[*p] && p < ctx->end) {
         p++;
     }
     ctx->p = p;
@@ -299,6 +306,7 @@ static BPMChange parse_bpm_change(SmParser *ctx)
     if (bpm == 0.0f) {
         die(ctx);
     }
+    result.bpm = bpm;
     result.bps = bpm / 60.f;
     return result;
 }
@@ -395,7 +403,7 @@ static SmFile parse_sm(Buffer data)
         switch (tag.tag) {
             case Tag_BPMs: {
                 assert(result.file_bpms == 0);
-                buf_use(result.file_bpms, &permanent_memory);
+                buf_use(result.file_bpms, current_allocator);
 
                 SmParser bpm_ctx = *ctx;
                 bpm_ctx.p = &ctx->buf[tag.str.index];
@@ -411,11 +419,11 @@ static SmFile parse_sm(Buffer data)
             } break;
             case Tag_Delays: {
                 assert(ctx->buf[tag.str.index] == ';');
-                result.tag_values[tag.tag] = tag.str;
+                result.tags[tag.tag] = tag.str;
             } break;
             case Tag_Stops: {
                 assert(stops == 0);
-                result.tag_values[tag.tag] = tag.str;
+                result.tags[tag.tag] = tag.str;
 
                 SmParser stop_ctx = *ctx;
                 stop_ctx.p = &ctx->buf[tag.str.index];
@@ -438,17 +446,19 @@ static SmFile parse_sm(Buffer data)
                 SmString notes = (SmString) { notes_start, notes_len };
 
                 if (string_matches((String) { &ctx->buf[mode.index], mode.len }, "dance-single")) {
-                    result.diffs[diff].valid = true;
-                    result.diffs[diff].mode = mode;
-                    result.diffs[diff].author = author;
-                    result.diffs[diff].desc = desc;
-                    result.diffs[diff].radar = radar;
-                    result.diffs[diff].notes = notes;
+                    buf_push(result.diffs, (SmDiff) {
+                        .diff = diff,
+                        .mode = mode,
+                        .author = author,
+                        .desc = desc,
+                        .radar = radar,
+                        .notes = notes,
+                    });
                 }
             } break;
             default: {
                 assert(tag.tag < TagCount);
-                result.tag_values[tag.tag] = tag.str;
+                result.tags[tag.tag] = tag.str;
             } break;
         }
     }
@@ -491,7 +501,7 @@ static SmFile parse_sm(Buffer data)
         f64 inserted_rows = 0.0;
 
         BPMChange *new_bpms = 0;
-        buf_use(new_bpms, &permanent_memory);
+        buf_use(new_bpms, current_allocator);
         buf_push(new_bpms, bpms[0]);
         SmStop *stop = stops;
         for (i32 i = 1; i < buf_len(bpms) - 1; i++) {
@@ -561,93 +571,92 @@ static SmFile parse_sm(Buffer data)
     result.n_bpms = (i32)buf_len(result.bpms);
 
     SmFileRow *file_rows = alloc_scratch(SmFileRow, 192);
-    for (isize d = 0; d < DiffCount; d++) {
-        if (result.diffs[d].valid) {
-            SmRow *rows = 0;
-            buf_use(rows, &permanent_memory);
+    for (isize d = 0; d < buf_len(result.diffs); d++) {
+        SmRow *rows = 0;
+        buf_use(rows, current_allocator);
 
-            BPMChange *bpm = result.bpms;
-            f32 row = 0.0f;
+        BPMChange *bpm = result.bpms;
+        f32 row = 0.0f;
 
-            ctx->p = &ctx->buf[result.diffs[d].notes.index];
-            while (true) {
-                i32 n_rows = 0;
-                while (SmFileNoteValid[*ctx->p]) {
-                    file_rows[n_rows++] = parse_notes_row(ctx);
-                }
-                assert(n_rows > 0);
-                assert(n_rows <= 192);
+        ctx->p = &ctx->buf[result.diffs[d].notes.index];
+        while (true) {
+            i32 n_rows = 0;
+            while (SmFileNoteValid[*ctx->p]) {
+                file_rows[n_rows++] = parse_notes_row(ctx);
+            }
+            assert(n_rows > 0);
+            assert(n_rows <= 192);
 
-                f32 row_inc = 192.0f / (f32)n_rows;
-                assert(rint(row_inc) == row_inc);
+            f32 row_inc = 192.0f / (f32)n_rows;
+            assert(rint(row_inc) == row_inc);
 
-                for (i32 i = 0; i < n_rows; i++) {
-                    if (file_rows[i].cccc) {
-                        buf_push(rows, (SmRow) {
-                            .time = row_time(*bpm, row),
-                            .snap = row_to_snap(i, n_rows),
-                            .cccc = file_rows[i].cccc
-                        });
-                    }
-
-                    row += row_inc;
-
-                    while (row > *inserted_beats) {
-                        row += 48.0f;
-                        inserted_beats++;
-                    }
-
-                    while (row >= bpm[1].row) {
-                        bpm++;
-                    }
+            for (i32 i = 0; i < n_rows; i++) {
+                if (file_rows[i].cccc) {
+                    buf_push(rows, (SmRow) {
+                        .time = row_time(*bpm, row),
+                        .snap = row_to_snap(i, n_rows),
+                        .cccc = file_rows[i].cccc
+                    });
                 }
 
-                if (try_consume_char(ctx, ';')) {
-                    break;
+                row += row_inc;
+
+                while (row > *inserted_beats) {
+                    row += 48.0f;
+                    inserted_beats++;
                 }
 
-                consume_char(ctx, ',');
+                while (row >= bpm[1].row) {
+                    bpm++;
+                }
             }
 
-            assert(bpm < buf_end(result.bpms));
-
-            i32 rowi = (i32)row % 192;
-            if (rowi) {
-                row += 192.0f - (f32)rowi;
-            }
-            buf_push(rows, (SmRow) { .time = row_time(*bpm, row), .snap = Snap_Sentinel });
-
-            result.diffs[d].rows = rows;
-            result.diffs[d].n_rows = (i32)buf_len(rows);
-
-            // Not user error here
-            for (i32 i = 1; i < result.diffs[d].n_rows; i++) {
-                assert(rows[i - 1].time <= rows[i].time);
+            if (try_consume_char(ctx, ';')) {
+                break;
             }
 
-            consume_whitespace_and_comments(ctx);
+            consume_char(ctx, ',');
         }
+
+        assert(bpm < buf_end(result.bpms));
+
+        i32 rowi = (i32)row % 192;
+        if (rowi) {
+            row += 192.0f - (f32)rowi;
+        }
+        buf_push(rows, (SmRow) { .time = row_time(*bpm, row), .snap = Snap_Sentinel });
+
+        result.diffs[d].rows = rows;
+        result.diffs[d].n_rows = (i32)buf_len(rows);
+
+        // Not user error here
+        for (i32 i = 1; i < result.diffs[d].n_rows; i++) {
+            assert(rows[i - 1].time <= rows[i].time);
+        }
+
+        consume_whitespace_and_comments(ctx);
     }
 
     return result;
 }
 
-static unsigned int row_bits(SmRow r)
+static u32 row_bits(SmRow r)
 {
-    return ((unsigned int)((r.columns[0] & NoteTap) != 0) << 0)  // left
-         + ((unsigned int)((r.columns[1] & NoteTap) != 0) << 1)  // left
-         + ((unsigned int)((r.columns[2] & NoteTap) != 0) << 2)  // right
-         + ((unsigned int)((r.columns[3] & NoteTap) != 0) << 3); // right
+    return ((u32)((r.columns[0] & NoteTap) != 0) << 0)  // left
+         + ((u32)((r.columns[1] & NoteTap) != 0) << 1)  // left
+         + ((u32)((r.columns[2] & NoteTap) != 0) << 2)  // right
+         + ((u32)((r.columns[3] & NoteTap) != 0) << 3); // right
 }
 
 #pragma float_control(precise, on, push)
 NoteInfo *sm_to_ett_note_info(SmFile *sm, i32 diff)
 {
-    NoteInfo *result = calloc(sm->diffs[diff].n_rows, sizeof(NoteInfo));
+    NoteInfo *result = 0;
+    buf_fit(result, sm->diffs[diff].n_rows);
 
     SmRow *r = sm->diffs[diff].rows;
 
-    SmString offset_str = sm->tag_values[Tag_Offset];
+    SmString offset_str = sm->tags[Tag_Offset];
     f32 offset = strtof(&sm->sm.buf[offset_str.index], 0);
 
     for (i32 i = 0; i < sm->diffs[diff].n_rows; i++) {
@@ -671,3 +680,181 @@ NoteInfo *sm_to_ett_note_info(SmFile *sm, i32 diff)
     return result;
 }
 #pragma float_control(pop)
+
+typedef union SHA1Hash
+{
+    u8 hash[20];
+    u32 words[5];
+} SHA1Hash;
+
+static void sha1_chunk(u32 *data, u32 h[5])
+{
+    #define leftrotate(x, n) (((x) << (n)) + ((x) >> (32 - (n))))
+
+    u32 w[80] = {0};
+
+    for (isize i = 0; i < 16; i++) {
+        w[i] = (data[i] >> 24)
+            + ((data[i] >> 8) & 0x0000ff00)
+            + ((data[i] << 8) & 0x00ff0000)
+            +  (data[i] << 24);
+    }
+
+    for (isize i = 16; i < 80; i++) {
+        u32 ww = w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16];
+        w[i] = leftrotate(ww, 1);
+    }
+
+    u32 a = h[0];
+    u32 b = h[1];
+    u32 c = h[2];
+    u32 d = h[3];
+    u32 e = h[4];
+
+    for (isize i = 0; i < 20; i++) {
+        u32 f = (b & c) | ((~b) & d);
+        u32 k = 0x5A827999;
+        u32 temp = leftrotate(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = leftrotate(b, 30);
+        b = a;
+        a = temp;
+    }
+    for (isize i = 20; i < 40; i++) {
+        u32 f = b ^ c ^ d;
+        u32 k = 0x6ED9EBA1;
+        u32 temp = leftrotate(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = leftrotate(b, 30);
+        b = a;
+        a = temp;
+    }
+    for (isize i = 40; i < 60; i++) {
+        u32 f = (b & c) | (b & d) | (c & d);
+        u32 k = 0x8F1BBCDC;
+        u32 temp = leftrotate(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = leftrotate(b, 30);
+        b = a;
+        a = temp;
+    }
+    for (isize i = 60; i < 80; i++) {
+        u32 f = b ^ c ^ d;
+        u32 k = 0xCA62C1D6;
+        u32 temp = leftrotate(a, 5) + f + e + k + w[i];
+        e = d;
+        d = c;
+        c = leftrotate(b, 30);
+        b = a;
+        a = temp;
+    }
+
+    h[0] = h[0] + a;
+    h[1] = h[1] + b;
+    h[2] = h[2] + c;
+    h[3] = h[3] + d;
+    h[4] = h[4] + e;
+
+    #undef leftrotate
+}
+
+static SHA1Hash sha1(u8 *data, isize len)
+{
+    // https://en.wikipedia.org/w/index.php?title=SHA-1&oldid=966694894
+
+    u64 ml = len * 8;
+
+    u32 h[5] = {
+        0x67452301,
+        0xEFCDAB89,
+        0x98BADCFE,
+        0x10325476,
+        0xC3D2E1F0,
+    };
+
+    u8 *chunk = data;
+    for (isize i = 0; i < len / 64; i++) {
+        sha1_chunk((u32 *)chunk, h);
+        chunk += 64;
+    }
+
+    u8 buf[64] = {0};
+    isize remaining = (data + len) - chunk;
+    memcpy(buf, chunk, remaining);
+    buf[remaining] = 0x80;
+    if (remaining >= 56) {
+        sha1_chunk((u32 *)buf, h);
+        memset(buf, 0, sizeof(buf));
+    }
+
+    u8 *length = buf + sizeof(buf) - sizeof(u64);
+    length[0] = (ml >> 56) & 0xff;
+    length[1] = (ml >> 48) & 0xff;
+    length[2] = (ml >> 40) & 0xff;
+    length[3] = (ml >> 32) & 0xff;
+    length[4] = (ml >> 24) & 0xff;
+    length[5] = (ml >> 16) & 0xff;
+    length[6] = (ml >>  8) & 0xff;
+    length[7] = (ml      ) & 0xff;
+
+    sha1_chunk((u32 *)buf, h);
+
+    SHA1Hash result = {0};
+    for (isize i = 0; i < array_length(result.words); i++) {
+        result.words[i] = (h[i] >> 24)
+                       + ((h[i] >> 8) & 0x0000ff00)
+                       + ((h[i] << 8) & 0x00ff0000)
+                       +  (h[i] << 24);
+    }
+
+    return result;
+}
+
+String generate_chart_key(SmFile *sm, isize diff)
+{
+    static u8 tap_note_type[256] = {
+	    [NoteOff] = 0,       // NoteOff -> TapNoteType_Empty
+	    [NoteOn] = 1,        // NoteOn -> TapNoteType_Tap
+	    [NoteHoldStart] = 2, // NoteHoldStart -> TapNoteType_HoldHead
+	    [NoteMine] = 4,      // NoteMine -> TapNoteType_Mine
+	    [NoteLift] = 5,      // NoteLift -> TapNoteType_Lift
+	    [NoteFake] = 7,      // NoteFake -> TapNoteType_Fake
+    };
+	BPMChange *bpm = sm->bpms;
+    SmRow *r = sm->diffs[diff].rows;
+    char *prep = 0;
+	for (isize i = 0; i < sm->diffs[diff].n_rows; i++) {
+        while (r[i].time >= bpm[1].time) {
+            bpm++;
+        }
+        union { u8 taps[4]; u32 row; } row;
+        row.taps[0] = tap_note_type[r[i].columns[0]];
+        row.taps[1] = tap_note_type[r[i].columns[1]];
+        row.taps[2] = tap_note_type[r[i].columns[2]];
+        row.taps[3] = tap_note_type[r[i].columns[3]];
+        if (row.row) {
+            buf_printf(prep, "%d%d%d%d%d",
+                row.taps[0],
+                row.taps[1],
+                row.taps[2],
+                row.taps[3],
+                (int)(bpm->bpm + 0.374643f)
+            );
+        }
+	}
+
+    SHA1Hash hash = sha1(prep, buf_len(prep));
+
+    String result = {
+        .buf = buf_make((char) {'X'}),
+    };
+    for (isize i = 0; i < array_length(hash.hash); i++) {
+        buf_printf(result.buf, "%02x", hash.hash[i]);
+    }
+    result.len = buf_len(result.buf);
+    buf_push(result.buf, 0);
+    return result;
+}

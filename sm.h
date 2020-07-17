@@ -67,6 +67,7 @@ typedef enum SmDifficulty
 
 typedef struct BPMChange
 {
+    f32 bpm;
     f32 bps;
     f32 beat;
     f32 row;
@@ -95,7 +96,7 @@ typedef struct SmRow
 
 typedef struct SmDiff
 {
-    b32 valid;
+    i32 diff;
 
     SmString mode;
     SmString author;
@@ -110,8 +111,8 @@ typedef struct SmDiff
 typedef struct SmFile
 {
     SmBuffer sm;
-    SmString tag_values[TagCount];
-    SmDiff diffs[DiffCount];
+    SmString tags[TagCount];
+    SmDiff *diffs;
     BPMChange *file_bpms;
     BPMChange *bpms;
     i32 n_bpms;

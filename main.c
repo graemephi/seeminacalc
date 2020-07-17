@@ -194,10 +194,15 @@ void init(void)
 
     isize bignumber = 100*1024*1024;
     scratch = stack_make(malloc(bignumber), bignumber);
+    permanent_memory = stack_make(malloc(bignumber), bignumber);
 
     CacheDB db = cachedb_init(db_path);
     Buffer cached = get_steps_from_db(&db, "X9a609c6dd132d807b2abc5882338cb9ebbec320d");
     // leak db
+
+    Buffer f = read_file("./03 IMAGE -MATERIAL-(Version 0).sm");
+    SmFile sm = parse_sm(f);
+    String ck = generate_chart_key(&sm, 0); ck;
 
     state.info = calc_info();
     state.calc = calc_init(&state.info);

@@ -102,6 +102,7 @@ void *stack_push_(Stack *stack, usize size, usize alignment, void *buf)
 
 Stack scratch = {0};
 Stack permanent_memory = {0};
+Stack *current_allocator = &permanent_memory;
 #define alloc_scratch(type, count) stack_alloc(&scratch, type, count)
 #define alloc(type, count) stack_alloc(&permanent_memory, type, count)
 
@@ -213,7 +214,6 @@ void *buf_change_allocator(Buf *hdr, Stack *stack)
     return 0;
 }
 
-no_inline
 void *buf_fit_(Buf *hdr, isize size, isize count)
 {
     assert(size < INTPTR_MAX / count);
@@ -250,8 +250,6 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
 
             hdr = new_hdr;
         }
-    } else {
-        assert_unreachable();
     }
 
     hdr->cookie = BufCookie;
@@ -269,6 +267,29 @@ void *buf_stack_(Stack *stack, isize size)
     hdr->cap = cap;
     hdr->cookie = BufCookie;
     return hdr + 1;
+}
+
+#define buf_printf(buf, ...) buf_printf_(&buf, __VA_ARGS__)
+i32 buf_printf_(char **buf_ref, char *fmt, ...)
+{
+    Buf *hdr = buf_hdr(*buf_ref);
+    assert_implies(hdr, hdr->cookie == BufCookie);
+    hdr = (Buf *)buf_fit_(hdr, 1, 32) - 1;
+
+    va_list args;
+    va_start(args, fmt);
+    i32 len = vsnprintf(hdr_buf(hdr) + hdr->len, 0, fmt, args);
+    va_end(args);
+    if (hdr->len + len > hdr->cap) {
+        hdr = (Buf *)buf_fit_(hdr, 1, len) - 1;
+    }
+    va_start(args, fmt);
+    hdr->len += vsnprintf(hdr_buf(hdr) + hdr->len, hdr->cap - hdr->len, fmt, args);
+    va_end(args);
+    assert(hdr->len <= hdr->cap);
+
+    *buf_ref = hdr_buf(hdr);
+    return len;
 }
 
 typedef struct String

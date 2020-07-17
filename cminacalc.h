@@ -100,10 +100,20 @@ extern "C"
 {
 #endif
 
+// EffectMasks allow basic filtering of parameters to those that are actually
+// relevant for a given file. Strong effects will almost always change the
+// rating, weak effects might not.
 void calculate_effects(CalcInfo *ci, SeeCalc *calc, NoteData *note_data, EffectMasks *masks);
 
+// Turns the SQLite binary blob from the `serializednotedata` column in the `steps`
+// table of the cache db into an opaque handle to C++ whateverisms.
 NoteData *frobble_serialized_note_data(char *note_data, size_t length);
-NoteData *frobble_note_data(NoteData *note_data, size_t length);
+
+// Turns arbitrary NoteInfo into an opaque handle to C++ whateverisms.
+// Note that if you aren't getting this from cache.db you probably want to
+// use Etterna's code because the calc is *very* sensitive to rounding error.
+// __If your note data is not bit-for-bit identical you will see error__
+NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
 
 CalcInfo calc_info();
 SeeCalc calc_init(CalcInfo *info);

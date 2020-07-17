@@ -123,18 +123,12 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
     free(params);
 }
 
-// Turns the SQLite binary blob from the `serializednotedata` column in the `steps`
-// table of the cache db into an opaque handle to C++ whateverisms.
 NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 {
     auto result = new std::vector<NoteInfo>((NoteInfo *)note_data, (NoteInfo *)(note_data + length));
     return (NoteData *)result;
 }
 
-// Turns arbitrary NoteInfo into an opaque handle to C++ whateverisms.
-// Note that if you aren't getting this from cache.db you probably want to
-// use Etterna's code because the calc is *very* sensitive to rounding error.
-// __If your note data is not bit-for-bit identical you will see error__
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
 {
     return frobble_serialized_note_data((char *)note_data, length * sizeof(NoteInfo));
@@ -207,7 +201,7 @@ CalcInfo calc_info()
         }
     }
 
-    // Test for clamping and int-ing
+    // Test for clamping high
     for (isize i = 0; i < num_params; i++) {
         *param_pointers[i] = make_test_value(param_info[i].default_value);
     }
