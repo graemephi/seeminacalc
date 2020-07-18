@@ -11,7 +11,6 @@
 #ifdef _MSC_VER
 
 #define alignof _Alignof
-#define no_inline __declspec(noinline)
 
 #if !defined(NDEBUG)
 // force_inline is a debugging aid mostly
@@ -104,7 +103,7 @@ Stack scratch = {0};
 Stack permanent_memory = {0};
 Stack *current_allocator = &permanent_memory;
 #define alloc_scratch(type, count) stack_alloc(&scratch, type, count)
-#define alloc(type, count) stack_alloc(&permanent_memory, type, count)
+#define alloc(type, count) stack_alloc(current_allocator, type, count)
 
 typedef struct Buffer
 {
@@ -222,6 +221,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
         hdr = alloc_scratch(Buf, 1);
         isize cap = max(8, count);
         alloc_scratch(u8, size * cap);
+        memset(hdr + 1, 0, size * cap);
         hdr->alloc = &scratch;
         hdr->len = 0;
         hdr->cap = cap;
@@ -231,6 +231,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
 
         if (hdr->alloc->ptr == hdr_buf(hdr) + size*hdr->cap) {
             stack_alloc(hdr->alloc, u8, size * (cap - hdr->cap));
+            memset(hdr_buf(hdr) + size*hdr->cap, 0, size * (cap - hdr->cap));
             hdr->cap = cap;
         } else {
             Buf *new_hdr = stack_alloc(hdr->alloc, Buf, 1);
@@ -239,7 +240,9 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
             new_hdr->len = hdr->len;
             new_hdr->cap = cap;
 
-            memcpy(hdr_buf(new_hdr), hdr_buf(hdr), hdr->len * size);
+            isize n = hdr->len * size;
+            memcpy(hdr_buf(new_hdr), hdr_buf(hdr), n);
+            memset(hdr_buf(new_hdr) + n, 0, size * cap - n);
 
             // leak old header. todo: literally anything else
             if (hdr->alloc == &permanent_memory) {

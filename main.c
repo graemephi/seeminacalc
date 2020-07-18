@@ -196,13 +196,13 @@ void init(void)
     scratch = stack_make(malloc(bignumber), bignumber);
     permanent_memory = stack_make(malloc(bignumber), bignumber);
 
-    CacheDB db = cachedb_init(db_path);
-    Buffer cached = get_steps_from_db(&db, "X9a609c6dd132d807b2abc5882338cb9ebbec320d");
-    // leak db
-
-    Buffer f = read_file("./03 IMAGE -MATERIAL-(Version 0).sm");
+    Buffer f = read_file("./The Lost Dedicated Life.sm");
     SmFile sm = parse_sm(f);
     String ck = generate_chart_key(&sm, 0); ck;
+
+    CacheDB db = cachedb_init(db_path);
+    Buffer cached = get_steps_from_db(&db, ck.buf);
+    // leak db
 
     state.info = calc_info();
     state.calc = calc_init(&state.info);
@@ -214,7 +214,14 @@ void init(void)
     buf_fit(state.sm.effects.strong, state.info.num_params);
     // calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
 
+    NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
+    NoteData *notes2 = frobble_note_data(ni, buf_len(ni));
+    SkillsetRatings ssr1;
+    calc_go(&state.calc, &state.info.defaults, state.sm.notes, 1.0f, .93f, &ssr1);
+    SkillsetRatings ssr2;
+    calc_go(&state.calc, &state.info.defaults, notes2, 1.0f, .93f, &ssr2);
     state.ps = copy_param_set(&state.info.defaults);
+    nddump(state.sm.notes, notes2);
 
     state.sm.min_rating = 40;
     state.sm.min_relative_rating = 2;

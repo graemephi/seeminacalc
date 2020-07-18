@@ -44,8 +44,8 @@ static_assert(sizeof(SkillsetNames) == (NumSkillsetRatings * sizeof(const char *
 #ifndef __NDSTRUCTS__
 typedef struct NoteInfo
 {
-    float rowTime;
     int notes;
+    float rowTime;
 } NoteInfo;
 #endif
 

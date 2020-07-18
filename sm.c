@@ -30,7 +30,7 @@ static void advance_to(SmParser *ctx, char c)
 
 static void consume_whitespace(SmParser *ctx)
 {
-    static char whitespace[256] = {
+    static const char whitespace[256] = {
         [' '] = 1,
         ['\r'] = 1,
         ['\n'] = 1,
@@ -137,17 +137,6 @@ static const u8 SmFileNoteValid[256] = {
     ['K'] = true,
     ['L'] = true,
     ['F'] = true,
-};
-
-static const u8 SmNoteChar[256] = {
-    [NoteOff] = '0',
-    [NoteOn] = '1',
-    [NoteHoldStart] = '2',
-    [NoteHoldEnd] = '3',
-    [NoteRollEnd] = '4',
-    [NoteMine] = 'M',
-    [NoteLift] = 'L',
-    [NoteFake] = 'F',
 };
 
 static const String DifficultyStrings[DiffCount] = {
@@ -296,20 +285,22 @@ static SmFileRow parse_notes_row(SmParser *ctx)
     return result;
 }
 
+#pragma float_control(precise, on, push)
 static BPMChange parse_bpm_change(SmParser *ctx)
 {
     BPMChange result = {0};
-    result.beat = roundf(parse_f32(ctx));
-    result.row = result.beat * 48.0f;
+    result.row = roundf(parse_f32(ctx) * 48.0f);
+    result.beat = result.row / 48.0f;
     consume_char(ctx, '=');
     f32 bpm = parse_f32(ctx);
     if (bpm == 0.0f) {
         die(ctx);
     }
-    result.bpm = bpm;
     result.bps = bpm / 60.f;
+    result.bpm = result.bps * 60.f;
     return result;
 }
+#pragma float_control(pop)
 
 static b32 try_parse_next_bpm_change(SmParser *ctx, BPMChange *out_change)
 {
@@ -328,8 +319,8 @@ static b32 parse_next_stop(SmParser *ctx, SmStop *out_stop)
         return false;
     }
     try_consume_char(ctx, ',');
-    result.beat = roundf(parse_f32(ctx));
-    result.row = result.beat * 48.0f;
+    result.row = roundf(parse_f32(ctx) * 48.0f);
+    result.beat = result.beat / 48.0f;
     consume_char(ctx, '=');
     result.duration = parse_f32(ctx);
     *out_stop = result;
@@ -376,7 +367,6 @@ static b8 row_has_tap(SmRow r)
     return (r.cccc & mask) != 0;
 }
 
-// Normative: every row has one and only one time. It's whatever this function says it is
 static f32 row_time(BPMChange bpm, f32 row)
 {
     return bpm.time + ((row - bpm.row) / 48.0f) / bpm.bps;
@@ -388,6 +378,55 @@ static f32 time_row_naive(BPMChange bpm, f32 time)
     return (bpm.beat + (f32)(time - bpm.time) * bpm.bps);
 }
 
+typedef struct MinaRowTimeGarbage
+{
+    BPMChange *last_seen_bpm;
+    b32 have_single_bpm;
+    f32 last_nerv;
+    i32 first_row_of_last_segment;
+
+    f32 event_row;
+    f32 time_to_next_event;
+    f32 next_event_time;
+    f32 last_time;
+} MinaRowTimeGarbage;
+
+static f32 mina_row_time(MinaRowTimeGarbage *g, BPMChange *bpms, f32 row)
+{
+    if (g->have_single_bpm) {
+        return row_time(bpms[0], row);
+    }
+
+    if (g->last_seen_bpm != bpms) {
+        assert(row >= g->event_row);
+
+        BPMChange *next = g->last_seen_bpm ? g->last_seen_bpm + 1 : bpms;
+        BPMChange *end = bpms + 1;
+        for (; next != end; next++) {
+            g->event_row = next[1].row;
+            if (g->event_row == FLT_MAX) {
+                g->event_row = g->last_nerv;
+            }
+            g->time_to_next_event = ((g->event_row - next[0].row) / 48.0f) / next[0].bps;
+            g->last_time = g->next_event_time;
+            g->next_event_time = g->last_time + g->time_to_next_event;
+        }
+
+        g->last_seen_bpm = bpms;
+    }
+
+    f32 perc = (row - bpms[0].row) / (g->event_row - bpms[0].row);
+    return g->last_time + g->time_to_next_event * perc;
+}
+
+static b32 row_has_roll(SmFileRow r)
+{
+    return (r.columns[0] == NoteRollEnd)
+        || (r.columns[1] == NoteRollEnd)
+        || (r.columns[2] == NoteRollEnd)
+        || (r.columns[3] == NoteRollEnd);
+}
+
 static SmFile parse_sm(Buffer data)
 {
     // TODO: all asserts in this function should be validation errors
@@ -397,6 +436,8 @@ static SmFile parse_sm(Buffer data)
 
     SmStop *stops = 0;
     b32 negBPMsexclamationmark = false;
+
+    f32 *mina_garbage_last_nerv = 0;
 
     SmTagValue tag = {0};
     while (try_advance_to_and_parse_tag(ctx, &tag)) {
@@ -480,6 +521,7 @@ static SmFile parse_sm(Buffer data)
         }
         result.bpms = bpms;
     } else {
+        result.risky.stops = true;
 #if 0
         buf_push(stops, (SmStop) { .row = DBL_MAX, .ticks = 0 });
         BPMChange *bpms = result.file_bpms;
@@ -576,7 +618,9 @@ static SmFile parse_sm(Buffer data)
         buf_use(rows, current_allocator);
 
         BPMChange *bpm = result.bpms;
-        f32 row = 0.0f;
+        MinaRowTimeGarbage g = { .have_single_bpm = buf_len(result.bpms) == 2 };
+        MinaRowTimeGarbage last_segment_g = {0};
+        f32 row = 0.0;
 
         ctx->p = &ctx->buf[result.diffs[d].notes.index];
         while (true) {
@@ -586,17 +630,19 @@ static SmFile parse_sm(Buffer data)
             }
             assert(n_rows > 0);
             assert(n_rows <= 192);
-
             f32 row_inc = 192.0f / (f32)n_rows;
             assert(rint(row_inc) == row_inc);
 
             for (i32 i = 0; i < n_rows; i++) {
                 if (file_rows[i].cccc) {
                     buf_push(rows, (SmRow) {
-                        .time = row_time(*bpm, row),
+                        .row = row,
+                        .time = mina_row_time(&g, bpm, (f32)row),
                         .snap = row_to_snap(i, n_rows),
                         .cccc = file_rows[i].cccc
                     });
+
+                    result.risky.rolls = row_has_roll(file_rows[i]);
                 }
 
                 row += row_inc;
@@ -608,6 +654,11 @@ static SmFile parse_sm(Buffer data)
 
                 while (row >= bpm[1].row) {
                     bpm++;
+
+                    if (bpm[1].row == FLT_MAX) {
+                        last_segment_g = g;
+                        last_segment_g.first_row_of_last_segment = buf_len(rows);
+                    }
                 }
             }
 
@@ -626,6 +677,16 @@ static SmFile parse_sm(Buffer data)
         }
         buf_push(rows, (SmRow) { .time = row_time(*bpm, row), .snap = Snap_Sentinel });
 
+        // mina_row_time needs to know the last non empty row for the last segment.
+        // We're single pass, so this fix up is needed.
+        if (g.have_single_bpm == false) {
+            last_segment_g.last_nerv = buf_end(rows)[-2].row;
+            last_segment_g.last_seen_bpm = bpm - 1;
+            for (isize i = last_segment_g.first_row_of_last_segment; i < buf_len(rows) - 1; i++) {
+                rows[i].time = mina_row_time(&last_segment_g, bpm, rows[i].row);
+            }
+        }
+
         result.diffs[d].rows = rows;
         result.diffs[d].n_rows = (i32)buf_len(rows);
 
@@ -633,47 +694,70 @@ static SmFile parse_sm(Buffer data)
         for (i32 i = 1; i < result.diffs[d].n_rows; i++) {
             assert(rows[i - 1].time <= rows[i].time);
         }
-
-        consume_whitespace_and_comments(ctx);
     }
 
     return result;
 }
 
-static u32 row_bits(SmRow r)
+typedef union MinaSerializedRow
 {
-    return ((u32)((r.columns[0] & NoteTap) != 0) << 0)  // left
-         + ((u32)((r.columns[1] & NoteTap) != 0) << 1)  // left
-         + ((u32)((r.columns[2] & NoteTap) != 0) << 2)  // right
-         + ((u32)((r.columns[3] & NoteTap) != 0) << 3); // right
+    u8 taps[4];
+    u32 row;
+} MinaSerializedRow;
+
+static MinaSerializedRow row_mina_serialize(SmRow r)
+{
+    static u8 tap_note_type[256] = {
+	    [NoteOff] = 0,
+	    [NoteOn] = 1,
+	    [NoteHoldStart] = 2,
+	    [NoteRollEnd] = 2, // wtf?
+	    [NoteMine] = 4,
+	    [NoteLift] = 5,
+	    [NoteFake] = 7,
+    };
+    MinaSerializedRow result = {0};
+    result.taps[0] = tap_note_type[r.columns[0]];
+    result.taps[1] = tap_note_type[r.columns[1]];
+    result.taps[2] = tap_note_type[r.columns[2]];
+    result.taps[3] = tap_note_type[r.columns[3]];
+    return result;
+}
+
+static u32 mina_row_bits(SmRow r)
+{
+    return ((u32)((r.columns[0] & (NoteTap|NoteRollEnd)) != 0) << 0)  // left
+         + ((u32)((r.columns[1] & (NoteTap|NoteRollEnd)) != 0) << 1)  // left
+         + ((u32)((r.columns[2] & (NoteTap|NoteRollEnd)) != 0) << 2)  // right
+         + ((u32)((r.columns[3] & (NoteTap|NoteRollEnd)) != 0) << 3); // right
 }
 
 #pragma float_control(precise, on, push)
 NoteInfo *sm_to_ett_note_info(SmFile *sm, i32 diff)
 {
     NoteInfo *result = 0;
-    buf_fit(result, sm->diffs[diff].n_rows);
-
     SmRow *r = sm->diffs[diff].rows;
 
     SmString offset_str = sm->tags[Tag_Offset];
     f32 offset = strtof(&sm->sm.buf[offset_str.index], 0);
 
-    for (i32 i = 0; i < sm->diffs[diff].n_rows; i++) {
-        if (row_bits(r[i])) {
-            offset += r[i].time;
-            break;
+    if (row_mina_serialize(r[0]).row == 0) {
+        for (i32 i = 1; i < sm->diffs[diff].n_rows; i++) {
+            MinaSerializedRow row = row_mina_serialize(r[i]);
+            if (row.row) {
+                offset += r[i].time;
+                break;
+            }
         }
     }
 
-    i32 inserted_index = 0;
     for (i32 i = 0; i < sm->diffs[diff].n_rows; i++) {
-        u32 notes = row_bits(r[i]);
+        u32 notes = mina_row_bits(r[i]);
         if (notes) {
-            result[inserted_index++] = (NoteInfo) {
+            buf_push(result, (NoteInfo) {
                 .notes = notes,
-                .rowTime = (r[i].time - offset) + offset // HAHAHA
-            };
+                .rowTime = (r[i].time - offset) - (r[0].time - offset)
+            });
         }
     }
 
@@ -815,27 +899,15 @@ static SHA1Hash sha1(u8 *data, isize len)
 
 String generate_chart_key(SmFile *sm, isize diff)
 {
-    static u8 tap_note_type[256] = {
-	    [NoteOff] = 0,       // NoteOff -> TapNoteType_Empty
-	    [NoteOn] = 1,        // NoteOn -> TapNoteType_Tap
-	    [NoteHoldStart] = 2, // NoteHoldStart -> TapNoteType_HoldHead
-	    [NoteMine] = 4,      // NoteMine -> TapNoteType_Mine
-	    [NoteLift] = 5,      // NoteLift -> TapNoteType_Lift
-	    [NoteFake] = 7,      // NoteFake -> TapNoteType_Fake
-    };
 	BPMChange *bpm = sm->bpms;
     SmRow *r = sm->diffs[diff].rows;
     char *prep = 0;
 	for (isize i = 0; i < sm->diffs[diff].n_rows; i++) {
-        while (r[i].time >= bpm[1].time) {
-            bpm++;
-        }
-        union { u8 taps[4]; u32 row; } row;
-        row.taps[0] = tap_note_type[r[i].columns[0]];
-        row.taps[1] = tap_note_type[r[i].columns[1]];
-        row.taps[2] = tap_note_type[r[i].columns[2]];
-        row.taps[3] = tap_note_type[r[i].columns[3]];
+        MinaSerializedRow row = row_mina_serialize(r[i]);
         if (row.row) {
+            while (r[i].row >= bpm[1].row) {
+                bpm++;
+            }
             buf_printf(prep, "%d%d%d%d%d",
                 row.taps[0],
                 row.taps[1],
@@ -856,5 +928,6 @@ String generate_chart_key(SmFile *sm, isize diff)
     }
     result.len = buf_len(result.buf);
     buf_push(result.buf, 0);
+
     return result;
 }

@@ -302,7 +302,7 @@ void nddump(NoteData *nd, NoteData *nd2)
     for (i32 i = 0; i < nd->ref.size(); i++) {
         float f = nd->ref.at(i).rowTime - nd2->ref.at(i).rowTime;
         if (fabs(f) > 1e-6) {
-            printf("f %d %f\n", i, f);
+            printf("f %d %.7f %.7f %.7f\n", i, f,  nd->ref.at(i).rowTime, nd2->ref.at(i).rowTime);
         }
         int d = nd->ref.at(i).notes - nd2->ref.at(i).notes;
         if (d) {

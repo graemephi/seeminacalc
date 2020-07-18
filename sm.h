@@ -86,6 +86,7 @@ typedef struct SmStop
 
 typedef struct SmRow
 {
+    f32 row;
     f32 time;
     u8 snap;
     union {
@@ -116,6 +117,10 @@ typedef struct SmFile
     BPMChange *file_bpms;
     BPMChange *bpms;
     i32 n_bpms;
+    struct {
+        u8 stops;
+        u8 rolls;
+    } risky;
 } SmFile;
 
 typedef union SmFileRow
