@@ -141,9 +141,9 @@ ParamSet copy_param_set(ParamSet *ps)
 {
     ParamSet result = {0};
     result.num_params = ps->num_params;
-    buf_fit(result.params, ps->num_params);
-    buf_fit(result.min, ps->num_params);
-    buf_fit(result.max, ps->num_params);
+    buf_reserve(result.params, ps->num_params);
+    buf_reserve(result.min, ps->num_params);
+    buf_reserve(result.max, ps->num_params);
     for (size_t i = 0; i < ps->num_params; i++) {
         result.params[i] = ps->params[i];
         result.min[i] = ps->min[i];
@@ -193,8 +193,10 @@ void init(void)
     }
 
     isize bignumber = 100*1024*1024;
-    scratch = stack_make(malloc(bignumber), bignumber);
-    permanent_memory = stack_make(malloc(bignumber), bignumber);
+    scratch_stack = stack_make(malloc(bignumber), bignumber);
+    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
+
+    push_allocator(permanent_memory);
 
     Buffer f = read_file("./The Lost Dedicated Life.sm");
     SmFile sm = parse_sm(f);
@@ -210,8 +212,8 @@ void init(void)
     state.sm.diff = S("Challenge");
     state.sm.chartkey = S("X9a609c6dd132d807b2abc5882338cb9ebbec320d");
     state.sm.notes = frobble_serialized_note_data(cached.buf, cached.len);
-    buf_fit(state.sm.effects.weak, state.info.num_params);
-    buf_fit(state.sm.effects.strong, state.info.num_params);
+    buf_reserve(state.sm.effects.weak, state.info.num_params);
+    buf_reserve(state.sm.effects.strong, state.info.num_params);
     // calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
 
     NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
@@ -251,6 +253,8 @@ void init(void)
         c.w *= 0.75;
         state.skillset_colors_selectable[i] = igColorConvertFloat4ToU32(c);
     }
+
+    pop_allocator();
 }
 
 static void param_slider_widget(i32 param_idx)

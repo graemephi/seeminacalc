@@ -17,8 +17,7 @@
 // So force msvc to emit em
 #define force_inline __forceinline extern
 #else
-// But maybe we should let the compiler decide when optimisations are on
-#define force_inline __forceinline
+#define force_inline
 #endif
 
 #else
@@ -55,12 +54,14 @@ static f64 clamp_lowd(f64 a, f64 b)
     return (a > b) ? a : b;
 }
 
-typedef struct Stack
+typedef struct Stack Stack;
+struct Stack
 {
     u8 *buf;
     u8 *ptr;
     u8 *end;
-} Stack;
+    Stack *prev;
+};
 
 Stack stack_make(u8 *buf, isize buf_size)
 {
@@ -99,11 +100,28 @@ void *stack_push_(Stack *stack, usize size, usize alignment, void *buf)
     return result;
 }
 
-Stack scratch = {0};
-Stack permanent_memory = {0};
-Stack *current_allocator = &permanent_memory;
-#define alloc_scratch(type, count) stack_alloc(&scratch, type, count)
+Stack scratch_stack = {0};
+Stack permanent_memory_stack = {0};
+Stack *const scratch = &scratch_stack;
+Stack *const permanent_memory = &permanent_memory_stack;
+Stack *current_allocator = &permanent_memory_stack;
+#define alloc_scratch(type, count) stack_alloc(scratch, type, count)
 #define alloc(type, count) stack_alloc(current_allocator, type, count)
+
+void push_allocator(Stack *a)
+{
+    assert(a->prev == 0);
+    a->prev = current_allocator;
+    current_allocator = a;
+}
+
+void pop_allocator()
+{
+    assert(current_allocator->prev);
+    Stack *prev = current_allocator->prev;
+    current_allocator->prev = 0;
+    current_allocator = prev;
+}
 
 typedef struct Buffer
 {
@@ -133,6 +151,7 @@ Buffer alloc_buffer(isize size)
     return (Buffer) { alloc(u8, size), 0, size };
 }
 
+// This is for development stuff and so doesn't need to handle errors properly!!
 Buffer read_file(char *path)
 {
     FILE *f;
@@ -192,12 +211,11 @@ force_inline b32 buf_fits(void *buf, isize n) { return (buf_cap(buf) - buf_len(b
 #define buf_end(buf) ((buf) + buf_len(buf))
 #define buf_last(buf) buf_end(buf)[-1]
 #define buf_fit(buf, n) ((buf) = buf_fit_(buf_hdr(buf), sizeof((buf)[0]), n))
-#define buf_push(buf, ...) (buf_fits((buf), 1) ? 0 : buf_fit(buf, 1), \
+#define buf_push(buf, ...) (buf_fits((buf), 1) ? 0 : buf_fit((buf), 1), \
                            (buf)[buf_len(buf)] = (__VA_ARGS__), \
                            &(buf)[buf_hdr(buf)->len++])
-
-#define buf_use(buf, alloc) ((buf) = (buf) ? buf_change_allocator(buf_hdr(buf), alloc) : buf_stack_(alloc, sizeof((buf)[0])))
 #define buf_make(...) buf_make_(buf_fit_(0, sizeof(__VA_ARGS__), 1), &(__VA_ARGS__), sizeof(__VA_ARGS__))
+#define buf_reserve(buf, n) (buf_fits((buf), n - buf_len(buf)) ? (buf) : buf_fit((buf), n - buf_len(buf)))
 
 force_inline
 void *buf_make_(void *dest, void *src, size_t size) {
@@ -206,23 +224,16 @@ void *buf_make_(void *dest, void *src, size_t size) {
     return dest;
 }
 
-void *buf_change_allocator(Buf *hdr, Stack *stack)
-{
-    (void)hdr, stack;
-    assert_unreachable();
-    return 0;
-}
-
 void *buf_fit_(Buf *hdr, isize size, isize count)
 {
     assert(size < INTPTR_MAX / count);
 
     if (hdr == 0) {
-        hdr = alloc_scratch(Buf, 1);
+        hdr = alloc(Buf, 1);
         isize cap = max(8, count);
-        alloc_scratch(u8, size * cap);
+        alloc(u8, size * cap);
         memset(hdr + 1, 0, size * cap);
-        hdr->alloc = &scratch;
+        hdr->alloc = current_allocator;
         hdr->len = 0;
         hdr->cap = cap;
         hdr->leaked = 0;
@@ -245,7 +256,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
             memset(hdr_buf(new_hdr) + n, 0, size * cap - n);
 
             // leak old header. todo: literally anything else
-            if (hdr->alloc == &permanent_memory) {
+            if (hdr->alloc == permanent_memory) {
                 isize leaked = hdr->len * size;
                 new_hdr->leaked += (i32)leaked;
                 total_bytes_leaked += leaked;
@@ -253,45 +264,32 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
 
             hdr = new_hdr;
         }
+    } else {
+        assert_unreachable();
     }
 
     hdr->cookie = BufCookie;
     return hdr + 1;
 }
 
-#define buf_stack(type, stack) buf_stack_(stack, sizeof(type))
-void *buf_stack_(Stack *stack, isize size)
-{
-    Buf *hdr = stack_alloc(stack, Buf, 1);
-    isize cap = 8;
-    stack_alloc(stack, u8, size * cap);
-    hdr->alloc = stack;
-    hdr->len = 0;
-    hdr->cap = cap;
-    hdr->cookie = BufCookie;
-    return hdr + 1;
-}
-
-#define buf_printf(buf, ...) buf_printf_(&buf, __VA_ARGS__)
+#define buf_printf(buf, ...) buf_printf_(&(buf), __VA_ARGS__)
 i32 buf_printf_(char **buf_ref, char *fmt, ...)
 {
-    Buf *hdr = buf_hdr(*buf_ref);
-    assert_implies(hdr, hdr->cookie == BufCookie);
-    hdr = (Buf *)buf_fit_(hdr, 1, 32) - 1;
+    char *buf = *buf_ref;
 
     va_list args;
     va_start(args, fmt);
-    i32 len = vsnprintf(hdr_buf(hdr) + hdr->len, 0, fmt, args);
+    i32 len = vsnprintf(0, 0, fmt, args);
     va_end(args);
-    if (hdr->len + len > hdr->cap) {
-        hdr = (Buf *)buf_fit_(hdr, 1, len) - 1;
-    }
-    va_start(args, fmt);
-    hdr->len += vsnprintf(hdr_buf(hdr) + hdr->len, hdr->cap - hdr->len, fmt, args);
-    va_end(args);
-    assert(hdr->len <= hdr->cap);
 
-    *buf_ref = hdr_buf(hdr);
+    buf_reserve(buf, buf_len(buf) + len);
+
+    va_start(args, fmt);
+    buf_hdr(buf)->len += vsnprintf(buf_end(buf), buf_cap(buf) - buf_len(buf), fmt, args);
+    va_end(args);
+    assert(buf_len(buf) <= buf_cap(buf));
+
+    *buf_ref = buf;
     return len;
 }
 

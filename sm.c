@@ -444,7 +444,6 @@ static SmFile parse_sm(Buffer data)
         switch (tag.tag) {
             case Tag_BPMs: {
                 assert(result.file_bpms == 0);
-                buf_use(result.file_bpms, current_allocator);
 
                 SmParser bpm_ctx = *ctx;
                 bpm_ctx.p = &ctx->buf[tag.str.index];
@@ -543,8 +542,7 @@ static SmFile parse_sm(Buffer data)
         f64 inserted_rows = 0.0;
 
         BPMChange *new_bpms = 0;
-        buf_use(new_bpms, current_allocator);
-        buf_push(new_bpms, bpms[0]);
+                buf_push(new_bpms, bpms[0]);
         SmStop *stop = stops;
         for (i32 i = 1; i < buf_len(bpms) - 1; i++) {
             assert(bpms[i].row > bpms[i - 1].row);
@@ -615,7 +613,6 @@ static SmFile parse_sm(Buffer data)
     SmFileRow *file_rows = alloc_scratch(SmFileRow, 192);
     for (isize d = 0; d < buf_len(result.diffs); d++) {
         SmRow *rows = 0;
-        buf_use(rows, current_allocator);
 
         BPMChange *bpm = result.bpms;
         MinaRowTimeGarbage g = { .have_single_bpm = buf_len(result.bpms) == 2 };
