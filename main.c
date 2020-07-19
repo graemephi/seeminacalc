@@ -1,26 +1,27 @@
-#pragma warning(disable : 4116) // unnamed type definition in parentheses
-#pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
-#pragma warning(disable : 4204) // nonstandard extension used: non-constant aggregate initializer
-#pragma warning(disable : 4221) // nonstandard extension used: cannot be initialized using address of automatic variable
-#pragma warning(disable : 4057) // 'initializing': 'char *' differs in indirection to slightly different base types from 'u8 *'
-
-#include "sqlite3.c"
-// The perils of including sqlite3 in your translation unit
-#if defined(_DEBUG) && NDEBUG == 1
-#undef NDEBUG
-#endif
-
 #define SOKOL_GLCORE33
 #define SOKOL_IMPL
 #include "sokol/sokol_app.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_time.h"
 #include "sokol/sokol_glue.h"
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
+#endif
 #define CIMGUI_DEFINE_ENUMS_AND_STRUCTS
 #include "cimgui/cimgui.h"
 #include "cimgui/cimplot.h"
 #define SOKOL_IMGUI_IMPL
 #include "sokol/util/sokol_imgui.h"
+
+#if 0
+#include "sqlite3.c"
+// The perils of including sqlite3 in your translation unit
+// sqlite3.c also disables certain warnings.
+#if defined(_DEBUG) && NDEBUG == 1
+#undef NDEBUG
+#endif
+#endif
 
 #include "bottom.h"
 #include "cminacalc.h"
@@ -30,6 +31,7 @@
 #include "sm.c"
 #pragma float_control(pop)
 
+#ifdef SQLITE_CORE
 typedef struct CacheDB
 {
     sqlite3 *db;
@@ -457,6 +459,8 @@ void input(const sapp_event* event)
 
 sapp_desc sokol_main(int argc, char* argv[])
 {
+    (void)argc;
+    (void)argv;
     if (argc == 1) {
         printf("gimme a db\n");
         exit(1);

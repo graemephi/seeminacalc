@@ -145,6 +145,7 @@ RageFileManager::ReleaseFileDriver(RageFileDriver* pDriver)
 static bool GrabDriver( RageFileDriver *pDriver )
 {
 }
+return 0;
 #endif
 
 // Mountpoints as directories cause a problem.  If "Themes/default" is a
@@ -161,6 +162,7 @@ class RageFileDriverMountpoints : public RageFileDriver
 	}
 	RageFileBasic* Open(const std::string& sPath, int iMode, int& iError)
 	{
+		return 0;
 	}
 	/* Never flush FDB, except in LoadFromDrivers. */
 	void FlushDirCache(const std::string& sPath) {}
@@ -174,16 +176,19 @@ static RageFileDriverMountpoints* g_Mountpoints = nullptr;
 static std::string
 ExtractDirectory(std::string sPath)
 {
+	return "";
 }
 
 static std::string
 ReadlinkRecursive(std::string sPath)
 {
+	return "";
 }
 
 static std::string
 GetDirOfExecutable(std::string argv0)
 {
+	return "";
 }
 
 static void
@@ -217,11 +222,13 @@ NormalizePath(std::string& sPath)
 inline bool
 ilt(const std::string& a, const std::string& b)
 {
+	return 0;
 }
 
 inline bool
 ieq(const std::string& a, const std::string& b)
 {
+	return 0;
 }
 
 /*
@@ -239,6 +246,7 @@ RemoveIf(Container& c, Predicate p)
 static inline bool
 CVSOrSVN(const std::string& s)
 {
+	return 0;
 }
 
 inline void
@@ -249,6 +257,7 @@ StripCvsAndSvn(vector<std::string>& vs)
 static inline bool
 MacResourceFork(const std::string& s)
 {
+	return 0;
 }
 
 inline void
@@ -376,6 +385,7 @@ RageFileManager::ResolvePath(const std::string& path)
 static bool
 SortBySecond(const std::pair<int, int>& a, const std::pair<int, int>& b)
 {
+	return 0;
 }
 
 /*
@@ -389,6 +399,7 @@ SortBySecond(const std::pair<int, int>& a, const std::pair<int, int>& b)
 static bool
 PathUsesSlowFlush(const std::string& sPath)
 {
+	return 0;
 }
 
 /* Used only by RageFile: */

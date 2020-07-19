@@ -65,7 +65,7 @@ struct Stack
 
 Stack stack_make(u8 *buf, isize buf_size)
 {
-    return (Stack) { buf, buf, buf + buf_size };
+    return (Stack) { buf, buf, buf + buf_size, 0 };
 }
 
 #define stack_alloc(stack, type, count) (type *)stack_alloc_(stack, sizeof(type), alignof(type), count)

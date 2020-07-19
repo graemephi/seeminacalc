@@ -38,7 +38,7 @@ static void consume_whitespace(SmParser *ctx)
     };
 
     char *p = ctx->p;
-    while (whitespace[*p] && p < ctx->end) {
+    while (whitespace[(u8)*p] && p < ctx->end) {
         p++;
     }
     ctx->p = p;
@@ -198,9 +198,9 @@ static SmTagValue parse_tag(SmParser *ctx)
     isize end = parser_position(ctx);
     consume_char(ctx, ';');
     return (SmTagValue) {
-        tag,
-        (i32)(start),
-        (i32)(end - start)
+        .tag = tag,
+        .str.index = (i32)start,
+        .str.len = (i32)(end - start)
     };
 }
 
@@ -274,10 +274,10 @@ static SmFileRow parse_notes_row(SmParser *ctx)
     }
 
     for (isize i = 0; i < 4; i++) {
-        if (SmFileNoteValid[*ctx->p] == false) {
+        if (SmFileNoteValid[(u8)*ctx->p] == false) {
             die(ctx);
         }
-        result.columns[i] = SmFileNote[*ctx->p];
+        result.columns[i] = SmFileNote[(u8)*ctx->p];
         ctx->p++;
     }
 
@@ -622,7 +622,7 @@ static SmFile parse_sm(Buffer data)
         ctx->p = &ctx->buf[result.diffs[d].notes.index];
         while (true) {
             i32 n_rows = 0;
-            while (SmFileNoteValid[*ctx->p]) {
+            while (SmFileNoteValid[(u8)*ctx->p]) {
                 file_rows[n_rows++] = parse_notes_row(ctx);
             }
             assert(n_rows > 0);

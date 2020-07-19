@@ -1,3 +1,14 @@
+#ifdef _MSC_VER
+#pragma warning(push, 0)
+#pragma warning(disable : 4706) // assignment within conditional expression
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Weverything"
+#endif
+
+#define IMGUI_USE_STB_SPRINTF
 #include "cimgui/imgui/imgui.cpp"
 #include "cimgui/imgui/imgui_demo.cpp"
 #include "cimgui/imgui/imgui_draw.cpp"
@@ -11,6 +22,14 @@
 #include "cimgui/cimplot.cpp"
 
 #include "cminacalc.cpp"
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 // ImPlot's zoom sucks??? So just hack away
 namespace ImPlot {

@@ -1,9 +1,19 @@
 Debug := 1
+Clang := 0
 Includes := -I$(CURDIR)\ettsrc
 
 ifeq ($(OS),Windows_NT)
 	NOpt := -Od -Ob1 -MTd -Zi
-	YOpt := -O2 -GL -Ob2 -MT
+	YOpt := -O2 -Ob2 -MT
+
+	ifeq ($(Clang), 1)
+		Compiler := clang-cl
+		YOpt += -flto -fuse-ld=lld
+		Includes += -I.
+	else
+		Compiler := cl
+		YOpt += -GL
+	endif
 
 	ifeq ($(Debug), 1)
 		OptimisationLevel := $(NOpt)
@@ -11,9 +21,9 @@ ifeq ($(OS),Windows_NT)
 		OptimisationLevel := $(YOpt)
 	endif
 
-	CompilerOptions := $(OptimisationLevel) $(Includes) -Fdbuild/ -Fobuild/ -Febuild/ -Oi -nologo -std:c++latest -fp:fast -EHsc
-	OurCodeOptions := -W4 -WX
-	ExternalCodeOptions := -w
+	CompilerOptions := $(OptimisationLevel) $(Includes) -Fdbuild/ -Fobuild/ -Febuild/ -Oi -nologo -EHsc -W4
+	COptions := -WX
+	CPPOptions := -std:c++17
 else
 	todo
 endif
@@ -27,9 +37,9 @@ build:
 	@mkdir build || true
 
 build/cpp.obj: *.h *.cpp Makefile
-	cl $(CompilerOptions) $(ExternalCodeOptions) -c cpp.cpp
+	$(Compiler) $(CompilerOptions) $(CPPOptions) -c cpp.cpp
 
 build/main.exe: *.h *.c build/cpp.obj Makefile
-	cl $(CompilerOptions) $(OurCodeOptions) main.c build/cpp.obj
+	$(Compiler) $(CompilerOptions) $(COptions) main.c build/cpp.obj
 
 .PHONY: all clean

@@ -29,3 +29,21 @@ typedef double f64;
 #define ALWAYS(X) ((X) ? 1 : (assert(0), 0))
 #define NEVER(X) ((X) ? (assert(0), 1) : 0)
 #endif
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4116) // unnamed type definition in parentheses
+#pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
+#pragma warning(disable : 4204) // nonstandard extension used: non-constant aggregate initializer
+#pragma warning(disable : 4221) // nonstandard extension used: cannot be initialized using address of automatic variable
+#pragma warning(disable : 4057) // 'initializing': 'char *' differs in indirection to slightly different base types from 'u8 *'
+#endif
+
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wpointer-sign"
+#pragma clang diagnostic ignored "-Wunused-function"
+#pragma clang diagnostic ignored "-Wunknown-pragmas"
+
+#ifdef __FAST_MATH__
+#warning -ffast-math breaks perfect parsing of sm files!!
+#endif
+#endif
