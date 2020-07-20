@@ -20,7 +20,7 @@ typedef intptr_t isize;
 typedef float f32;
 typedef double f64;
 
-#define array_length(arr) (sizeof(arr) / sizeof(arr[0]))
+#define array_length(arr) (isize)(sizeof(arr) / sizeof(arr[0]))
 
 #define assert_implies(pred, cond) assert(!(pred) || (cond))
 #define assert_unreachable() assert(!"Unreachable codepath hit")
@@ -36,6 +36,7 @@ typedef double f64;
 #pragma warning(disable : 4204) // nonstandard extension used: non-constant aggregate initializer
 #pragma warning(disable : 4221) // nonstandard extension used: cannot be initialized using address of automatic variable
 #pragma warning(disable : 4057) // 'initializing': 'char *' differs in indirection to slightly different base types from 'u8 *'
+#pragma warning(disable : 4709) // comma operator within array index expression
 #endif
 
 #ifdef __clang__

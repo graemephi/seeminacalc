@@ -62,7 +62,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
 
     SkillsetRatings default_ratings = {};
     calc_go(calc, &info->defaults, note_data, 1.0f, 0.93f, &default_ratings);
-    for (i32 r = 0; r < NumSkillsetRatings; r++) {
+    for (i32 r = 0; r < NumSkillsets; r++) {
         default_ratings.E[r] = rating_floor(default_ratings.E[r]);
     }
 
@@ -73,7 +73,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
     params_set.params = params;
     params_set.num_params = num_params;
 
-    b8 changed[NumSkillsetRatings] = {};
+    b8 changed[NumSkillsets] = {};
 
     SkillsetRatings ratings = {};
     for (int i = 0; i < num_params; i++) {
@@ -89,7 +89,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
 
             calc_go(calc, &params_set, note_data, 1.0f, 0.93f, &ratings);
 
-            for (int r = 0; r < NumSkillsetRatings; r++) {
+            for (int r = 0; r < NumSkillsets; r++) {
                 b32 changed = rating_floor(ratings.E[r]) != default_ratings.E[r];
                 masks->strong[i] |= (changed << r);
             }
@@ -111,7 +111,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
             calc_go(calc, &params_set, note_data, 1.0f, 0.93f, &ratings);
 
             masks->weak[i] = masks->strong[i];
-            for (i32 r = 0; r < NumSkillsetRatings; r++) {
+            for (i32 r = 0; r < NumSkillsets; r++) {
                 b32 changed = rating_floor(ratings.E[r]) != default_ratings.E[r];
                 masks->weak[i] |= (changed << r);
             }
@@ -292,7 +292,7 @@ void calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, f
     // memcpying every time, but it probably doesn't matter
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
-    for (int i = 0; i < NumSkillsetRatings; i++) {
+    for (int i = 0; i < NumSkillsets; i++) {
         out->E[i] = ratings[i];
     }
 }

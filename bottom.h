@@ -24,6 +24,13 @@
 #error ???
 #endif // _MSC_VER
 
+#include "stb_sprintf.h"
+#undef snprintf
+#define sprintf stbsp_sprintf
+#define snprintf stbsp_snprintf
+#define vsprintf stbsp_vsprintf
+#define vsnprintf stbsp_vsnprintf
+
 #include "common.h"
 
 // Really strike confidence in the reader at the top of the file.
@@ -49,9 +56,19 @@ static i32 clamp(i32 a, i32 b, i32 t)
     return clamp_low(a, clamp_high(b, t));
 }
 
-static f64 clamp_lowd(f64 a, f64 b)
+static f32 clamp_lowf(f32 a, f32 b)
 {
     return (a > b) ? a : b;
+}
+
+static f32 clamp_highf(f32 a, f32 b)
+{
+    return (a <= b) ? a : b;
+}
+
+static f32 lerp(f32 a, f32 b, f32 t)
+{
+    return a*(1.0f - t) + b*t;
 }
 
 typedef struct Stack Stack;
@@ -140,7 +157,7 @@ i32 buffer_printf(Buffer *buf, char *fmt, ...)
         return 0;
     }
     va_start(args, fmt);
-    buf->len += vsnprintf(buf->buf + buf->len, buf->cap - buf->len, fmt, args);
+    buf->len += vsnprintf(buf->buf + buf->len, (i32)(buf->cap - buf->len), fmt, args);
     va_end(args);
     assert(buf->len <= buf->cap);
     return len;
@@ -152,7 +169,7 @@ Buffer alloc_buffer(isize size)
 }
 
 // This is for development stuff and so doesn't need to handle errors properly!!
-Buffer read_file(char *path)
+Buffer read_file(const char *path)
 {
     FILE *f;
     i32 ok = fopen_s(&f, path, "rb");
@@ -198,7 +215,7 @@ typedef struct Buf
 } Buf;
 static_assert(alignof(Buf) == sizeof(usize), "Buf depends on it aligning to word size (lazy)");
 enum {
-    BufCookie = 0x1DEAL
+    BufCookie = 0xAC00C1E4U
 };
 
 force_inline Buf *buf_hdr(void *buf) { Buf *hdr = buf ? (Buf *)buf - 1 : 0; assert_implies(hdr, hdr->cookie == BufCookie); return hdr; }
@@ -207,18 +224,32 @@ force_inline isize buf_len(void *buf) { return ((buf) ? buf_hdr(buf)->len : 0); 
 force_inline isize buf_cap(void *buf) { return ((buf) ? buf_hdr(buf)->cap : 0); }
 force_inline void buf_clear(void *buf) { if (buf) buf_hdr(buf)->len = 0; }
 force_inline b32 buf_fits(void *buf, isize n) { return (buf_cap(buf) - buf_len(buf)) >= n; }
-#define buf_cap_bytes(buf) (buf_cap(buf) * sizeof((buf)[0]))
+#define buf_elem_size(buf) sizeof((buf)[0])
+#define buf_cap_bytes(buf) (buf_cap(buf) * buf_elem_size(buf))
 #define buf_end(buf) ((buf) + buf_len(buf))
 #define buf_last(buf) buf_end(buf)[-1]
-#define buf_fit(buf, n) ((buf) = buf_fit_(buf_hdr(buf), sizeof((buf)[0]), n))
-#define buf_push(buf, ...) (buf_fits((buf), 1) ? 0 : buf_fit((buf), 1), \
+#define buf_fit(buf, n) ((buf) = buf_fit_(buf_hdr(buf), buf_elem_size(buf), n))
+#define buf_maybe_fit(buf, n) (buf_fits((buf), (n)) ? 0 : buf_fit((buf), (n)))
+#define buf_push(buf, ...) (buf_maybe_fit(buf, 1), \
                            (buf)[buf_len(buf)] = (__VA_ARGS__), \
                            &(buf)[buf_hdr(buf)->len++])
+#define buf_pop(buf) (assert(buf_len(buf) > 0), (buf)[--buf_hdr(buf)->len])
 #define buf_make(...) buf_make_(buf_fit_(0, sizeof(__VA_ARGS__), 1), &(__VA_ARGS__), sizeof(__VA_ARGS__))
-#define buf_reserve(buf, n) (buf_fits((buf), n - buf_len(buf)) ? (buf) : buf_fit((buf), n - buf_len(buf)))
+#define buf_reserve(buf, n) (buf_fits((buf), (n) - buf_len(buf)) ? (buf) : buf_fit((buf), (n) - buf_len(buf)))
+
+#define buf_pushn(buf, n) (buf_maybe_fit((buf), (n)), buf_pushn_((buf), buf_elem_size(buf), (n)))
+force_inline
+void *buf_pushn_(void *buf, isize size, isize count)
+{
+    void *result = (u8 *)buf + buf_len(buf) * size;
+    buf_hdr(buf)->len += count;
+    memset(result, 0, size * count);
+    return result;
+}
 
 force_inline
-void *buf_make_(void *dest, void *src, size_t size) {
+void *buf_make_(void *dest, void *src, size_t size)
+{
     memcpy(dest, src, size);
     buf_hdr(dest)->len++;
     return dest;
@@ -229,9 +260,9 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
     assert(size < INTPTR_MAX / count);
 
     if (hdr == 0) {
-        hdr = alloc(Buf, 1);
+        hdr = stack_alloc(current_allocator, Buf, 1);
         isize cap = max(8, count);
-        alloc(u8, size * cap);
+        stack_alloc(current_allocator, u8, size * cap);
         memset(hdr + 1, 0, size * cap);
         hdr->alloc = current_allocator;
         hdr->len = 0;
@@ -285,12 +316,45 @@ i32 buf_printf_(char **buf_ref, char *fmt, ...)
     buf_reserve(buf, buf_len(buf) + len);
 
     va_start(args, fmt);
-    buf_hdr(buf)->len += vsnprintf(buf_end(buf), buf_cap(buf) - buf_len(buf), fmt, args);
+    buf_hdr(buf)->len += vsnprintf(buf_end(buf), (i32)(buf_cap(buf) - buf_len(buf)), fmt, args);
     va_end(args);
     assert(buf_len(buf) <= buf_cap(buf));
 
     *buf_ref = buf;
     return len;
+}
+
+#define buf_index_of(buf, elem) buf_index_of_(buf_hdr(buf), elem - buf)
+force_inline
+isize buf_index_of_(Buf *hdr, isize index)
+{
+    if (ALWAYS(hdr && index >= 0 && index <= hdr->len)) {
+        return index;
+    }
+
+    return -1;
+}
+
+#define buf_remove_unsorted_index(buf, index) buf_remove_unsorted_(buf_hdr(buf), buf_elem_size(buf), index)
+#define buf_remove_unsorted(buf, elem) buf_remove_unsorted_(buf_hdr(buf), buf_elem_size(buf), buf_index_of(buf, elem))
+force_inline
+void buf_remove_unsorted_(Buf *hdr, isize size, isize index)
+{
+    if (ALWAYS(hdr && index >= 0 && index < hdr->len)) {
+        memmove(hdr_buf(hdr) + index * size, hdr_buf(hdr) + (hdr->len - 1) * size, size);
+        hdr->len--;
+    }
+}
+
+#define buf_remove_sorted_index(buf, index) buf_remove_sorted_(buf_hdr(buf), buf_elem_size(buf), index)
+#define buf_remove_sorted(buf, elem) buf_remove_sorted_(buf_hdr(buf), buf_elem_size(buf), buf_index_of(buf, elem))
+force_inline
+void buf_remove_sorted_(Buf *hdr, isize size, isize index)
+{
+    if (ALWAYS(hdr && index >= 0 && index < hdr->len)) {
+        memmove(hdr_buf(hdr) + index * size, hdr_buf(hdr) + (index + 1) * size, (hdr->len - index - 1) * size);
+        hdr->len--;
+    }
 }
 
 typedef struct String

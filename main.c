@@ -79,6 +79,25 @@ Buffer get_steps_from_db(CacheDB *db, char *key)
     sqlite3_reset(db->note_data_stmt);
     return result;
 }
+#endif
+
+u64 rng()
+{
+    // wikipedia
+	static usize x = 1;
+	x ^= x >> 12;
+	x ^= x << 25;
+	x ^= x >> 27;
+	return x * 0x2545F4914F6CDD1DULL;
+}
+
+f32 rngf()
+{
+    u32 a = rng() & ((1 << 23) - 1);
+    return a / (f32)(1 << 23);
+}
+
+static const ImVec2 V2Zero = {0};
 
 bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
 static bool BeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
@@ -102,24 +121,68 @@ static bool ItemDoubleClicked(int button)
     return result;
 }
 
-typedef struct SimFileWindow
+static void tooltip(const char *fmt, ...)
+{
+    if (igIsItemHovered(0)) {
+        igBeginTooltip();
+        va_list args;
+        va_start(args, fmt);
+        igTextV(fmt, args);
+        va_end(args);
+        igEndTooltip();
+    }
+}
+
+typedef struct Fn
+{
+    f32 xs[1024];
+    f32 ys[1024];
+} Fn;
+
+typedef struct FnGraph FnGraph;
+struct FnGraph
+{
+    b32 active;
+    b32 is_param;
+    i32 param;
+    i32 len;
+
+    Fn absolute[NumSkillsets];
+    f32 min;
+    f32 max;
+
+    Fn relative[NumSkillsets];
+    f32 relative_min;
+};
+// 128KB
+
+typedef struct SimFileInfo
 {
     String title;
     String diff;
     String chartkey;
+    String title_author_ck;
 
     NoteData *notes;
     EffectMasks effects;
 
-    f32 *skillsets_over_wife[NumSkillsetRatings];
-    f32 *relative_skillsets_over_wife[NumSkillsetRatings];
+    f32 *skillsets_over_wife[NumSkillsets];
+    f32 *relative_skillsets_over_wife[NumSkillsets];
     f32 min_rating;
     f32 max_rating;
     f32 min_relative_rating;
     f32 max_relative_rating;
 
+    i32 *graphs;
+
+    bool selected_skillsets[NumSkillsets];
+
     bool open;
-} SimFileWindow;
+    u64 frame_last_focused;
+} SimFileInfo;
+
+static SimFileInfo null_sfi_ = {0};
+static SimFileInfo *const null_sfi = &null_sfi_;
 
 typedef struct State
 {
@@ -128,16 +191,57 @@ typedef struct State
 
     CalcInfo info;
     SeeCalc calc;
-    SimFileWindow sm;
-    ParamSet ps;
+    SimFileInfo *files;
+    SimFileInfo *active;
 
-    bool selected_skillsets[NumSkillsetRatings];
-    u32 skillset_colors[NumSkillsetRatings];
-    u32 skillset_colors_selectable[NumSkillsetRatings];
+    ParamSet ps;
+    bool *parameter_graphs_enabled;
+    i32 *param_graph_order;
+    FnGraph *graphs;
+    i32 *free_graphs;
+
+    u32 skillset_colors[NumSkillsets];
+    u32 skillset_colors_selectable[NumSkillsets];
+    bool selected_skillsets[NumSkillsets];
 
     int update_index;
+    i32 open_windows;
 } State;
-static State state;
+static State state = {0};
+
+i32 make_parameter_graph(i32 param)
+{
+    FnGraph *fg = 0;
+    if (buf_len(state.free_graphs) > 0) {
+        fg = &state.graphs[buf_pop(state.free_graphs)];
+    } else {
+        fg = buf_pushn(state.graphs, 1);
+    }
+    fg->active = true;
+    fg->is_param = true;
+    fg->param = param;
+    fg->len = state.info.params[param].integer ? (i32)state.info.params[param].max : 10;
+    fg->min = FLT_MAX;
+    fg->max = FLT_MIN;
+    fg->relative_min = FLT_MAX;
+    return (i32)buf_index_of(state.graphs, fg);
+}
+
+void free_parameter_graph(i32 handle)
+{
+    state.graphs[handle].active = false;
+    buf_push(state.free_graphs, handle);
+}
+
+void free_all_parameter_graphs(i32 handles[])
+{
+    for (i32 i = 0; i != buf_len(handles); i++) {
+        i32 handle = handles[i];
+        state.graphs[handle].active = false;
+        buf_push(state.free_graphs, handle);
+    }
+    buf_clear(handles);
+}
 
 ParamSet copy_param_set(ParamSet *ps)
 {
@@ -172,6 +276,8 @@ void init(void)
     ImGuiIO* io = igGetIO();
     ImFontAtlas_AddFontFromFileTTF(io->Fonts, "NotoSansCJKjp-Regular.otf", 16.0f, 0, ImFontAtlas_GetGlyphRangesJapanese(io->Fonts));
 
+    igPushStyleVarFloat(ImGuiStyleVar_ScrollbarSize, 4.f);
+
     {
         // Copy pasted from simgui_setup
         unsigned char* font_pixels;
@@ -200,74 +306,95 @@ void init(void)
 
     push_allocator(permanent_memory);
 
-    Buffer f = read_file("./The Lost Dedicated Life.sm");
-    SmFile sm = parse_sm(f);
-    String ck = generate_chart_key(&sm, 0); ck;
-
-    CacheDB db = cachedb_init(db_path);
-    Buffer cached = get_steps_from_db(&db, ck.buf);
-    // leak db
+    const char *files[] = {
+        "03 IMAGE -MATERIAL-(Version 0).sm",
+        "Grief & Malice.sm",
+        "Odin.sm",
+        "Skycoffin CT.sm",
+        "The Lost Dedicated Life.sm"
+    };
 
     state.info = calc_info();
     state.calc = calc_init(&state.info);
-    state.sm.title = S("-Image-Material- (V0)");
-    state.sm.diff = S("Challenge");
-    state.sm.chartkey = S("X9a609c6dd132d807b2abc5882338cb9ebbec320d");
-    state.sm.notes = frobble_serialized_note_data(cached.buf, cached.len);
-    buf_reserve(state.sm.effects.weak, state.info.num_params);
-    buf_reserve(state.sm.effects.strong, state.info.num_params);
-    // calculate_effects(&state.info, &state.calc, state.sm.notes, &state.sm.effects);
-
-    NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
-    NoteData *notes2 = frobble_note_data(ni, buf_len(ni));
-    SkillsetRatings ssr1;
-    calc_go(&state.calc, &state.info.defaults, state.sm.notes, 1.0f, .93f, &ssr1);
-    SkillsetRatings ssr2;
-    calc_go(&state.calc, &state.info.defaults, notes2, 1.0f, .93f, &ssr2);
     state.ps = copy_param_set(&state.info.defaults);
-    nddump(state.sm.notes, notes2);
+    buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
+    buf_reserve(state.graphs, 128);
 
-    state.sm.min_rating = 40;
-    state.sm.min_relative_rating = 2;
-    for (i32 i = 0; i < 19; i++) {
-        f32 goal = 0.82f + ((f32)i / 100.f);
-        ssxs[i] = goal * 100.f;
-        SkillsetRatings ssr;
-        calc_go(&state.calc, &state.info.defaults, state.sm.notes, 1.0f, goal, &ssr);
-        for (i32 r = 0; r < NumSkillsetRatings; r++) {
-            buf_push(state.sm.skillsets_over_wife[r], ssr.E[r]);
-            state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);
-            state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
+    for (isize i = 0; i < array_length(files); i++) {
+        Buffer f = read_file(files[i]);
+        SmFile sm = parse_sm(f);
+        String ck = generate_chart_key(&sm, 0);
+        NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
 
-            f32 relative_rating = ssr.E[r] / ssr.overall;
-            buf_push(state.sm.relative_skillsets_over_wife[r], relative_rating);
-            state.sm.min_relative_rating = min(relative_rating, state.sm.min_relative_rating);
-            state.sm.max_relative_rating = max(relative_rating, state.sm.max_relative_rating);
+        String title = sm_tag_copy(&sm, Tag_Title);
+        String author = sm_tag_inplace(&sm, Tag_Credit);
+        String title_author_ck = { .len = title.len + author.len + ck.len + 6 };
+        buf_reserve(title_author_ck.buf, title_author_ck.len);
+        snprintf(title_author_ck.buf, (i32)title_author_ck.len, "%.*s (%.*s)##%.*s",
+            (i32)title.len, title.buf,
+            (i32)author.len, author.buf,
+            (i32)ck.len, ck.buf
+        );
+
+        SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
+            .title = title,
+            .diff = DifficultyStrings[sm.diffs[0].diff],
+            .chartkey = ck,
+            .title_author_ck = title_author_ck,
+            .notes = frobble_note_data(ni, buf_len(ni))
+        });
+
+        buf_reserve(sfi->effects.weak, state.info.num_params);
+        buf_reserve(sfi->effects.strong, state.info.num_params);
+        // calculate_effects(&state.info, &state.calc, sfi->notes, &sfi->effects);
+
+        sfi->min_rating = 40;
+        sfi->min_relative_rating = 2;
+        for (i32 x = 0; x < 19; x++) {
+            f32 goal = 0.82f + ((f32)x / 100.f);
+            ssxs[x] = goal * 100.f;
+            SkillsetRatings ssr;
+            calc_go(&state.calc, &state.info.defaults, sfi->notes, 1.0f, goal, &ssr);
+            for (i32 r = 0; r < NumSkillsets; r++) {
+                buf_push(sfi->skillsets_over_wife[r], ssr.E[r]);
+                sfi->min_rating = min(ssr.E[r], sfi->min_rating);
+                sfi->max_rating = max(ssr.E[r], sfi->max_rating);
+
+                f32 relative_rating = ssr.E[r] / ssr.overall;
+                buf_push(sfi->relative_skillsets_over_wife[r], relative_rating);
+                sfi->min_relative_rating = min(relative_rating, sfi->min_relative_rating);
+                sfi->max_relative_rating = max(relative_rating, sfi->max_relative_rating);
+            }
+        }
+
+        for (isize ss = 1; ss < NumSkillsets; ss++) {
+            sfi->selected_skillsets[ss] = (0.9 <= (sfi->skillsets_over_wife[ss][18] / sfi->skillsets_over_wife[0][18]));
+        }
+        for (i32 ss = 0; ss < NumSkillsets; ss++) {
+            ImVec4 c = GetColormapColor(ss);
+            state.skillset_colors[ss] = igColorConvertFloat4ToU32(c);
+            c.w *= 0.75;
+            state.skillset_colors_selectable[ss] = igColorConvertFloat4ToU32(c);
         }
     }
 
-    for (isize i = 1; i < NumSkillsetRatings; i++) {
-        state.selected_skillsets[i] = (0.9 <= (state.sm.skillsets_over_wife[i][18] / state.sm.skillsets_over_wife[0][18]));
-    }
-    for (isize i = 0; i < NumSkillsetRatings; i++) {
-        ImVec4 c = GetColormapColor(i);
-        state.skillset_colors[i] = igColorConvertFloat4ToU32(c);
-        c.w *= 0.75;
-        state.skillset_colors_selectable[i] = igColorConvertFloat4ToU32(c);
-    }
+    *null_sfi = (SimFileInfo) {
+        .title_author_ck = S("nullck"),
+    };
+
+    state.active = null_sfi;
 
     pop_allocator();
 }
 
-static void param_slider_widget(i32 param_idx)
+static i32 param_slider_widget(i32 param_idx)
 {
+    b32 toggled = false;
     i32 mp = param_idx;
     igPushIDInt(mp);
-    if (igButton("      ##reset", (ImVec2) {0})) {
-        state.ps.params[mp] = state.info.defaults.params[mp];
-        state.ps.min[mp] = state.info.defaults.min[mp];
-        state.ps.max[mp] = state.info.defaults.max[mp];
-    }
+    if (igCheckbox("##graph", &state.parameter_graphs_enabled[mp])) {
+        toggled = true;
+    } tooltip("graph this parameter");
     igSameLine(0, 4);
     if (state.info.params[mp].integer) {
         i32 value = (i32)state.ps.params[mp];
@@ -279,25 +406,39 @@ static void param_slider_widget(i32 param_idx)
         f32 speed = (state.ps.max[mp] - state.ps.min[mp]) / 100.f;
         char slider_id[32];
         snprintf(slider_id, sizeof(slider_id), "##slider%d", mp);
+        igSetNextItemWidth(igGetFontSize() * 10.0f);
         igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f);
         if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
         }
         igSameLine(0, 4);
-        igPushItemWidth(igGetFontSize() * 4.0f);
+        igSetNextItemWidth(igGetFontSize() * 4.0f);
         igDragFloatRange2("##range",  &state.ps.min[mp], &state.ps.max[mp], speed, -100.0f, 100.0f, "%.1f", "%.1f", 1.0f);
-        igPopItemWidth();
+        tooltip("min/max override (the defaults are guesses)");
+        if (ItemDoubleClicked(0)) {
+            ImVec2 l, u;
+            igGetItemRectMin(&l);
+            igGetItemRectMax(&u);
+            u.x = l.x + (u.x - l.x) * 0.5f;;
+            b32 left = igIsMouseHoveringRect(l, u, true);
+            if (left) {
+                state.ps.min[mp] = state.info.defaults.min[mp];
+            } else {
+                state.ps.max[mp] = state.info.defaults.max[mp];
+            }
+        }
         igSameLine(0, 0);
         igText(state.info.params[mp].name);
     }
     igPopID();
+    return toggled;
 }
 
 static void skillset_line_plot(i32 ss, b32 highlight, f32 *xs, f32 *ys, i32 count)
 {
     // Recreate highlighting cause ImPlot doesn't let you tell it to highlight lines
     if (highlight) {
-        ipPushStyleVarFloat(ImPlotStyleVar_LineWeight,  ipGetStyle()->LineWeight * 2.0f);
+        ipPushStyleVarFloat(ImPlotStyleVar_LineWeight, ipGetStyle()->LineWeight * 2.0f);
     }
 
     ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[ss]);
@@ -318,16 +459,81 @@ void frame(void)
 
     igShowDemoWindow(0);
 
-    bool ss_highlight[NumSkillsetRatings] = {0};
+    bool ss_highlight[NumSkillsets] = {0};
+    SimFileInfo *next_active = 0;
 
-    igSetNextWindowSize((ImVec2) { 600, 0 }, ImGuiCond_Once);
-    if (igBegin("Mod Parameters", 0, ImGuiWindowFlags_None)) {
-        u32 mask = 0;
-        i32 clear_selections_to = -1;
-        for (isize i = 0; i < NumSkillsetRatings; i++) {
+    ImGuiIO *io = igGetIO();
+
+    ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus;
+
+    igSetNextWindowPos((ImVec2) { io->DisplaySize.x - 399.0f, 0.0f }, ImGuiCond_Always, V2Zero);
+    igSetNextWindowSize((ImVec2) { 400.0f, io->DisplaySize.y }, ImGuiCond_Always);
+    if (igBegin("Files", 0, fixed_window)) {
+        // Header
+        igSameLine(igGetWindowWidth() - 36.0f, 4);
+        b32 skillsets = false;
+        igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);
+        igPushStyleColorU32(ImGuiCol_HeaderActive, 0);
+        if (igTreeNodeExStr("##skillsets toggle", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+            skillsets = true;
+        } tooltip("Skillsets");
+        igPopStyleColor(2);
+        igSeparator();
+
+        // Open file list
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            igText("%2.2f", sfi->skillsets_over_wife[0][13]); igSameLine(0, 7.0f);
+            tooltip("Overall at AA");
+            igText("%2.2f", sfi->skillsets_over_wife[0][18]); igSameLine(0, 7.0f);
+            tooltip("Overall at max scaling");
+            igPushIDStr(sfi->title_author_ck.buf);
+            if (igSelectableBool(sfi->title_author_ck.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+                if (sfi->open) {
+                    sfi->open = false;
+                } else {
+                    sfi->open = true;
+                    next_active = sfi;
+                }
+            }
+            if (skillsets) {
+                for (isize ss = 0; ss < NumSkillsets; ss++) {
+                    char r[32] = {0};
+                    snprintf(r, sizeof(r), "%2.2f##%d", sfi->skillsets_over_wife[ss][13], (i32)ss);
+                    igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
+                    igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
+                    igSelectableBool(r, sfi->selected_skillsets[ss], ImGuiSelectableFlags_None, (ImVec2) { 300.0f / NumSkillsets, 0 });
+                    tooltip("%s at AA", SkillsetNames[ss]);
+                    if (igIsItemHovered(0)) {
+                        ss_highlight[ss] = 1;
+                    }
+                    igPopStyleColor(2);
+                    igSameLine(0, 4);
+                    igDummy((ImVec2){4,0});
+                    igSameLine(0, 4);
+                }
+                igNewLine();
+            }
+            igPopID();
+            igSeparator();
+        }
+    }
+    igEnd();
+
+    SimFileInfo *active = state.active;
+    i32 param_toggled = -1;
+
+    igSetNextWindowPos((ImVec2) { 0, 0 }, ImGuiCond_Always,  V2Zero);
+    igSetNextWindowSize((ImVec2) { 450.0f, io->DisplaySize.y }, ImGuiCond_Always);
+    if (igBegin("Mod Parameters", 0, fixed_window)) {
+        u32 effect_mask = 0;
+        isize clear_selections_to = -1;
+        igPushIDStr(active->title_author_ck.buf);
+        // Skillset filters
+        f32 selectable_width_factor = 4.0f;
+        for (isize i = 0; i < NumSkillsets; i++) {
             igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[i]);
             igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[i]);
-            igSelectableBoolPtr(SkillsetNames[i], &state.selected_skillsets[i], 0, (ImVec2){ 500.0f / NumSkillsetRatings, 0});
+            igSelectableBoolPtr(SkillsetNames[i], &active->selected_skillsets[i], 0, (ImVec2){ (igGetWindowWidth() - 10.f)  / selectable_width_factor, 0});
             igPopStyleColor(2);
             if (ItemDoubleClicked(0)) {
                 clear_selections_to = i;
@@ -335,115 +541,256 @@ void frame(void)
             if (igIsItemHovered(0)) {
                 ss_highlight[i] = 1;
             }
-            igSameLine(0, 4);
-            igDummy((ImVec2){4,0});
-            igSameLine(0, 4);
-            mask |= (state.selected_skillsets[i] << i);
+            if (i != 4) {
+                igSameLine(0, 4);
+                igDummy((ImVec2){0, 4});
+                igSameLine(0, 4);
+            } else {
+
+                selectable_width_factor = 3.0f;
+            }
+            effect_mask |= (active->selected_skillsets[i] << i);
         }
+        igPopID();
         if (clear_selections_to >= 0) {
-            memset(state.selected_skillsets, 0, sizeof(state.selected_skillsets));
-            state.selected_skillsets[clear_selections_to] = 1;
+            memset(active->selected_skillsets, 0, sizeof(active->selected_skillsets));
+            active->selected_skillsets[clear_selections_to] = 1;
         }
         igNewLine();
 
-        if (igBeginTabBar("MyTabBar", ImGuiTabBarFlags_None))
-        {
-            if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None))
-            {
+        // Tabs for param strength filters
+        if (igBeginTabBar("FilterTabs", ImGuiTabBarFlags_NoTooltip)) {
+            if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
-                            if ((state.sm.effects.strong[mp] & mask) != 0) {
-                                param_slider_widget(mp);
+                            if (active->effects.strong == 0 || (active->effects.strong[mp] & effect_mask) != 0) {
+                                if (param_slider_widget(mp)) {
+                                    param_toggled = mp;
+                                }
                             }
                         }
                         igTreePop();
                     }
                 }
                 igEndTabItem();
-            }
-            if (igBeginTabItem("Less Relevant", 0, ImGuiTabItemFlags_None))
-            {
+            } tooltip("These will basically always change the MSD of the active file's selected skillsets");
+            if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
-                            if ((state.sm.effects.weak[mp] & mask) != 0) {
-                                param_slider_widget(mp);
+                            if (active->effects.weak == 0 || (active->effects.weak[mp] & effect_mask) != 0) {
+                                if (param_slider_widget(mp)) {
+                                    param_toggled = mp;
+                                }
                             }
                         }
                         igTreePop();
                     }
                 }
                 igEndTabItem();
-            }
-            if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None))
-            {
+            } tooltip("More, plus some params that need more shoving");
+            if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
-                            param_slider_widget(mp);
+                            if (param_slider_widget(mp)) {
+                                param_toggled = mp;
+                            }
                         }
                         igTreePop();
                     }
                 }
                 igEndTabItem();
-            }
+            } tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
+            if (igBeginTabItem("Dead", 0, ImGuiTabItemFlags_None)) {
+                for (i32 i = 0; i < state.info.num_mods; i++) {
+                    if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
+                        for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
+                            i32 mp = state.info.mods[i].index + j;
+                            if (active->effects.weak && (active->effects.weak[mp] & effect_mask) == 0) {
+                                if (param_slider_widget(mp)) {
+                                    param_toggled = mp;
+                                }
+                            }
+                        }
+                        igTreePop();
+                    }
+                }
+                igEndTabItem();
+            } tooltip("These don't do anything to the active file's selected skillsets");
         }
         igEndTabBar();
     }
     igEnd();
 
-    if (igBegin(state.sm.title.buf, &state.sm.open, ImGuiWindowFlags_None)) {
-        igText(state.sm.diff.buf);
-        igSameLine(clamp_lowd(igGetWindowWidth() - 268, 100), 0);
-        igText(state.sm.chartkey.buf);
+    // MSD graph windows
+    i32 open_windows = 0;
+    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+        if (sfi->open) {
+            if (state.open_windows == 0) {
+                igSetNextWindowPos((ImVec2) { 450.0f, 0 }, ImGuiCond_Always, V2Zero);
+                igSetNextWindowSize((ImVec2) { io->DisplaySize.x - 850.0f, io->DisplaySize.y }, ImGuiCond_Always);
+            } else {
+                ImVec2 sz = (ImVec2) {750.0f, clamp_highf(io->DisplaySize.y, io->DisplaySize.y * 0.33f * (buf_len(sfi->graphs) + 1)) };
+                ImVec2 pos = (ImVec2) { rngf() * (io->DisplaySize.x - sz.x), rngf() * (io->DisplaySize.y - sz.y) };
+                igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
+                igSetNextWindowSize(sz, ImGuiCond_Appearing);
+            }
+            if (igBegin(sfi->title_author_ck.buf, &sfi->open, ImGuiWindowFlags_None)) {
+                if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+                    next_active = sfi;
+                }
+                igText(sfi->diff.buf);
+                igSameLine(clamp_lowf(igGetWindowWidth() - 268.f, 100), 0);
+                igText(sfi->chartkey.buf);
 
-        ipSetNextPlotLimits(82, 100, state.sm.min_rating - 1.f, state.sm.max_rating + 2.f, ImGuiCond_Once);
-        if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
-            for (i32 r = 0; r < NumSkillsetRatings; r++) {
-                skillset_line_plot(r, ss_highlight[r], ssxs, state.sm.skillsets_over_wife[r], 19);
+                ipSetNextPlotLimits(82, 100, sfi->min_rating - 1.f, sfi->max_rating + 2.f, ImGuiCond_Once);
+                if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
+                    for (i32 r = 0; r < NumSkillsets; r++) {
+                        skillset_line_plot(r, ss_highlight[r], ssxs, sfi->skillsets_over_wife[r], 19);
+                    }
+                    ipEndPlot();
+                }
+                igSameLine(0, 4);
+                ipSetNextPlotLimits(82, 100, sfi->min_relative_rating - 0.05f, sfi->max_relative_rating + 0.05f, ImGuiCond_Once);
+                if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
+                    for (i32 r = 1; r < NumSkillsets; r++) {
+                        skillset_line_plot(r, ss_highlight[r], ssxs, sfi->relative_skillsets_over_wife[r], 19);
+                    }
+                    ipEndPlot();
+                }
+
+                for (i32 fgi = (i32)buf_len(sfi->graphs) - 1; fgi >= 0; fgi--) {
+                    FnGraph *fg = &state.graphs[sfi->graphs[fgi]];
+                    i32 mp = fg->param;
+                    ParamInfo *p = &state.info.params[mp];
+                    if (fg->max == FLT_MIN) {
+                        break;
+                    }
+                    u8 full_name[64] = {0};
+                    snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
+                    igPushIDStr(full_name);
+                    ipSetNextPlotLimits(state.ps.min[mp], state.ps.max[mp], fg->min - 1.f, fg->max + 2.f, ImGuiCond_Once);
+                    if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
+                        for (i32 r = 0; r < NumSkillsets; r++) {
+                            skillset_line_plot(r, ss_highlight[r], fg->absolute[r].xs, fg->absolute[r].ys, fg->len);
+                        }
+                        ipEndPlot();
+                    }
+                    igSameLine(0, 4);
+                    ipSetNextPlotLimits(state.ps.min[mp], state.ps.max[mp], fg->relative_min - 0.05f, 1.05f, ImGuiCond_Once);
+                    if (BeginPlotDefaults("##Relative AA", full_name, 0)) {
+                        for (i32 r = 1; r < NumSkillsets; r++) {
+                            skillset_line_plot(r, ss_highlight[r], fg->relative[r].xs, fg->relative[r].ys, fg->len);
+                        }
+                        ipEndPlot();
+                    }
+                    igPopID();
+                }
             }
-            ipEndPlot();
-        }
-        igSameLine(0, 4);
-        ipSetNextPlotLimits(82, 100, state.sm.min_relative_rating - 0.05f, state.sm.max_relative_rating + 0.05f, ImGuiCond_Once);
-        if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
-            for (i32 r = 1; r < NumSkillsetRatings; r++) {
-                skillset_line_plot(r, ss_highlight[r], ssxs, state.sm.relative_skillsets_over_wife[r], 19);
-            }
-            ipEndPlot();
+            igEnd();
+            open_windows++;
         }
     }
-    igEnd();
+    state.open_windows = open_windows;
 
     sg_begin_default_pass(&state.pass_action, width, height);
     simgui_render();
     sg_end_pass();
     sg_commit();
 
-    for (i32 i = state.update_index; i < state.update_index + 1; i++) {
-        f32 goal = 0.82f + ((f32)i / 100.f);
-        ssxs[i] = goal * 100.f;
-        SkillsetRatings ssr;
-        calc_go(&state.calc, &state.ps, state.sm.notes, 1.0f, goal, &ssr);
-        for (i32 r = 0; r < NumSkillsetRatings; r++) {
-            state.sm.skillsets_over_wife[r][i] = ssr.E[r];
-            state.sm.min_rating = min(ssr.E[r], state.sm.min_rating);
-            state.sm.max_rating = max(ssr.E[r], state.sm.max_rating);
-
-            f32 relative_rating = ssr.E[r] / ssr.overall;
-            state.sm.relative_skillsets_over_wife[r][i] = relative_rating;
-            state.sm.min_relative_rating = min(relative_rating, state.sm.min_relative_rating);
-            state.sm.max_relative_rating = max(relative_rating, state.sm.max_relative_rating);
+    if (active->open == false) {
+        next_active = null_sfi;
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            if (sfi->open && sfi->frame_last_focused >= next_active->frame_last_focused) {
+                next_active = sfi;
+            }
+        }
+        if (next_active == null_sfi) {
+            next_active = 0;
         }
     }
-    state.update_index += 1;
-    if (state.update_index >= 19) {
-        state.update_index = 0;
+
+    if (next_active) {
+        assert(next_active->open);
+        next_active->frame_last_focused = _sapp.frame_count;
+        state.active = next_active;
     }
+
+    if (param_toggled != -1) {
+        if (state.parameter_graphs_enabled[param_toggled]) {
+            buf_push(state.param_graph_order, param_toggled);
+            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                buf_push(sfi->graphs, make_parameter_graph(param_toggled));
+            }
+        } else {
+            for (isize i = 0; i < buf_len(state.param_graph_order); i++) {
+                if (state.param_graph_order[i] == param_toggled) {
+                    buf_remove_sorted_index(state.param_graph_order, i);
+                    break;
+                }
+            }
+
+            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                for (isize i = 0; i != buf_len(sfi->graphs); i++) {
+                    if (state.graphs[sfi->graphs[i]].param == param_toggled) {
+                        free_parameter_graph(sfi->graphs[i]);
+                        buf_remove_sorted_index(sfi->graphs, i);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+        if (sfi->open) {
+            i32 goal_index = state.update_index % 19;
+            f32 goal = 0.82f + ((f32)goal_index / 100.f);
+            ssxs[goal_index] = goal * 100.f;
+            SkillsetRatings ssr;
+            calc_go(&state.calc, &state.ps, sfi->notes, 1.0f, goal, &ssr);
+            for (i32 r = 0; r < NumSkillsets; r++) {
+                sfi->skillsets_over_wife[r][goal_index] = ssr.E[r];
+                sfi->min_rating = min(ssr.E[r], sfi->min_rating);
+                sfi->max_rating = max(ssr.E[r], sfi->max_rating);
+
+                f32 relative_rating = ssr.E[r] / ssr.overall;
+                sfi->relative_skillsets_over_wife[r][goal_index] = relative_rating;
+                sfi->min_relative_rating = min(relative_rating, sfi->min_relative_rating);
+                sfi->max_relative_rating = max(relative_rating, sfi->max_relative_rating);
+            }
+
+            for (isize i = 0; i != buf_len(sfi->graphs); i++) {
+                FnGraph *fg = &state.graphs[sfi->graphs[i]];
+                assert(fg->active);
+                i32 x_index = state.update_index % 10;
+
+                f32 current = state.ps.params[fg->param];
+                state.ps.params[fg->param] = lerp(state.ps.min[fg->param], state.ps.max[fg->param], (f32)x_index / 9.0f);
+                calc_go(&state.calc, &state.ps, sfi->notes, 1.0f, 0.93f, &ssr);
+                state.ps.params[fg->param] = current;
+                for (i32 r = 0; r < NumSkillsets; r++) {
+                    for (isize x = 0; x < 10; x++) {
+                        fg->absolute[r].xs[x] = lerp(state.ps.min[fg->param], state.ps.max[fg->param], (f32)x / 9.0f);
+                        fg->relative[r].xs[x] = lerp(state.ps.min[fg->param], state.ps.max[fg->param], (f32)x / 9.0f);
+                    }
+                    fg->absolute[r].ys[x_index] = ssr.E[r];
+                    fg->min = min(ssr.E[r], fg->min);
+                    fg->max = max(ssr.E[r], fg->max);
+
+                    f32 relative_rating = ssr.E[r] / ssr.overall;
+                    fg->relative[r].ys[x_index] = relative_rating;
+                    fg->relative_min = min(relative_rating, fg->relative_min);
+                }
+            }
+        }
+    }
+    state.update_index++;
 }
 
 void cleanup(void)
@@ -466,15 +813,13 @@ sapp_desc sokol_main(int argc, char* argv[])
         exit(1);
     }
 
-    db_path = argv[1];
-
     return (sapp_desc) {
         .init_cb = init,
         .frame_cb = frame,
         .cleanup_cb = cleanup,
         .event_cb = input,
-        .width = 1024,
-        .height = 768,
+        .width = 1920,
+        .height = 1080,
         .sample_count = 8,
         .gl_force_gles2 = true,
         .window_title = "SeeMinaCalc",

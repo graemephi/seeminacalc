@@ -1,4 +1,10 @@
 Debug := 1
+
+ifdef Release
+Debug := 0
+Force := *
+endif
+
 Clang := 0
 Includes := -I$(CURDIR)\ettsrc
 
@@ -42,4 +48,4 @@ build/cpp.obj: *.h *.cpp Makefile
 build/main.exe: *.h *.c build/cpp.obj Makefile
 	$(Compiler) $(CompilerOptions) $(COptions) main.c build/cpp.obj
 
-.PHONY: all clean
+.PHONY: all clean $(Force)

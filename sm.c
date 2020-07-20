@@ -1,3 +1,23 @@
+static String sm_tag_copy(SmFile *sm, SmTag t)
+{
+    assert(t >= 0 && t <= TagCount);
+    SmString s = sm->tags[t];
+    String result = { .len = s.len };
+    buf_reserve(result.buf, s.len + 1);
+    memcpy(result.buf, &sm->sm.buf[s.index], s.len);
+    result.buf[s.len] = 0;
+    return result;
+}
+
+static String sm_tag_inplace(SmFile *sm, SmTag t)
+{
+    SmString s = sm->tags[t];
+    return (String) {
+        .buf = &sm->sm.buf[s.index],
+        .len = s.len
+    };
+}
+
 static void die(SmParser *ctx)
 {
     i32 current_line = 1;
@@ -34,7 +54,8 @@ static void consume_whitespace(SmParser *ctx)
         [' '] = 1,
         ['\r'] = 1,
         ['\n'] = 1,
-        ['\t'] = 1
+        ['\t'] = 1,
+        ['\f'] = 1
     };
 
     char *p = ctx->p;
@@ -116,15 +137,15 @@ static f32 parse_f32(SmParser *ctx)
 }
 
 static const u8 SmFileNote[256] = {
-    ['0'] = NoteOff,
-    ['1'] = NoteOn,
-    ['2'] = NoteHoldStart,
-    ['3'] = NoteHoldEnd,
-    ['4'] = NoteRollEnd,
-    ['M'] = NoteMine,
-    ['K'] = NoteOff,
-    ['L'] = NoteLift,
-    ['F'] = NoteFake,
+    ['0'] = Note_Off,
+    ['1'] = Note_On,
+    ['2'] = Note_HoldStart,
+    ['3'] = Note_HoldEnd,
+    ['4'] = Note_RollEnd,
+    ['M'] = Note_Mine,
+    ['K'] = Note_Off,
+    ['L'] = Note_Lift,
+    ['F'] = Note_Fake,
 };
 
 static const u8 SmFileNoteValid[256] = {
@@ -363,7 +384,7 @@ static u8 row_to_snap(i32 numer, i32 denom)
 
 static b8 row_has_tap(SmRow r)
 {
-    u32 mask = (NoteTap << 24) + (NoteTap << 16) + (NoteTap << 8) + NoteTap;
+    u32 mask = (Note_Tap << 24) + (Note_Tap << 16) + (Note_Tap << 8) + Note_Tap;
     return (r.cccc & mask) != 0;
 }
 
@@ -421,10 +442,10 @@ static f32 mina_row_time(MinaRowTimeGarbage *g, BPMChange *bpms, f32 row)
 
 static b32 row_has_roll(SmFileRow r)
 {
-    return (r.columns[0] == NoteRollEnd)
-        || (r.columns[1] == NoteRollEnd)
-        || (r.columns[2] == NoteRollEnd)
-        || (r.columns[3] == NoteRollEnd);
+    return (r.columns[0] == Note_RollEnd)
+        || (r.columns[1] == Note_RollEnd)
+        || (r.columns[2] == Note_RollEnd)
+        || (r.columns[3] == Note_RollEnd);
 }
 
 static SmFile parse_sm(Buffer data)
@@ -436,8 +457,6 @@ static SmFile parse_sm(Buffer data)
 
     SmStop *stops = 0;
     b32 negBPMsexclamationmark = false;
-
-    f32 *mina_garbage_last_nerv = 0;
 
     SmTagValue tag = {0};
     while (try_advance_to_and_parse_tag(ctx, &tag)) {
@@ -639,7 +658,7 @@ static SmFile parse_sm(Buffer data)
                         .cccc = file_rows[i].cccc
                     });
 
-                    result.risky.rolls = row_has_roll(file_rows[i]);
+                    result.risky.rolls = (b8)row_has_roll(file_rows[i]);
                 }
 
                 row += row_inc;
@@ -654,7 +673,7 @@ static SmFile parse_sm(Buffer data)
 
                     if (bpm[1].row == FLT_MAX) {
                         last_segment_g = g;
-                        last_segment_g.first_row_of_last_segment = buf_len(rows);
+                        last_segment_g.first_row_of_last_segment = (i32)buf_len(rows);
                     }
                 }
             }
@@ -705,13 +724,13 @@ typedef union MinaSerializedRow
 static MinaSerializedRow row_mina_serialize(SmRow r)
 {
     static u8 tap_note_type[256] = {
-	    [NoteOff] = 0,
-	    [NoteOn] = 1,
-	    [NoteHoldStart] = 2,
-	    [NoteRollEnd] = 2, // wtf?
-	    [NoteMine] = 4,
-	    [NoteLift] = 5,
-	    [NoteFake] = 7,
+	    [Note_Off] = 0,
+	    [Note_On] = 1,
+	    [Note_HoldStart] = 2,
+	    [Note_RollEnd] = 2,
+	    [Note_Mine] = 4,
+	    [Note_Lift] = 5,
+	    [Note_Fake] = 7,
     };
     MinaSerializedRow result = {0};
     result.taps[0] = tap_note_type[r.columns[0]];
@@ -723,10 +742,10 @@ static MinaSerializedRow row_mina_serialize(SmRow r)
 
 static u32 mina_row_bits(SmRow r)
 {
-    return ((u32)((r.columns[0] & (NoteTap|NoteRollEnd)) != 0) << 0)  // left
-         + ((u32)((r.columns[1] & (NoteTap|NoteRollEnd)) != 0) << 1)  // left
-         + ((u32)((r.columns[2] & (NoteTap|NoteRollEnd)) != 0) << 2)  // right
-         + ((u32)((r.columns[3] & (NoteTap|NoteRollEnd)) != 0) << 3); // right
+    return ((u32)((r.columns[0] & (Note_Tap|Note_RollEnd)) != 0) << 0)  // left
+         + ((u32)((r.columns[1] & (Note_Tap|Note_RollEnd)) != 0) << 1)  // left
+         + ((u32)((r.columns[2] & (Note_Tap|Note_RollEnd)) != 0) << 2)  // right
+         + ((u32)((r.columns[3] & (Note_Tap|Note_RollEnd)) != 0) << 3); // right
 }
 
 #pragma float_control(precise, on, push)

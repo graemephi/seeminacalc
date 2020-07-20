@@ -131,14 +131,14 @@ typedef union SmFileRow
 
 enum
 {
-    NoteOff = 0,
-    NoteOn = 1,
-    NoteMine = 2,
-    NoteHoldStart = 4,
-    NoteHoldEnd = 8,
-    NoteRollEnd = 16,
-    NoteLift = 32,
-    NoteFake = 64,
+    Note_Off = 0,
+    Note_On = 1,
+    Note_Mine = 2,
+    Note_HoldStart = 4,
+    Note_HoldEnd = 8,
+    Note_RollEnd = 16,
+    Note_Lift = 32,
+    Note_Fake = 64,
 
-    NoteTap = NoteOn | NoteHoldStart
+    Note_Tap = Note_On | Note_HoldStart
 };

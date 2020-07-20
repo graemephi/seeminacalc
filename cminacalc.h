@@ -10,7 +10,7 @@ typedef struct Calc Calc;
 #endif
 
 enum {
-    NumSkillsetRatings = 8
+    NumSkillsets = 8
 };
 
 typedef union SkillsetRatings
@@ -25,9 +25,9 @@ typedef union SkillsetRatings
         float chordjacks;
         float technical;
     };
-    float E[NumSkillsetRatings];
+    float E[NumSkillsets];
 } SkillsetRatings;
-static_assert(sizeof(SkillsetRatings) == (NumSkillsetRatings * sizeof(float)), "size mismatch");
+static_assert(sizeof(SkillsetRatings) == (NumSkillsets * sizeof(float)), "size mismatch");
 
 const char *SkillsetNames[] = {
     "Overall",
@@ -39,7 +39,7 @@ const char *SkillsetNames[] = {
     "Chordjacks",
     "Technical",
 };
-static_assert(sizeof(SkillsetNames) == (NumSkillsetRatings * sizeof(const char *)), "size mismatch");
+static_assert(sizeof(SkillsetNames) == (NumSkillsets * sizeof(const char *)), "size mismatch");
 
 #ifndef __NDSTRUCTS__
 typedef struct NoteInfo
@@ -88,8 +88,8 @@ typedef struct SeeCalc
 typedef struct CalcInfo
 {
     int version;
-    size_t num_mods;
-    size_t num_params;
+    ptrdiff_t num_mods;
+    ptrdiff_t num_params;
     ModInfo *mods;
     ParamInfo *params;
     ParamSet defaults;
