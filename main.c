@@ -188,6 +188,11 @@ static void tooltip(const char *fmt, ...)
     }
 }
 
+static ImVec2 V2(f32 x, f32 y)
+{
+    return (ImVec2) { x, y };
+}
+
 typedef struct Fn
 {
     f32 xs[1024];
@@ -260,7 +265,7 @@ typedef struct State
     u32 skillset_colors_selectable[NumSkillsets];
 
     int update_index;
-    i32 open_windows;
+    i32 num_open_windows;
     b32 parameters_shown_last_frame;
 } State;
 static State state = {0};
@@ -415,6 +420,7 @@ void init(void)
 
     igPushStyleVarFloat(ImGuiStyleVar_ScrollbarSize, 4.f);
     igPushStyleVarFloat(ImGuiStyleVar_WindowRounding, 1.0f);
+    igPushStyleVarVec2(ImGuiStyleVar_FramePadding, V2(8.0f, 4.0f));
 
     if (font.buf) {
         ImGuiIO* io = igGetIO();
@@ -451,6 +457,7 @@ void init(void)
         "./Skycoffin CT.sm",
         "./The Lost Dedicated Life.sm",
         "./m1dy - 960 BPM Speedcore.sm",
+        "./alien temple.sm",
 
         // Junk """""""test vectors"""""""
         "./03 IMAGE -MATERIAL-(Version 0).sm",
@@ -472,8 +479,9 @@ void init(void)
 
     for (i32 ss = 0; ss < NumSkillsets; ss++) {
         ImVec4 c = GetColormapColor(ss);
+        c.w *= 0.9f;
         state.skillset_colors[ss] = igColorConvertFloat4ToU32(c);
-        c.w *= 0.75;
+        c.w *= 0.8f;
         state.skillset_colors_selectable[ss] = igColorConvertFloat4ToU32(c);
     }
 
@@ -493,16 +501,16 @@ static i32 param_slider_widget(i32 param_idx, b32 show_parameter_names)
         toggled = true;
     } tooltip("graph this parameter");
     igSameLine(0, 4);
+    char slider_id[32];
+    snprintf(slider_id, sizeof(slider_id), "##slider%d", mp);
     if (state.info.params[mp].integer) {
         i32 value = (i32)state.ps.params[mp];
         i32 low = (i32)state.ps.min[mp];
         i32 high = (i32)state.ps.max[mp];
-        igSliderInt(state.info.params[mp].name, &value, low, high, "%d");
+        igSliderInt(slider_id, &value, low, high, "%d");
         state.ps.params[mp] = (f32)value;
     } else {
         f32 speed = (state.ps.max[mp] - state.ps.min[mp]) / 100.f;
-        char slider_id[32];
-        snprintf(slider_id, sizeof(slider_id), "##slider%d", mp);
         igSetNextItemWidth(igGetFontSize() * 10.0f);
         igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f);
         if (show_parameter_names == false) {
@@ -527,10 +535,10 @@ static i32 param_slider_widget(i32 param_idx, b32 show_parameter_names)
                 state.ps.max[mp] = state.info.defaults.max[mp];
             }
         }
-        if (show_parameter_names) {
-            igSameLine(0, 0);
-            igText(state.info.params[mp].name);
-        }
+    }
+    if (show_parameter_names) {
+        igSameLine(0, 0);
+        igText(state.info.params[mp].name);
     }
     igPopID();
     return toggled;
@@ -552,6 +560,27 @@ static void skillset_line_plot(i32 ss, b32 highlight, f32 *xs, f32 *ys, i32 coun
     }
 }
 
+static ImVec4 msd_color(f32 x)
+{
+    // -- Colorized stuff
+    // function byMSD(x)
+    // 	if x then
+    // 		return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
+    // 	end
+    // 	return HSV(0, 0.9, 0.9)
+    // end
+    ImVec4 color = { 0, 0.9f, 0.9f, 1.0f };
+    if (x) {
+        f32 h = max(95.0f - (x / 40.0f) * 150.0f, -50.0f) / 360.f;
+        h = h + (f32)(h < 0) - truncf(h);
+        f32 s = 0.9f;
+        f32 v = 0.9f;
+        igColorConvertHSVtoRGB(h, s, v, &color.x, &color.y, &color.z);
+    }
+
+    return color;
+}
+
 void frame(void)
 {
     reset_scratch();
@@ -565,12 +594,13 @@ void frame(void)
     SimFileInfo *next_active = 0;
 
     ImGuiIO *io = igGetIO();
+    ImVec2 ds = io->DisplaySize;
 
     ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 
     f32 right_width = 400.0f;
-    igSetNextWindowPos((ImVec2) { io->DisplaySize.x - (right_width - 1.0f), 0.0f }, ImGuiCond_Always, V2Zero);
-    igSetNextWindowSize((ImVec2) { right_width, io->DisplaySize.y }, ImGuiCond_Always);
+    igSetNextWindowPos((ImVec2) { ds.x - right_width, 0.0f }, ImGuiCond_Always, V2Zero);
+    igSetNextWindowSize((ImVec2) { right_width + 1.0f, ds.y + 1.0f }, ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
         // Header + arrow drop down fake thing
         igSameLine(igGetWindowWidth() - 36.0f, 4);
@@ -585,10 +615,10 @@ void frame(void)
 
         // Open file list
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-            igText("%2.2f", sfi->skillsets_over_wife[0][13]); igSameLine(0, 7.0f);
-            tooltip("Overall at AA");
-            igText("%2.2f", sfi->skillsets_over_wife[0][18]); igSameLine(0, 7.0f);
-            tooltip("Overall at max scaling");
+            igTextColored(msd_color(sfi->skillsets_over_wife[0][13]), "%2.2f", sfi->skillsets_over_wife[0][13]);
+            tooltip("Overall at AA"); igSameLine(0, 7.0f);
+            igTextColored(msd_color(sfi->skillsets_over_wife[0][18]), "%2.2f", sfi->skillsets_over_wife[0][18]);
+            tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
             igPushIDStr(sfi->id.buf);
             if (igSelectableBool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
                 if (sfi->open) {
@@ -599,10 +629,9 @@ void frame(void)
                 }
             }
             if (sfi->stops) {
-                // Warn about stops
-                igSameLine(0, igGetWindowWidth() - igCalcItemWidth() - 10.0f);
+                igSameLine(igGetWindowWidth() - 30.f, 4);
                 igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
-                tooltip("This file has stops or negBPMs. These are parsed in differently from Etterna, so the ratings might differ. "
+                tooltip("This file has stops or negBPMs. These are parsed differently from Etterna, so the ratings will differ from what you see in Ettera.\n\n"
                         "Note that the calc is VERY sensitive to tiny variations in ms row times.");
             }
             if (skillsets) {
@@ -612,7 +641,7 @@ void frame(void)
                     igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
                     igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
                     igSelectableBool(r, sfi->selected_skillsets[ss], ImGuiSelectableFlags_None, (ImVec2) { 300.0f / NumSkillsets, 0 });
-                    tooltip("%s at AA", SkillsetNames[ss]);
+                    tooltip("%s", SkillsetNames[ss]);
                     if (igIsItemHovered(0)) {
                         ss_highlight[ss] = 1;
                     }
@@ -633,8 +662,8 @@ void frame(void)
     i32 param_toggled = -1;
 
     f32 left_width = state.parameters_shown_last_frame ? 450.0f : 300.0f;
-    igSetNextWindowPos((ImVec2) { 0, 0 }, ImGuiCond_Always,  V2Zero);
-    igSetNextWindowSize((ImVec2) { left_width, io->DisplaySize.y }, ImGuiCond_Always);
+    igSetNextWindowPos((ImVec2) { -1.0f, 0 }, ImGuiCond_Always,  V2Zero);
+    igSetNextWindowSize((ImVec2) { left_width + 1.0f, ds.y + 1.0f }, ImGuiCond_Always);
     if (igBegin("Mod Parameters", 0, fixed_window)) {
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
@@ -751,16 +780,16 @@ void frame(void)
     igEnd();
 
     // MSD graph windows
-    i32 open_windows = 0;
+    i32 num_open_windows = 0;
+    f32 centre_width = ds.x - left_width - right_width;
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
         if (sfi->open) {
-            f32 centre_width = io->DisplaySize.x - left_width - right_width;
-            if (state.open_windows == 0 && centre_width >= 450.0f) {
+            if (state.num_open_windows == 0 && centre_width >= 450.0f) {
                 igSetNextWindowPos((ImVec2) { left_width, 0 }, ImGuiCond_Always, V2Zero);
-                igSetNextWindowSize((ImVec2) {centre_width , io->DisplaySize.y }, ImGuiCond_Always);
+                igSetNextWindowSize((ImVec2) {centre_width , ds.y }, ImGuiCond_Always);
             } else {
-                ImVec2 sz = (ImVec2) { clamp_high(io->DisplaySize.x, 750.0f), clamp(300.0f, io->DisplaySize.y, io->DisplaySize.y * 0.33f * (buf_len(sfi->graphs) + 1)) };
-                ImVec2 pos = (ImVec2) { rngf() * (io->DisplaySize.x - sz.x), rngf() * (io->DisplaySize.y - sz.y) };
+                ImVec2 sz = (ImVec2) { clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (buf_len(sfi->graphs) + 1)) };
+                ImVec2 pos = (ImVec2) { rngf() * (ds.x - sz.x), rngf() * (ds.y - sz.y) };
                 igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Appearing);
             }
@@ -817,10 +846,18 @@ void frame(void)
                 }
             }
             igEnd();
-            open_windows++;
+            num_open_windows++;
         }
     }
-    state.open_windows = open_windows;
+    state.num_open_windows = num_open_windows;
+
+    if (buf_len(state.files) > 0) {
+        igSetNextWindowPos((ImVec2) { left_width + centre_width / 2.0f, ds.y / 2.f }, 0, (ImVec2) { 0.5f, 0.5f });
+
+        igBegin("Drop", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
+        igText(" Drop .sm file here ");
+        igEnd();
+    }
 
     sg_begin_default_pass(&state.pass_action, width, height);
     simgui_render();

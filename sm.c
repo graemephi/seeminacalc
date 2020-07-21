@@ -329,7 +329,6 @@ static BPMChange parse_bpm_change(SmParser *ctx)
     result.beat = result.row / 48.0f;
     consume_char(ctx, '=');
     f32 bpm = parse_f32(ctx);
-    validate(ctx, bpm > 0.0f, "non-positive bpm");
     result.bps = bpm / 60.f;
     result.bpm = result.bps * 60.f;
     return result;
@@ -587,7 +586,9 @@ static i32 parse_sm(Buffer data, SmFile *out)
                 // row s.t. row_time(next, row) == prev.time
                 f32 row = time_row_naive(next, prev.time);
 
-                prev.bps = 12600.0f / (0.25f / (row - prev.row));
+                prev.bps = 10500.f * (row - prev.row);
+                prev.bpm = prev.bps * 60.0f;
+
                 buf_last(new_bpms) = prev;
                 next.time = prev.time;
                 next.row = row;
@@ -603,7 +604,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
 
                 BPMChange bpm_stop = (BPMChange) {
                     .bps = bps,
-                    .bpm = 60.0f * bps,
+                    .bpm = bps * 60.0f,
                     .row = corrected_row,
                     .time = row_time(buf_last(new_bpms), corrected_row),
                 };
