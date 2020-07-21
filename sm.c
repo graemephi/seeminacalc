@@ -159,7 +159,7 @@ static const u8 SmFileNote[256] = {
     ['1'] = Note_On,
     ['2'] = Note_HoldStart,
     ['3'] = Note_HoldEnd,
-    ['4'] = Note_RollEnd,
+    ['4'] = Note_RollStart,
     ['M'] = Note_Mine,
     ['K'] = Note_Off,
     ['L'] = Note_Lift,
@@ -677,7 +677,15 @@ static i32 parse_sm(Buffer data, SmFile *out)
                         .cccc = file_rows[i].cccc
                     });
 
-                    result.risky.rolls = (b8)row_has_roll(file_rows[i]);
+                    for (isize c = 0; c < 4; c++) {
+                        if (file_rows[i].columns[c] & (Note_HoldStart|Note_RollStart)) {
+                            validate(ctx, hold_state[c] == false, "mismatched hold head");
+                            hold_state[c] = true;
+                        } else if (file_rows[i].columns[c] == Note_HoldEnd) {
+                            validate(ctx, hold_state[c] == true, "mismatched hold end");
+                            hold_state[c] = false;
+                        }
+                    }
                 }
 
                 row += row_inc;
@@ -748,7 +756,7 @@ static MinaSerializedRow row_mina_serialize(SmRow r)
 	    [Note_Off] = 0,
 	    [Note_On] = 1,
 	    [Note_HoldStart] = 2,
-	    [Note_RollEnd] = 2,
+	    [Note_RollStart] = 2,
 	    [Note_Mine] = 4,
 	    [Note_Lift] = 5,
 	    [Note_Fake] = 7,
@@ -763,10 +771,10 @@ static MinaSerializedRow row_mina_serialize(SmRow r)
 
 static u32 mina_row_bits(SmRow r)
 {
-    return ((u32)((r.columns[0] & (Note_Tap|Note_RollEnd)) != 0) << 0)  // left
-         + ((u32)((r.columns[1] & (Note_Tap|Note_RollEnd)) != 0) << 1)  // left
-         + ((u32)((r.columns[2] & (Note_Tap|Note_RollEnd)) != 0) << 2)  // right
-         + ((u32)((r.columns[3] & (Note_Tap|Note_RollEnd)) != 0) << 3); // right
+    return ((u32)((r.columns[0] & Note_Tap) != 0) << 0)  // left
+         + ((u32)((r.columns[1] & Note_Tap) != 0) << 1)  // left
+         + ((u32)((r.columns[2] & Note_Tap) != 0) << 2)  // right
+         + ((u32)((r.columns[3] & Note_Tap) != 0) << 3); // right
 }
 
 #pragma float_control(precise, on, push)

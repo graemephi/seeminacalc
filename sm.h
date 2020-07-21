@@ -139,10 +139,10 @@ enum
     Note_On = 1,
     Note_Mine = 2,
     Note_HoldStart = 4,
-    Note_HoldEnd = 8,
-    Note_RollEnd = 16,
+    Note_RollStart = 8,
+    Note_HoldEnd = 16,
     Note_Lift = 32,
     Note_Fake = 64,
 
-    Note_Tap = Note_On | Note_HoldStart
+    Note_Tap = Note_On | Note_HoldStart | Note_RollStart
 };
