@@ -105,7 +105,14 @@ void set_font(char *buf, int len)
 Buffer load_font_file(char *path)
 {
     (void)path;
-    return font_data;
+    Buffer result = (Buffer) {
+        .buf = alloc(u8, font_data.len),
+        .len = font_data.len,
+        .cap = font_data.len
+    };
+    memcpy(result.buf, font_data.buf, font_data.len);
+    free(font_data.buf);
+    return result;
 }
 
 void open_file(char *data, int len)
@@ -118,6 +125,7 @@ void open_file(char *data, int len)
 
     i32 parse_and_add_sm(Buffer buf);
     parse_and_add_sm(buf);
+    free(data);
 }
 #else
 Buffer load_font_file(char *path)
@@ -170,10 +178,12 @@ static void tooltip(const char *fmt, ...)
 {
     if (igIsItemHovered(0)) {
         igBeginTooltip();
+        igPushTextWrapPos(400.0f);
         va_list args;
         va_start(args, fmt);
         igTextV(fmt, args);
         va_end(args);
+        igPopTextWrapPos();
         igEndTooltip();
     }
 }
@@ -223,6 +233,7 @@ typedef struct SimFileInfo
     bool selected_skillsets[NumSkillsets];
 
     bool open;
+    bool stops;
     u64 frame_last_focused;
 } SimFileInfo;
 
@@ -272,9 +283,10 @@ i32 parse_and_add_sm(Buffer buf)
     String author = sm_tag_inplace(&sm, Tag_Credit);
     String diff = DifficultyStrings[sm.diffs[0].diff];
     String id = {0};
-    id.len = buf_printf(id.buf, "%.*s (%.*s, %.*s)##%.*s",
+    id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
         title.len, title.buf,
         author.len, author.buf,
+        author.len == 0 ? 0 : 2, ", ",
         diff.len, diff.buf,
         ck.len, ck.buf
     );
@@ -291,7 +303,8 @@ i32 parse_and_add_sm(Buffer buf)
         .diff = diff,
         .chartkey = copy_string(ck),
         .id = copy_string(id),
-        .notes = frobble_note_data(ni, buf_len(ni))
+        .notes = frobble_note_data(ni, buf_len(ni)),
+        .stops = sm.has_stops
     });
 
     buf_reserve(sfi->effects.weak, state.info.num_params);
@@ -388,7 +401,10 @@ void init(void)
         .context = sapp_sgcontext()
     });
     stm_setup();
-    simgui_setup(&(simgui_desc_t){ .no_default_font = (font.buf != 0) });
+    simgui_setup(&(simgui_desc_t){
+        .no_default_font = (font.buf != 0),
+        .sample_count = _sapp.sample_count
+    });
     state = (State) {
         .pass_action = {
             .colors[0] = {
@@ -398,6 +414,7 @@ void init(void)
     };
 
     igPushStyleVarFloat(ImGuiStyleVar_ScrollbarSize, 4.f);
+    igPushStyleVarFloat(ImGuiStyleVar_WindowRounding, 1.0f);
 
     if (font.buf) {
         ImGuiIO* io = igGetIO();
@@ -433,6 +450,7 @@ void init(void)
         "./Odin.sm",
         "./Skycoffin CT.sm",
         "./The Lost Dedicated Life.sm",
+        "./m1dy - 960 BPM Speedcore.sm",
 
         // Junk """""""test vectors"""""""
         "./03 IMAGE -MATERIAL-(Version 0).sm",
@@ -543,14 +561,12 @@ void frame(void)
     f64 delta_time = stm_sec(stm_laptime(&state.last_time));
     simgui_new_frame(width, height, delta_time);
 
-    igShowDemoWindow(0);
-
     bool ss_highlight[NumSkillsets] = {0};
     SimFileInfo *next_active = 0;
 
     ImGuiIO *io = igGetIO();
 
-    ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 
     f32 right_width = 400.0f;
     igSetNextWindowPos((ImVec2) { io->DisplaySize.x - (right_width - 1.0f), 0.0f }, ImGuiCond_Always, V2Zero);
@@ -581,6 +597,13 @@ void frame(void)
                     sfi->open = true;
                     next_active = sfi;
                 }
+            }
+            if (sfi->stops) {
+                // Warn about stops
+                igSameLine(0, igGetWindowWidth() - igCalcItemWidth() - 10.0f);
+                igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
+                tooltip("This file has stops or negBPMs. These are parsed in differently from Etterna, so the ratings might differ. "
+                        "Note that the calc is VERY sensitive to tiny variations in ms row times.");
             }
             if (skillsets) {
                 for (isize ss = 0; ss < NumSkillsets; ss++) {
@@ -616,12 +639,13 @@ void frame(void)
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
         igPushIDStr(active->id.buf);
+
         // Skillset filters
         f32 selectable_width_factor = 4.0f;
         for (isize i = 0; i < NumSkillsets; i++) {
             igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[i]);
             igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[i]);
-            igSelectableBoolPtr(SkillsetNames[i], &active->selected_skillsets[i], 0, (ImVec2){ (igGetWindowWidth() - 10.f)  / selectable_width_factor, 0});
+            igSelectableBoolPtr(SkillsetNames[i], &active->selected_skillsets[i], 0, (ImVec2){ (igGetWindowWidth() - 12*4)  / selectable_width_factor, 0});
             igPopStyleColor(2);
             if (ItemDoubleClicked(0)) {
                 clear_selections_to = i;
@@ -629,12 +653,12 @@ void frame(void)
             if (igIsItemHovered(0)) {
                 ss_highlight[i] = 1;
             }
-            if (i != 4) {
+            if (i != 3) {
                 igSameLine(0, 4);
-                igDummy((ImVec2){0, 4});
+                igDummy((ImVec2){4, 4});
                 igSameLine(0, 4);
             } else {
-                selectable_width_factor = 3.0f;
+                selectable_width_factor = 4.0f;
             }
             effect_mask |= (active->selected_skillsets[i] << i);
         }

@@ -453,14 +453,6 @@ static f32 mina_row_time(MinaRowTimeGarbage *g, BPMChange *bpms, f32 row)
     return g->last_time + g->time_to_next_event * perc;
 }
 
-static b32 row_has_roll(SmFileRow r)
-{
-    return (r.columns[0] == Note_RollEnd)
-        || (r.columns[1] == Note_RollEnd)
-        || (r.columns[2] == Note_RollEnd)
-        || (r.columns[3] == Note_RollEnd);
-}
-
 static i32 parse_sm(Buffer data, SmFile *out)
 {
     SmFile result = { .sm = { .buf = data.buf, .len = data.len }};
@@ -507,12 +499,14 @@ static i32 parse_sm(Buffer data, SmFile *out)
                 validate(ctx, stops == 0, "file has two sets of stops");
                 result.tags[tag.tag] = tag.str;
 
+                push_allocator(scratch);
                 SmParser stop_ctx = *ctx;
                 stop_ctx.p = &ctx->buf[tag.str.index];
                 for (SmStop stop; parse_next_stop(&stop_ctx, &stop);) {
                     validate(ctx, stop.duration >= 0.0f, "stop has non-positive duration");
                     buf_push(stops, stop);
                 }
+                pop_allocator();
             } break;
             case Tag_Notes: {
                 SmParser notes_ctx = *ctx;
@@ -558,9 +552,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
         }
         result.bpms = bpms;
     } else {
-        result.risky.stops = true;
-#if 0
-        buf_push(stops, (SmStop) { .row = DBL_MAX, .ticks = 0 });
+        buf_push(stops, (SmStop) { .row = FLT_MAX, .duration = 0 });
         BPMChange *bpms = result.file_bpms;
 
         // Deal with stops and negative bpms. In both cases we turn them into
@@ -577,13 +569,13 @@ static i32 parse_sm(Buffer data, SmFile *out)
         // a sufficiently high bpm, and move the following BPM forward in
         // row-space.
 
-        f64 inserted_rows = 0.0;
+        f32 inserted_rows = 0.0;
 
         BPMChange *new_bpms = 0;
-                buf_push(new_bpms, bpms[0]);
+        buf_push(new_bpms, bpms[0]);
         SmStop *stop = stops;
         for (i32 i = 1; i < buf_len(bpms) - 1; i++) {
-            assert(bpms[i].row > bpms[i - 1].row);
+            validate(ctx, bpms[i].row > bpms[i - 1].row, "bpm row is out of order");
             BPMChange next = bpms[i];
 
             next.row += inserted_rows;
@@ -593,30 +585,31 @@ static i32 parse_sm(Buffer data, SmFile *out)
                 BPMChange prev = buf_last(new_bpms);
 
                 // row s.t. row_time(next, row) == prev.time
-                f64 row = time_row_naive(next, prev.time);
+                f32 row = time_row_naive(next, prev.time);
 
-                prev.tpr = 0.25 / (row - prev.row);
+                prev.bps = 12600.0f / (0.25f / (row - prev.row));
                 buf_last(new_bpms) = prev;
                 next.time = prev.time;
                 next.row = row;
 
                 // This means the bpm changed twice before the negative bpm warp was over.
                 // Technically possible but probably extremely rare.
-                assert(prev.row < bpms[i + 1].row);
+                validate(ctx, prev.row < bpms[i + 1].row, "what even is this file. don't do that");
             }
 
             while (stop->row + inserted_rows <= next.row) {
-                f64 ticks = stop->ticks / 48.0;
-                f64 corrected_row = stop->row + inserted_rows;
+                f32 bps = 1.0f / stop->duration;
+                f32 corrected_row = stop->row + inserted_rows;
 
                 BPMChange bpm_stop = (BPMChange) {
-                    .tpr = ticks,
+                    .bps = bps,
+                    .bpm = 60.0f * bps,
                     .row = corrected_row,
                     .time = row_time(buf_last(new_bpms), corrected_row),
                 };
 
-                f64 end_row = corrected_row + 48.0;
-                f64 end_time = row_time(bpm_stop, end_row);
+                f32 end_row = corrected_row + 48.0f;
+                f32 end_time = row_time(bpm_stop, end_row);
                 buf_push(new_bpms, bpm_stop);
 
                 if (corrected_row < next.row) {
@@ -628,8 +621,8 @@ static i32 parse_sm(Buffer data, SmFile *out)
 
                 buf_push(inserted_beats, corrected_row);
 
-                inserted_rows += 48.0;
-                next.row += 48.0;
+                inserted_rows += 48.0f;
+                next.row += 48.0f;
                 next.time = row_time(buf_last(new_bpms), next.row);
                 stop++;
             }
@@ -640,8 +633,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
 
         buf_push(new_bpms, SentinelBPM);
         result.bpms = new_bpms;
-    #endif
-        die(ctx, "not implemented");
+        result.has_stops = true;
     }
 
     buf_push(inserted_beats, FLT_MAX);
@@ -656,6 +648,8 @@ static i32 parse_sm(Buffer data, SmFile *out)
         MinaRowTimeGarbage g = { .have_single_bpm = buf_len(result.bpms) == 2 };
         MinaRowTimeGarbage last_segment_g = {0};
         f32 row = 0.0;
+
+        u8 hold_state[4] = {0};
 
         ctx->p = &ctx->buf[result.diffs[d].notes.index];
         while (true) {

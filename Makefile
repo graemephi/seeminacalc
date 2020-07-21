@@ -35,7 +35,7 @@ build/debug/cpp.obj: *.h *.cpp Makefile
 build/debug/main.exe: *.h *.c build/debug/cpp.obj Makefile
 	$(Compiler) $(Common) $(C) $(Debug) main.c build/debug/cpp.obj
 
-build/release:
+build/release/main.exe:
 	$(Compiler) $(Common) $(CPP) $(Release) main.c cpp.cpp
 
 EMCCFlags :=
@@ -61,4 +61,6 @@ EMCCFlags += -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall']"
 emscripten:
 	emcc $(EMCCFlags) -msse -msimd128 $(Includes) main.c cpp.cpp -o web/main.js
 
-.PHONY: all clean build/release
+debug: build/debug/main.exe
+release: build/release/main.exe
+.PHONY: all clean debug release

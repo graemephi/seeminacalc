@@ -121,10 +121,7 @@ typedef struct SmFile
     BPMChange *file_bpms;
     BPMChange *bpms;
     i32 n_bpms;
-    struct {
-        u8 stops;
-        u8 rolls;
-    } risky;
+    i32 has_stops;
 } SmFile;
 
 typedef union SmFileRow
