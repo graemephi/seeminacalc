@@ -1,4 +1,7 @@
+#if !(defined(SOKOL_GLCORE33)||defined(SOKOL_GLES2)||defined(SOKOL_GLES3)||defined(SOKOL_D3D11)||defined(SOKOL_METAL)||defined(SOKOL_WGPU)||defined(SOKOL_DUMMY_BACKEND))
 #define SOKOL_GLCORE33
+#endif
+
 #define SOKOL_IMPL
 #include "sokol/sokol_app.h"
 #include "sokol/sokol_gfx.h"
@@ -78,6 +81,47 @@ Buffer get_steps_from_db(CacheDB *db, char *key)
 
     sqlite3_reset(db->note_data_stmt);
     return result;
+}
+#endif
+
+
+
+#ifdef __EMSCRIPTEN__
+static Buffer font_data = {0};
+
+// Must be called before main. In theory we can just fread off Emscripten's VFS
+// but it throws for me and I ain't looking into it, might as well just get the
+// size reduction from not using it instead
+void set_font(char *buf, int len)
+{
+    font_data = (Buffer) {
+        .buf = buf,
+        .len = len,
+        .cap = len
+    };
+}
+
+Buffer load_font_file(char *path)
+{
+    (void)path;
+    return font_data;
+}
+
+void open_file(char *data, int len)
+{
+    Buffer buf = (Buffer) {
+        .buf = data,
+        .len = len,
+        .cap = len
+    };
+
+    i32 parse_and_add_sm(Buffer buf);
+    parse_and_add_sm(buf);
+}
+#else
+Buffer load_font_file(char *path)
+{
+    return read_file(path);
 }
 #endif
 
@@ -161,7 +205,7 @@ typedef struct SimFileInfo
     String title;
     String diff;
     String chartkey;
-    String title_author_ck;
+    String id;
 
     NoteData *notes;
     EffectMasks effects;
@@ -202,12 +246,82 @@ typedef struct State
 
     u32 skillset_colors[NumSkillsets];
     u32 skillset_colors_selectable[NumSkillsets];
-    bool selected_skillsets[NumSkillsets];
 
     int update_index;
     i32 open_windows;
 } State;
 static State state = {0};
+
+float ssxs[19];
+
+i32 parse_and_add_sm(Buffer buf)
+{
+    push_allocator(scratch);
+    SmFile sm = {0};
+    i32 err = parse_sm(buf, &sm);
+    if (err) {
+        pop_allocator();
+        return -1;
+    }
+
+    NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
+    String ck = generate_chart_key(&sm, 0);
+    String title = sm_tag_inplace(&sm, Tag_Title);
+    String author = sm_tag_inplace(&sm, Tag_Credit);
+    String diff = DifficultyStrings[sm.diffs[0].diff];
+    String id = {0};
+    id.len = buf_printf(id.buf, "%.*s (%.*s, %.*s)##%.*s",
+        title.len, title.buf,
+        author.len, author.buf,
+        diff.len, diff.buf,
+        ck.len, ck.buf
+    );
+    pop_allocator();
+
+    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+        if (strings_are_equal(sfi->id, id)) {
+            return -2;
+        }
+    }
+
+    SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
+        .title = copy_string(title),
+        .diff = diff,
+        .chartkey = copy_string(ck),
+        .id = copy_string(id),
+        .notes = frobble_note_data(ni, buf_len(ni))
+    });
+
+    buf_reserve(sfi->effects.weak, state.info.num_params);
+    buf_reserve(sfi->effects.strong, state.info.num_params);
+    // calculate_effects(&state.info, &state.calc, sfi->notes, &sfi->effects);
+
+    sfi->min_rating = 40;
+    sfi->min_relative_rating = 2;
+    for (i32 x = 0; x < 19; x++) {
+        f32 goal = 0.82f + ((f32)x / 100.f);
+        ssxs[x] = goal * 100.f;
+        SkillsetRatings ssr;
+        calc_go(&state.calc, &state.info.defaults, sfi->notes, 1.0f, goal, &ssr);
+        for (i32 r = 0; r < NumSkillsets; r++) {
+            buf_push(sfi->skillsets_over_wife[r], ssr.E[r]);
+            sfi->min_rating = min(ssr.E[r], sfi->min_rating);
+            sfi->max_rating = max(ssr.E[r], sfi->max_rating);
+
+            f32 relative_rating = ssr.E[r] / ssr.overall;
+            buf_push(sfi->relative_skillsets_over_wife[r], relative_rating);
+            sfi->min_relative_rating = min(relative_rating, sfi->min_relative_rating);
+            sfi->max_relative_rating = max(relative_rating, sfi->max_relative_rating);
+        }
+    }
+
+    for (isize ss = 1; ss < NumSkillsets; ss++) {
+        sfi->selected_skillsets[ss] = (0.9 <= (sfi->skillsets_over_wife[ss][18] / sfi->skillsets_over_wife[0][18]));
+    }
+
+    printf("Added %s\n", id.buf);
+    return 0;
+}
 
 i32 make_parameter_graph(i32 param)
 {
@@ -257,14 +371,22 @@ ParamSet copy_param_set(ParamSet *ps)
     }
     return result;
 }
-float ssxs[19];
+
 void init(void)
 {
+    isize bignumber = 100*1024*1024;
+    scratch_stack = stack_make(malloc(bignumber), bignumber);
+    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
+
+    push_allocator(scratch);
+    Buffer font = load_font_file("NotoSansCJKjp-Regular.otf");
+    pop_allocator();
+
     sg_setup(&(sg_desc){
         .context = sapp_sgcontext()
     });
     stm_setup();
-    simgui_setup(&(simgui_desc_t){ .no_default_font = 1 });
+    simgui_setup(&(simgui_desc_t){ .no_default_font = (font.buf != 0) });
     state = (State) {
         .pass_action = {
             .colors[0] = {
@@ -273,12 +395,12 @@ void init(void)
         }
     };
 
-    ImGuiIO* io = igGetIO();
-    ImFontAtlas_AddFontFromFileTTF(io->Fonts, "NotoSansCJKjp-Regular.otf", 16.0f, 0, ImFontAtlas_GetGlyphRangesJapanese(io->Fonts));
-
     igPushStyleVarFloat(ImGuiStyleVar_ScrollbarSize, 4.f);
 
-    {
+    if (font.buf) {
+        ImGuiIO* io = igGetIO();
+        ImFontAtlas_AddFontFromMemoryTTF(io->Fonts, font.buf, (i32)font.len, 16.0f, 0, ImFontAtlas_GetGlyphRangesJapanese(io->Fonts));
+
         // Copy pasted from simgui_setup
         unsigned char* font_pixels;
         int font_width, font_height;
@@ -300,19 +422,18 @@ void init(void)
         io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
     }
 
-    isize bignumber = 100*1024*1024;
-    scratch_stack = stack_make(malloc(bignumber), bignumber);
-    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
-
-    push_allocator(permanent_memory);
-
+#ifdef __EMSCRIPTEN__
+    const char *files[0] = {};
+#else
     const char *files[] = {
-        "03 IMAGE -MATERIAL-(Version 0).sm",
-        "Grief & Malice.sm",
-        "Odin.sm",
-        "Skycoffin CT.sm",
-        "The Lost Dedicated Life.sm"
+        "./03 IMAGE -MATERIAL-(Version 0).sm",
+        "./03 IMAGE -MATERIAL-(Version 0).sm",
+        "./Grief & Malice.sm",
+        "./Odin.sm",
+        "./Skycoffin CT.sm",
+        "./The Lost Dedicated Life.sm"
     };
+#endif
 
     state.info = calc_info();
     state.calc = calc_init(&state.info);
@@ -322,69 +443,21 @@ void init(void)
 
     for (isize i = 0; i < array_length(files); i++) {
         Buffer f = read_file(files[i]);
-        SmFile sm = parse_sm(f);
-        String ck = generate_chart_key(&sm, 0);
-        NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
+        parse_and_add_sm(f);
+    }
 
-        String title = sm_tag_copy(&sm, Tag_Title);
-        String author = sm_tag_inplace(&sm, Tag_Credit);
-        String title_author_ck = { .len = title.len + author.len + ck.len + 6 };
-        buf_reserve(title_author_ck.buf, title_author_ck.len);
-        snprintf(title_author_ck.buf, (i32)title_author_ck.len, "%.*s (%.*s)##%.*s",
-            (i32)title.len, title.buf,
-            (i32)author.len, author.buf,
-            (i32)ck.len, ck.buf
-        );
-
-        SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
-            .title = title,
-            .diff = DifficultyStrings[sm.diffs[0].diff],
-            .chartkey = ck,
-            .title_author_ck = title_author_ck,
-            .notes = frobble_note_data(ni, buf_len(ni))
-        });
-
-        buf_reserve(sfi->effects.weak, state.info.num_params);
-        buf_reserve(sfi->effects.strong, state.info.num_params);
-        // calculate_effects(&state.info, &state.calc, sfi->notes, &sfi->effects);
-
-        sfi->min_rating = 40;
-        sfi->min_relative_rating = 2;
-        for (i32 x = 0; x < 19; x++) {
-            f32 goal = 0.82f + ((f32)x / 100.f);
-            ssxs[x] = goal * 100.f;
-            SkillsetRatings ssr;
-            calc_go(&state.calc, &state.info.defaults, sfi->notes, 1.0f, goal, &ssr);
-            for (i32 r = 0; r < NumSkillsets; r++) {
-                buf_push(sfi->skillsets_over_wife[r], ssr.E[r]);
-                sfi->min_rating = min(ssr.E[r], sfi->min_rating);
-                sfi->max_rating = max(ssr.E[r], sfi->max_rating);
-
-                f32 relative_rating = ssr.E[r] / ssr.overall;
-                buf_push(sfi->relative_skillsets_over_wife[r], relative_rating);
-                sfi->min_relative_rating = min(relative_rating, sfi->min_relative_rating);
-                sfi->max_relative_rating = max(relative_rating, sfi->max_relative_rating);
-            }
-        }
-
-        for (isize ss = 1; ss < NumSkillsets; ss++) {
-            sfi->selected_skillsets[ss] = (0.9 <= (sfi->skillsets_over_wife[ss][18] / sfi->skillsets_over_wife[0][18]));
-        }
-        for (i32 ss = 0; ss < NumSkillsets; ss++) {
-            ImVec4 c = GetColormapColor(ss);
-            state.skillset_colors[ss] = igColorConvertFloat4ToU32(c);
-            c.w *= 0.75;
-            state.skillset_colors_selectable[ss] = igColorConvertFloat4ToU32(c);
-        }
+    for (i32 ss = 0; ss < NumSkillsets; ss++) {
+        ImVec4 c = GetColormapColor(ss);
+        state.skillset_colors[ss] = igColorConvertFloat4ToU32(c);
+        c.w *= 0.75;
+        state.skillset_colors_selectable[ss] = igColorConvertFloat4ToU32(c);
     }
 
     *null_sfi = (SimFileInfo) {
-        .title_author_ck = S("nullck"),
+        .id = S("nullck"),
     };
 
     state.active = null_sfi;
-
-    pop_allocator();
 }
 
 static i32 param_slider_widget(i32 param_idx)
@@ -452,6 +525,8 @@ static void skillset_line_plot(i32 ss, b32 highlight, f32 *xs, f32 *ys, i32 coun
 
 void frame(void)
 {
+    reset_scratch();
+
     i32 width = sapp_width();
     i32 height = sapp_height();
     f64 delta_time = stm_sec(stm_laptime(&state.last_time));
@@ -486,8 +561,8 @@ void frame(void)
             tooltip("Overall at AA");
             igText("%2.2f", sfi->skillsets_over_wife[0][18]); igSameLine(0, 7.0f);
             tooltip("Overall at max scaling");
-            igPushIDStr(sfi->title_author_ck.buf);
-            if (igSelectableBool(sfi->title_author_ck.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+            igPushIDStr(sfi->id.buf);
+            if (igSelectableBool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
                 if (sfi->open) {
                     sfi->open = false;
                 } else {
@@ -527,7 +602,7 @@ void frame(void)
     if (igBegin("Mod Parameters", 0, fixed_window)) {
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
-        igPushIDStr(active->title_author_ck.buf);
+        igPushIDStr(active->id.buf);
         // Skillset filters
         f32 selectable_width_factor = 4.0f;
         for (isize i = 0; i < NumSkillsets; i++) {
@@ -546,7 +621,6 @@ void frame(void)
                 igDummy((ImVec2){0, 4});
                 igSameLine(0, 4);
             } else {
-
                 selectable_width_factor = 3.0f;
             }
             effect_mask |= (active->selected_skillsets[i] << i);
@@ -640,7 +714,7 @@ void frame(void)
                 igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Appearing);
             }
-            if (igBegin(sfi->title_author_ck.buf, &sfi->open, ImGuiWindowFlags_None)) {
+            if (igBegin(sfi->id.buf, &sfi->open, ImGuiWindowFlags_None)) {
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
                 }
@@ -808,10 +882,6 @@ sapp_desc sokol_main(int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
-    if (argc == 1) {
-        printf("gimme a db\n");
-        exit(1);
-    }
 
     return (sapp_desc) {
         .init_cb = init,

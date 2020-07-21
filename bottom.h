@@ -8,9 +8,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define alignof _Alignof
+
 #ifdef _MSC_VER
 
-#define alignof _Alignof
+#undef min
+#undef max
 
 #if !defined(NDEBUG)
 // force_inline is a debugging aid mostly
@@ -21,7 +24,7 @@
 #endif
 
 #else
-#error ???
+#define force_inline
 #endif // _MSC_VER
 
 #include "stb_sprintf.h"
@@ -35,6 +38,16 @@
 
 // Really strike confidence in the reader at the top of the file.
 static isize total_bytes_leaked = 0;
+
+static isize mins(isize a, isize b)
+{
+    return (a < b) ? a : b;
+}
+
+static isize maxs(isize a, isize b)
+{
+    return (a >= b) ? a : b;
+}
 
 static b32 is_power_of_two_or_zero(i32 x)
 {
@@ -71,18 +84,42 @@ static f32 lerp(f32 a, f32 b, f32 t)
     return a*(1.0f - t) + b*t;
 }
 
-typedef struct Stack Stack;
-struct Stack
+static f32 min(f32 a, f32 b)
+{
+    return (a < b) ? a : b;
+}
+
+static f32 max(f32 a, f32 b)
+{
+    return (a >= b) ? a : b;
+}
+
+typedef struct Stack
 {
     u8 *buf;
     u8 *ptr;
     u8 *end;
-    Stack *prev;
-};
+} Stack;
+
+typedef struct StackMark
+{
+    Stack *stack;
+    u8 *mark;
+} StackMark;
 
 Stack stack_make(u8 *buf, isize buf_size)
 {
-    return (Stack) { buf, buf, buf + buf_size, 0 };
+    return (Stack) { buf, buf, buf + buf_size };
+}
+
+StackMark stack_mark(Stack *stack)
+{
+    return (StackMark) { .stack = stack, .mark = stack->ptr };
+}
+
+void stack_release(StackMark mark)
+{
+    mark.stack->ptr = mark.mark;
 }
 
 #define stack_alloc(stack, type, count) (type *)stack_alloc_(stack, sizeof(type), alignof(type), count)
@@ -125,19 +162,12 @@ Stack *current_allocator = &permanent_memory_stack;
 #define alloc_scratch(type, count) stack_alloc(scratch, type, count)
 #define alloc(type, count) stack_alloc(current_allocator, type, count)
 
-void push_allocator(Stack *a)
+void reset_scratch()
 {
-    assert(a->prev == 0);
-    a->prev = current_allocator;
-    current_allocator = a;
-}
-
-void pop_allocator()
-{
-    assert(current_allocator->prev);
-    Stack *prev = current_allocator->prev;
-    current_allocator->prev = 0;
-    current_allocator = prev;
+#ifndef NDEBUG
+    memset(scratch->ptr, 0x3c, scratch->ptr - scratch->buf);
+#endif
+    scratch->ptr = scratch->buf;
 }
 
 typedef struct Buffer
@@ -171,9 +201,13 @@ Buffer alloc_buffer(isize size)
 // This is for development stuff and so doesn't need to handle errors properly!!
 Buffer read_file(const char *path)
 {
+#ifdef _MSC_VER
     FILE *f;
-    i32 ok = fopen_s(&f, path, "rb");
-    assert(ok == 0);
+    fopen_s(&f, path, "rb");
+#else
+    FILE *f = fopen(path, "rb");
+#endif
+    assert(f);
 
     fseek(f, 0, SEEK_END);
     usize filesize = ftell(f);
@@ -193,16 +227,6 @@ Buffer read_file(const char *path)
     result.buf[read] = 0;
 
     return result;
-}
-
-isize write_file(char *path, Buffer buf)
-{
-    FILE *f;
-    i32 ok = fopen_s(&f, path, "wb");
-    assert(ok == 0);
-    isize written = fwrite(buf.buf, 1, buf.len, f);
-    fclose(f);
-    return written;
 }
 
 typedef struct Buf
@@ -261,7 +285,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
 
     if (hdr == 0) {
         hdr = stack_alloc(current_allocator, Buf, 1);
-        isize cap = max(8, count);
+        isize cap = maxs(8, count);
         stack_alloc(current_allocator, u8, size * cap);
         memset(hdr + 1, 0, size * cap);
         hdr->alloc = current_allocator;
@@ -313,10 +337,10 @@ i32 buf_printf_(char **buf_ref, char *fmt, ...)
     i32 len = vsnprintf(0, 0, fmt, args);
     va_end(args);
 
-    buf_reserve(buf, buf_len(buf) + len);
+    buf_reserve(buf, buf_len(buf) + len + 1);
 
     va_start(args, fmt);
-    buf_hdr(buf)->len += vsnprintf(buf_end(buf), (i32)(buf_cap(buf) - buf_len(buf)), fmt, args);
+    buf_hdr(buf)->len += vsnprintf(buf_end(buf), (i32)(buf_cap(buf) - buf_len(buf) + 1), fmt, args);
     va_end(args);
     assert(buf_len(buf) <= buf_cap(buf));
 
@@ -365,3 +389,32 @@ typedef struct String
 #define S(imm) ((String) { .buf = imm, .len = sizeof(imm) - 1 })
 // msvc in its infinite wisdom needs this for static init
 #define SS(imm) { .buf = imm, .len = sizeof(imm) - 1 }
+
+b32 strings_are_equal(String a, String b)
+{
+    if (a.len == b.len) {
+        return memcmp(a.buf, b.buf, a.len) == 0;
+    }
+
+    return false;
+}
+
+String copy_string(String s)
+{
+    String result = {0};
+    result.len = buf_printf(result.buf, "%.*s", s.len, s.buf);
+    buf_push(result.buf, 0);
+    return result;
+}
+
+static Stack **stack_stack = 0;
+void push_allocator(Stack *a)
+{
+    buf_push(stack_stack, current_allocator);
+    current_allocator = a;
+}
+
+void pop_allocator()
+{
+    current_allocator = buf_pop(stack_stack);
+}

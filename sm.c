@@ -29,6 +29,7 @@ static void die(SmParser *ctx)
         }
     }
     printf("parse error at line %d\n", current_line);
+    assert(0);
     exit(1);
 }
 

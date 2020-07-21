@@ -29,7 +29,7 @@ typedef union SkillsetRatings
 } SkillsetRatings;
 static_assert(sizeof(SkillsetRatings) == (NumSkillsets * sizeof(float)), "size mismatch");
 
-const char *SkillsetNames[] = {
+static const char *SkillsetNames[] = {
     "Overall",
     "Stream",
     "Jumpstream",
