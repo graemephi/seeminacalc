@@ -54,29 +54,19 @@ static b32 is_power_of_two_or_zero(i32 x)
     return (x & (x - 1)) == 0;
 }
 
-static i32 clamp_low(i32 a, i32 b)
+static f32 clamp_low(f32 a, f32 b)
 {
     return (a > b) ? a : b;
 }
 
-static i32 clamp_high(i32 a, i32 b)
-{
-    return (a < b) ? a : b;
-}
-
-static i32 clamp(i32 a, i32 b, i32 t)
-{
-    return clamp_low(a, clamp_high(b, t));
-}
-
-static f32 clamp_lowf(f32 a, f32 b)
-{
-    return (a > b) ? a : b;
-}
-
-static f32 clamp_highf(f32 a, f32 b)
+static f32 clamp_high(f32 a, f32 b)
 {
     return (a <= b) ? a : b;
+}
+
+static f32 clamp(f32 a, f32 b, f32 t)
+{
+    return clamp_low(a, clamp_high(b , t));
 }
 
 static f32 lerp(f32 a, f32 b, f32 t)

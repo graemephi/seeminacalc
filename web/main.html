@@ -40,7 +40,7 @@
                 for (let i = 0; i < event.dataTransfer.files.length; i++) {
                     event.dataTransfer.files[i].arrayBuffer().then(data  => {
                         let bytes = new Uint8Array(data);
-                        let buf = Module._malloc(bytes.length);
+                        let buf = Module._calloc(bytes.length + 1, 1);
                         Module.HEAPU8.set(bytes, buf);
                         Module.ccall('open_file', null, ['number', 'number'], [buf, bytes.length]);
                     });
@@ -53,7 +53,7 @@
                     var buf = 0;
                     font.then(data => {
                         let bytes = new Uint8Array(data);
-                        buf = Module._malloc(bytes.length);
+                        buf = Module._calloc(bytes.length + 1, 1);
                         Module.HEAPU8.set(bytes, buf);
                         Module.ccall('set_font', null, ['number', 'number'], [buf, bytes.length]);
                     }).catch(err => {

@@ -1,8 +1,12 @@
+#include <setjmp.h>
+
 typedef struct SmParser
 {
     char *buf;
     char *p;
     char *end;
+    jmp_buf *env;
+    String error;
 } SmParser;
 
 typedef struct SmBuffer

@@ -1,14 +1,3 @@
-static String sm_tag_copy(SmFile *sm, SmTag t)
-{
-    assert(t >= 0 && t <= TagCount);
-    SmString s = sm->tags[t];
-    String result = { .len = s.len };
-    buf_reserve(result.buf, s.len + 1);
-    memcpy(result.buf, &sm->sm.buf[s.index], s.len);
-    result.buf[s.len] = 0;
-    return result;
-}
-
 static String sm_tag_inplace(SmFile *sm, SmTag t)
 {
     SmString s = sm->tags[t];
@@ -18,8 +7,14 @@ static String sm_tag_inplace(SmFile *sm, SmTag t)
     };
 }
 
-static void die(SmParser *ctx)
+static String sm_tag_copy(SmFile *sm, SmTag t)
 {
+    return copy_string(sm_tag_inplace(sm, t));
+}
+
+static void die(SmParser *ctx, char *expected)
+{
+    push_allocator(scratch);
     i32 current_line = 1;
     if (ctx->p) {
         for (char *p = ctx->p; p != ctx->buf; p--) {
@@ -28,9 +23,31 @@ static void die(SmParser *ctx)
             }
         }
     }
-    printf("parse error at line %d\n", current_line);
-    assert(0);
-    exit(1);
+    ctx->error = (String) {0};
+    ctx->error.len = buf_printf(ctx->error.buf, "line %d: parse error. expected %s, got %c", current_line, expected, *ctx->p);
+    pop_allocator();
+    longjmp(*ctx->env, -1);
+}
+
+static void validate(SmParser *ctx, b32 condition, char *message)
+{
+    if (!condition) {
+        push_allocator(scratch);
+        ctx->error = (String) {0};
+        if (*ctx->p && ctx->p < ctx->end) {
+            i32 current_line = 1;
+            for (char *p = ctx->p; p != ctx->buf; p--) {
+                if (*p == '\n') {
+                    current_line++;
+                }
+            }
+            ctx->error.len = buf_printf(ctx->error.buf, "line %d: %s", current_line, message);
+        } else {
+            ctx->error.len = buf_printf(ctx->error.buf, "%s", message);
+        }
+        pop_allocator();
+        longjmp(*ctx->env, -2);
+    }
 }
 
 static i32 parser_position(SmParser *ctx)
@@ -99,7 +116,7 @@ static void consume_string(SmParser *ctx, String s)
 {
     b32 ok = try_consume_string(ctx, s);
     if (ok == false) {
-        die(ctx);
+        die(ctx, (char[]){ s.buf[0], 0 });
     }
 }
 
@@ -121,7 +138,7 @@ static void consume_char(SmParser *ctx, char c)
 {
     b32 ok = try_consume_char(ctx, c);
     if (ok == false) {
-        die(ctx);
+        die(ctx, (char[]){c, 0});
     }
 }
 
@@ -130,7 +147,7 @@ static f32 parse_f32(SmParser *ctx)
     char *p = ctx->p;
     f32 result = strtof(p, &p);
     if (p == ctx->p) {
-        die(ctx);
+        die(ctx, "number");
     }
     ctx->p = p;
     consume_whitespace_and_comments(ctx);
@@ -211,7 +228,7 @@ static SmTagValue parse_tag(SmParser *ctx)
         }
     }
     if (tag == TagCount) {
-        die(ctx);
+        die(ctx, "tag");
     }
 
     consume_char(ctx, ':');
@@ -264,7 +281,8 @@ SmDifficulty parse_notes_difficulty(SmParser *ctx)
         }
     }
     if (result == DiffCount) {
-        die(ctx);
+        // TODO: this should be edit, of which there can be more than one
+        die(ctx, "difficulty");
     }
     consume_char(ctx, ':');
     return result;
@@ -291,14 +309,10 @@ static SmString parse_notes_groove_radar(SmParser *ctx)
 static SmFileRow parse_notes_row(SmParser *ctx)
 {
     SmFileRow result = {0};
-    if (ctx->p + 4 > ctx->end) {
-        die(ctx);
-    }
+    validate(ctx, ctx->p + 4 < ctx->end, "unexpected end of file");
 
     for (isize i = 0; i < 4; i++) {
-        if (SmFileNoteValid[(u8)*ctx->p] == false) {
-            die(ctx);
-        }
+        validate(ctx, SmFileNoteValid[(u8)*ctx->p], "invalid note");
         result.columns[i] = SmFileNote[(u8)*ctx->p];
         ctx->p++;
     }
@@ -315,9 +329,7 @@ static BPMChange parse_bpm_change(SmParser *ctx)
     result.beat = result.row / 48.0f;
     consume_char(ctx, '=');
     f32 bpm = parse_f32(ctx);
-    if (bpm == 0.0f) {
-        die(ctx);
-    }
+    validate(ctx, bpm > 0.0f, "non-positive bpm");
     result.bps = bpm / 60.f;
     result.bpm = result.bps * 60.f;
     return result;
@@ -449,12 +461,22 @@ static b32 row_has_roll(SmFileRow r)
         || (r.columns[3] == Note_RollEnd);
 }
 
-static SmFile parse_sm(Buffer data)
+static i32 parse_sm(Buffer data, SmFile *out)
 {
-    // TODO: all asserts in this function should be validation errors
-
     SmFile result = { .sm = { .buf = data.buf, .len = data.len }};
-    SmParser *ctx = &(SmParser) { data.buf, data.buf, data.buf + data.len };
+    jmp_buf env;
+    SmParser *ctx = &(SmParser) {
+        .buf = data.buf,
+        .p = data.buf,
+        .end = data.buf + data.len,
+        .env = &env
+    };
+
+    i32 err = setjmp(env);
+    if (err) {
+        printf("sm error: %s\n", ctx->error.buf);
+        return err;
+    }
 
     SmStop *stops = 0;
     b32 negBPMsexclamationmark = false;
@@ -463,14 +485,14 @@ static SmFile parse_sm(Buffer data)
     while (try_advance_to_and_parse_tag(ctx, &tag)) {
         switch (tag.tag) {
             case Tag_BPMs: {
-                assert(result.file_bpms == 0);
+                validate(ctx, result.file_bpms == 0, "file has two sets of bpms");
 
                 SmParser bpm_ctx = *ctx;
                 bpm_ctx.p = &ctx->buf[tag.str.index];
 
                 // SM is forgiving on files; we aren't, and don't care about files with zero bpms.
                 buf_push(result.file_bpms, parse_bpm_change(&bpm_ctx));
-                assert(result.file_bpms->row == 0.0f);
+                validate(ctx, result.file_bpms->row == 0.0f, "first bpm is not at beat 0");
                 for (BPMChange c; try_parse_next_bpm_change(&bpm_ctx, &c);) {
                     buf_push(result.file_bpms, c);
                     negBPMsexclamationmark |= (c.bps < 0);
@@ -478,17 +500,17 @@ static SmFile parse_sm(Buffer data)
                 buf_push(result.file_bpms, SentinelBPM);
             } break;
             case Tag_Delays: {
-                assert(ctx->buf[tag.str.index] == ';');
+                validate(ctx, ctx->buf[tag.str.index] == ';', "delays are not supported");
                 result.tags[tag.tag] = tag.str;
             } break;
             case Tag_Stops: {
-                assert(stops == 0);
+                validate(ctx, stops == 0, "file has two sets of stops");
                 result.tags[tag.tag] = tag.str;
 
                 SmParser stop_ctx = *ctx;
                 stop_ctx.p = &ctx->buf[tag.str.index];
                 for (SmStop stop; parse_next_stop(&stop_ctx, &stop);) {
-                    assert(stop.duration >= 0.0f);
+                    validate(ctx, stop.duration >= 0.0f, "stop has non-positive duration");
                     buf_push(stops, stop);
                 }
             } break;
@@ -502,7 +524,7 @@ static SmFile parse_sm(Buffer data)
                 SmString radar = parse_notes_groove_radar(&notes_ctx);
                 i32 notes_start = parser_position(&notes_ctx);
                 i32 notes_len = tag.str.len - (notes_start - tag.str.index);
-                assert(notes_len > 0);
+                validate(ctx, notes_len > 0, "no notes");
                 SmString notes = (SmString) { notes_start, notes_len };
 
                 if (string_matches((String) { &ctx->buf[mode.index], mode.len }, "dance-single")) {
@@ -517,26 +539,22 @@ static SmFile parse_sm(Buffer data)
                 }
             } break;
             default: {
-                assert(tag.tag < TagCount);
                 result.tags[tag.tag] = tag.str;
             } break;
         }
     }
 
-    if (*ctx->p != 0) {
-        die(ctx);
-    }
-
-    assert(result.file_bpms);
+    validate(ctx, ctx->p == ctx->end || *ctx->p == 0, "failed to reach end of file");
+    validate(ctx, result.file_bpms != 0, "file has no bpms");
 
     f32 *inserted_beats = 0;
 
     if (buf_len(stops) == 0 && negBPMsexclamationmark == false) {
         BPMChange *bpms = result.file_bpms;
         for (i32 i = 1; i < buf_len(bpms) - 1; i++) {
-            assert(bpms[i].row >= bpms[i - 1].row);
+            validate(ctx, bpms[i].row >= bpms[i - 1].row, "bpm row is out of order");
             bpms[i].time = row_time(bpms[i - 1], bpms[i].row);
-            assert(bpms[i].time >= bpms[i - 1].time);
+            validate(ctx, bpms[i].time >= bpms[i - 1].time, "bpm time is out of order");
         }
         result.bpms = bpms;
     } else {
@@ -623,7 +641,7 @@ static SmFile parse_sm(Buffer data)
         buf_push(new_bpms, SentinelBPM);
         result.bpms = new_bpms;
     #endif
-        die(ctx);
+        die(ctx, "not implemented");
     }
 
     buf_push(inserted_beats, FLT_MAX);
@@ -645,10 +663,10 @@ static SmFile parse_sm(Buffer data)
             while (SmFileNoteValid[(u8)*ctx->p]) {
                 file_rows[n_rows++] = parse_notes_row(ctx);
             }
-            assert(n_rows > 0);
-            assert(n_rows <= 192);
+            validate(ctx, n_rows > 0, "empty measures aren't supported");
+            validate(ctx, n_rows <= 192, "too many rows in measure");
             f32 row_inc = 192.0f / (f32)n_rows;
-            assert(rint(row_inc) == row_inc);
+            validate(ctx, (f32)(i32)(row_inc) == row_inc, "number of rows in measure does not form valid snap");
 
             for (i32 i = 0; i < n_rows; i++) {
                 if (file_rows[i].cccc) {
@@ -707,13 +725,15 @@ static SmFile parse_sm(Buffer data)
         result.diffs[d].rows = rows;
         result.diffs[d].n_rows = (i32)buf_len(rows);
 
-        // Not user error here
         for (i32 i = 1; i < result.diffs[d].n_rows; i++) {
             assert(rows[i - 1].time <= rows[i].time);
         }
     }
 
-    return result;
+    if (out) {
+        *out = result;
+    }
+    return 0;
 }
 
 typedef union MinaSerializedRow

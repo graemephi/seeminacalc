@@ -1,53 +1,42 @@
-target := debug
-
-ifeq ($(target), debug)
-Debug := 1
-Force :=
-endif
-
-ifeq ($(target), release)
-Debug := 0
-Force := *
-endif
-
 Clang := 0
 Includes := -Ietterna -Ilib
 
-ifeq ($(OS),Windows_NT)
-	ifeq ($(Clang), 1)
-		Compiler := clang-cl
-		LTO := -flto -fuse-ld=lld
-	else
-		Compiler := cl
-		LTO := -GL
-	endif
-
-	ifeq ($(Debug), 1)
-		OptimisationLevel := -Od -Ob1 -MTd -Zi
-	else
-		OptimisationLevel := -O2 -Ob2 -MT $(LTO)
-	endif
-
-	CompilerOptions := -Oi -nologo -EHsc -W4 -DSOKOL_NO_DEPRECATED $(OptimisationLevel) $(Includes) -Fdbuild/ -Fobuild/ -Febuild/
-	COptions := -WX
-	CPPOptions := -std:c++17
-else
-	$(error todo)
+ifneq ($(OS),Windows_NT)
+	$(error haven't done this. look at emcc)
 endif
 
-all: build build/main.exe
+
+ifdef clang
+Compiler := clang-cl
+LTO := -flto -fuse-ld=lld
+else
+Compiler := cl
+LTO := -GL
+endif
+
+Debug := -Od -Ob1 -MTd -Zi -Fd"build/debug/" -Fo"build/debug/" -Fe"build/debug/"
+Release := -O2 -Ob2 -MT $(LTO) -Fd"build/release/" -Fo"build/release/" -Fe"build/release/"
+Common := -Oi -nologo -EHsc -W4 $(Includes)
+C := -WX
+CPP := -std:c++17
+
+all: build build/debug/main.exe
 
 clean:
 	rm -r build
 
 build:
-	@-mkdir build
+	@-mkdir -p build/debug
+	@-mkdir -p build/release
 
-build/cpp.obj: *.h *.cpp Makefile
-	$(Compiler) $(CompilerOptions) $(CPPOptions) -c cpp.cpp
+build/debug/cpp.obj: *.h *.cpp Makefile
+	$(Compiler) $(Common) $(CPP) $(Debug) -c cpp.cpp
 
-build/main.exe: *.h *.c build/cpp.obj Makefile
-	$(Compiler) $(CompilerOptions) $(COptions) main.c build/cpp.obj
+build/debug/main.exe: *.h *.c build/debug/cpp.obj Makefile
+	$(Compiler) $(Common) $(C) $(Debug) main.c build/debug/cpp.obj
+
+build/release:
+	$(Compiler) $(Common) $(CPP) $(Release) main.c cpp.cpp
 
 EMCCFlags :=
 EMCCFlags += -s DISABLE_EXCEPTION_CATCHING=1
@@ -66,10 +55,10 @@ EMCCFlags += -DNDEBUG
 EMCCFlags += -DSOKOL_GLES3
 EMCCFlags += -s ENVIRONMENT=web
 EMCCFlags += -O3
-EMCCFlags += -s "EXPORTED_FUNCTIONS=['_main', '_init', '_set_font', '_open_file']"
+EMCCFlags += -s "EXPORTED_FUNCTIONS=['_main', '_set_font', '_open_file', '_calloc']"
 EMCCFlags += -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall']"
 
 emscripten:
 	emcc $(EMCCFlags) -msse -msimd128 $(Includes) main.c cpp.cpp -o web/main.js
 
-.PHONY: all clean $(Force)
+.PHONY: all clean build/release

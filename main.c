@@ -2,6 +2,7 @@
 #define SOKOL_GLCORE33
 #endif
 
+#define SOKOL_NO_DEPRECATED
 #define SOKOL_IMPL
 #include "sokol/sokol_app.h"
 #include "sokol/sokol_gfx.h"
@@ -240,7 +241,7 @@ typedef struct State
 
     ParamSet ps;
     bool *parameter_graphs_enabled;
-    i32 *param_graph_order;
+    i32 *parameter_graph_order;
     FnGraph *graphs;
     i32 *free_graphs;
 
@@ -249,6 +250,7 @@ typedef struct State
 
     int update_index;
     i32 open_windows;
+    b32 parameters_shown_last_frame;
 } State;
 static State state = {0};
 
@@ -427,11 +429,15 @@ void init(void)
 #else
     const char *files[] = {
         "./03 IMAGE -MATERIAL-(Version 0).sm",
-        "./03 IMAGE -MATERIAL-(Version 0).sm",
         "./Grief & Malice.sm",
         "./Odin.sm",
         "./Skycoffin CT.sm",
-        "./The Lost Dedicated Life.sm"
+        "./The Lost Dedicated Life.sm",
+
+        // Junk """""""test vectors"""""""
+        "./03 IMAGE -MATERIAL-(Version 0).sm",
+        "./main.c",
+        "NotoSansCJKjp-Regular.otf"
     };
 #endif
 
@@ -460,7 +466,7 @@ void init(void)
     state.active = null_sfi;
 }
 
-static i32 param_slider_widget(i32 param_idx)
+static i32 param_slider_widget(i32 param_idx, b32 show_parameter_names)
 {
     b32 toggled = false;
     i32 mp = param_idx;
@@ -481,6 +487,9 @@ static i32 param_slider_widget(i32 param_idx)
         snprintf(slider_id, sizeof(slider_id), "##slider%d", mp);
         igSetNextItemWidth(igGetFontSize() * 10.0f);
         igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f);
+        if (show_parameter_names == false) {
+            tooltip(state.info.params[mp].name);
+        }
         if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
         }
@@ -500,8 +509,10 @@ static i32 param_slider_widget(i32 param_idx)
                 state.ps.max[mp] = state.info.defaults.max[mp];
             }
         }
-        igSameLine(0, 0);
-        igText(state.info.params[mp].name);
+        if (show_parameter_names) {
+            igSameLine(0, 0);
+            igText(state.info.params[mp].name);
+        }
     }
     igPopID();
     return toggled;
@@ -541,10 +552,11 @@ void frame(void)
 
     ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus;
 
-    igSetNextWindowPos((ImVec2) { io->DisplaySize.x - 399.0f, 0.0f }, ImGuiCond_Always, V2Zero);
-    igSetNextWindowSize((ImVec2) { 400.0f, io->DisplaySize.y }, ImGuiCond_Always);
+    f32 right_width = 400.0f;
+    igSetNextWindowPos((ImVec2) { io->DisplaySize.x - (right_width - 1.0f), 0.0f }, ImGuiCond_Always, V2Zero);
+    igSetNextWindowSize((ImVec2) { right_width, io->DisplaySize.y }, ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
-        // Header
+        // Header + arrow drop down fake thing
         igSameLine(igGetWindowWidth() - 36.0f, 4);
         b32 skillsets = false;
         igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);
@@ -597,8 +609,9 @@ void frame(void)
     SimFileInfo *active = state.active;
     i32 param_toggled = -1;
 
+    f32 left_width = state.parameters_shown_last_frame ? 450.0f : 300.0f;
     igSetNextWindowPos((ImVec2) { 0, 0 }, ImGuiCond_Always,  V2Zero);
-    igSetNextWindowSize((ImVec2) { 450.0f, io->DisplaySize.y }, ImGuiCond_Always);
+    igSetNextWindowSize((ImVec2) { left_width, io->DisplaySize.y }, ImGuiCond_Always);
     if (igBegin("Mod Parameters", 0, fixed_window)) {
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
@@ -634,13 +647,25 @@ void frame(void)
 
         // Tabs for param strength filters
         if (igBeginTabBar("FilterTabs", ImGuiTabBarFlags_NoTooltip)) {
+            // Arrow dropdown fake thing again
+            igSameLine(0, 0);
+            igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);
+            igPushStyleColorU32(ImGuiCol_HeaderActive, 0);
+            b32 show_parameter_names = false;
+            if (igTreeNodeExStr("##parameter name toggle", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+                show_parameter_names = true;
+            } tooltip("show parameter names");
+            igPopStyleColor(2);
+            state.parameters_shown_last_frame = show_parameter_names;
+
+            // The actual tabs
             if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.strong == 0 || (active->effects.strong[mp] & effect_mask) != 0) {
-                                if (param_slider_widget(mp)) {
+                                if (param_slider_widget(mp, show_parameter_names)) {
                                     param_toggled = mp;
                                 }
                             }
@@ -656,7 +681,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.weak == 0 || (active->effects.weak[mp] & effect_mask) != 0) {
-                                if (param_slider_widget(mp)) {
+                                if (param_slider_widget(mp, show_parameter_names)) {
                                     param_toggled = mp;
                                 }
                             }
@@ -671,7 +696,7 @@ void frame(void)
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
-                            if (param_slider_widget(mp)) {
+                            if (param_slider_widget(mp, show_parameter_names)) {
                                 param_toggled = mp;
                             }
                         }
@@ -686,7 +711,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.weak && (active->effects.weak[mp] & effect_mask) == 0) {
-                                if (param_slider_widget(mp)) {
+                                if (param_slider_widget(mp, show_parameter_names)) {
                                     param_toggled = mp;
                                 }
                             }
@@ -705,11 +730,12 @@ void frame(void)
     i32 open_windows = 0;
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
         if (sfi->open) {
-            if (state.open_windows == 0) {
-                igSetNextWindowPos((ImVec2) { 450.0f, 0 }, ImGuiCond_Always, V2Zero);
-                igSetNextWindowSize((ImVec2) { io->DisplaySize.x - 850.0f, io->DisplaySize.y }, ImGuiCond_Always);
+            f32 centre_width = io->DisplaySize.x - left_width - right_width;
+            if (state.open_windows == 0 && centre_width >= 450.0f) {
+                igSetNextWindowPos((ImVec2) { left_width, 0 }, ImGuiCond_Always, V2Zero);
+                igSetNextWindowSize((ImVec2) {centre_width , io->DisplaySize.y }, ImGuiCond_Always);
             } else {
-                ImVec2 sz = (ImVec2) {750.0f, clamp_highf(io->DisplaySize.y, io->DisplaySize.y * 0.33f * (buf_len(sfi->graphs) + 1)) };
+                ImVec2 sz = (ImVec2) { clamp_high(io->DisplaySize.x, 750.0f), clamp(300.0f, io->DisplaySize.y, io->DisplaySize.y * 0.33f * (buf_len(sfi->graphs) + 1)) };
                 ImVec2 pos = (ImVec2) { rngf() * (io->DisplaySize.x - sz.x), rngf() * (io->DisplaySize.y - sz.y) };
                 igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Appearing);
@@ -719,7 +745,7 @@ void frame(void)
                     next_active = sfi;
                 }
                 igText(sfi->diff.buf);
-                igSameLine(clamp_lowf(igGetWindowWidth() - 268.f, 100), 0);
+                igSameLine(clamp_low(igGetWindowWidth() - 268.f, 100), 0);
                 igText(sfi->chartkey.buf);
 
                 ipSetNextPlotLimits(82, 100, sfi->min_rating - 1.f, sfi->max_rating + 2.f, ImGuiCond_Once);
@@ -797,14 +823,14 @@ void frame(void)
 
     if (param_toggled != -1) {
         if (state.parameter_graphs_enabled[param_toggled]) {
-            buf_push(state.param_graph_order, param_toggled);
+            buf_push(state.parameter_graph_order, param_toggled);
             for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                 buf_push(sfi->graphs, make_parameter_graph(param_toggled));
             }
         } else {
-            for (isize i = 0; i < buf_len(state.param_graph_order); i++) {
-                if (state.param_graph_order[i] == param_toggled) {
-                    buf_remove_sorted_index(state.param_graph_order, i);
+            for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
+                if (state.parameter_graph_order[i] == param_toggled) {
+                    buf_remove_sorted_index(state.parameter_graph_order, i);
                     break;
                 }
             }
