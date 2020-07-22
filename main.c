@@ -609,8 +609,8 @@ void frame(void)
     ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 
     f32 right_width = 400.0f;
-    igSetNextWindowPos((ImVec2) { ds.x - right_width, 0.0f }, ImGuiCond_Always, V2Zero);
-    igSetNextWindowSize((ImVec2) { right_width + 1.0f, ds.y + 1.0f }, ImGuiCond_Always);
+    igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
+    igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
         // Header + arrow drop down fake thing
         igSameLine(igGetWindowWidth() - 36.0f, 4);
@@ -650,14 +650,14 @@ void frame(void)
                     snprintf(r, sizeof(r), "%2.2f##%d", sfi->skillsets_over_wife[ss][13], (i32)ss);
                     igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
                     igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
-                    igSelectableBool(r, sfi->display_skillsets[ss], ImGuiSelectableFlags_None, (ImVec2) { 300.0f / NumSkillsets, 0 });
+                    igSelectableBool(r, sfi->display_skillsets[ss], ImGuiSelectableFlags_None, V2(300.0f / NumSkillsets, 0));
                     tooltip("%s", SkillsetNames[ss]);
                     if (igIsItemHovered(0)) {
                         ss_highlight[ss] = 1;
                     }
                     igPopStyleColor(2);
                     igSameLine(0, 4);
-                    igDummy((ImVec2){4,0});
+                    igDummy(V2(4,0));
                     igSameLine(0, 4);
                 }
                 igNewLine();
@@ -672,8 +672,8 @@ void frame(void)
     i32 param_toggled = -1;
 
     f32 left_width = state.parameters_shown_last_frame ? 450.0f : 300.0f;
-    igSetNextWindowPos((ImVec2) { -1.0f, 0 }, ImGuiCond_Always,  V2Zero);
-    igSetNextWindowSize((ImVec2) { left_width + 1.0f, ds.y + 1.0f }, ImGuiCond_Always);
+    igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always,  V2Zero);
+    igSetNextWindowSize(V2(left_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Mod Parameters", 0, fixed_window)) {
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
@@ -684,7 +684,7 @@ void frame(void)
         for (isize i = 0; i < NumSkillsets; i++) {
             igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[i]);
             igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[i]);
-            igSelectableBoolPtr(SkillsetNames[i], &active->selected_skillsets[i], 0, (ImVec2){ (igGetWindowWidth() - 12*4)  / selectable_width_factor, 0});
+            igSelectableBoolPtr(SkillsetNames[i], &active->selected_skillsets[i], 0, V2((igGetWindowWidth() - 12*4) / selectable_width_factor, 0));
             igPopStyleColor(2);
             if (ItemDoubleClicked(0)) {
                 clear_selections_to = i;
@@ -694,7 +694,7 @@ void frame(void)
             }
             if (i != 3) {
                 igSameLine(0, 4);
-                igDummy((ImVec2){4, 4});
+                igDummy(V2(4, 4));
                 igSameLine(0, 4);
             } else {
                 selectable_width_factor = 4.0f;
@@ -795,11 +795,11 @@ void frame(void)
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
         if (sfi->open) {
             if (state.num_open_windows == 0 && centre_width >= 450.0f) {
-                igSetNextWindowPos((ImVec2) { left_width, 0 }, ImGuiCond_Always, V2Zero);
-                igSetNextWindowSize((ImVec2) {centre_width , ds.y }, ImGuiCond_Always);
+                igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
+                igSetNextWindowSize(V2(centre_width , ds.y), ImGuiCond_Always);
             } else {
-                ImVec2 sz = (ImVec2) { clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (buf_len(sfi->graphs) + 1)) };
-                ImVec2 pos = (ImVec2) { rngf() * (ds.x - sz.x), rngf() * (ds.y - sz.y) };
+                ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (buf_len(sfi->graphs) + 1)));
+                ImVec2 pos = V2(rngf() * (ds.x - sz.x), rngf() * (ds.y - sz.y));
                 igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Appearing);
             }
@@ -862,7 +862,7 @@ void frame(void)
     state.num_open_windows = num_open_windows;
 
     if (buf_len(state.files) == 0) {
-        igSetNextWindowPos((ImVec2) { left_width + centre_width / 2.0f, ds.y / 2.f }, 0, (ImVec2) { 0.5f, 0.5f });
+        igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f), 0, V2(0.5f, 0.5f));
 
         igBegin("Drop", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
         igText("Drop files, song folders or packs here");
