@@ -84,6 +84,15 @@ static f32 max(f32 a, f32 b)
     return (a >= b) ? a : b;
 }
 
+static f32 safe_div(f32 a, f32 b)
+{
+    if (b == 0.0f) {
+        return 0.0f;
+    }
+
+    return a / b;
+}
+
 typedef struct Stack
 {
     u8 *buf;
@@ -349,6 +358,16 @@ isize buf_index_of_(Buf *hdr, isize index)
     return -1;
 }
 
+void buf_set_len(void *buf, i32 len)
+{
+    Buf *hdr = buf_hdr(buf);
+    if (hdr) {
+        hdr->len = len;
+    } else {
+        assert(len == 0);
+    }
+}
+
 #define buf_remove_unsorted_index(buf, index) buf_remove_unsorted_(buf_hdr(buf), buf_elem_size(buf), index)
 #define buf_remove_unsorted(buf, elem) buf_remove_unsorted_(buf_hdr(buf), buf_elem_size(buf), buf_index_of(buf, elem))
 force_inline
@@ -398,13 +417,22 @@ String copy_string(String s)
 }
 
 static Stack **stack_stack = 0;
-void push_allocator(Stack *a)
+i32 push_allocator(Stack *a)
 {
-    buf_push(stack_stack, current_allocator);
+    Stack **pushed = buf_push(stack_stack, current_allocator);
     current_allocator = a;
+    return (i32)buf_index_of(stack_stack, pushed);
 }
 
 void pop_allocator()
 {
     current_allocator = buf_pop(stack_stack);
+}
+
+void restore_allocator(i32 handle)
+{
+    assert(handle >= 0);
+    assert(handle < buf_len(stack_stack));
+    buf_set_len(stack_stack, handle);
+    current_allocator = handle > 0 ? buf_last(stack_stack) : permanent_memory;
 }

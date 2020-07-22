@@ -36,6 +36,7 @@ typedef enum {
     Tag_FGChanges,
     Tag_Genre,
     Tag_KeySounds,
+    Tag_LastBeatHint,
     Tag_LyricsPath,
     Tag_Music,
     Tag_Notes,
@@ -71,11 +72,12 @@ typedef enum SmDifficulty
 
 typedef struct BPMChange
 {
-    f32 bpm;
+    f32 bpm; // can remove
     f32 bps;
-    f32 beat;
+    f32 beat; // can remove
     f32 row;
     f32 time;
+    b32 artificial;
 } BPMChange;
 
 // FLT_MAX w/o header
@@ -121,7 +123,7 @@ typedef struct SmFile
     BPMChange *file_bpms;
     BPMChange *bpms;
     i32 n_bpms;
-    i32 has_stops;
+    b32 has_stops;
 } SmFile;
 
 typedef union SmFileRow

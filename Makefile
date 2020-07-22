@@ -16,8 +16,8 @@ endif
 
 Debug := -Od -Ob1 -MTd -Zi -Fd"build/debug/" -Fo"build/debug/" -Fe"build/debug/"
 Release := -O2 -Ob2 -MT $(LTO) -Fd"build/release/" -Fo"build/release/" -Fe"build/release/"
-Common := -Oi -nologo -EHsc -W4 $(Includes)
-C := -WX
+Common := -Oi -nologo -EHsc -W4 -WX $(Includes)
+C :=
 CPP := -std:c++17
 
 all: build build/debug/main.exe

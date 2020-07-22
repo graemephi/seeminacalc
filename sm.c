@@ -202,6 +202,7 @@ static const String TagStrings[TagCount] = {
     SS("FGCHANGES"),
     SS("GENRE"),
     SS("KEYSOUNDS"),
+    SS("LASTBEATHINT"),
     SS("LYRICSPATH"),
     SS("MUSIC"),
     SS("NOTES"),
@@ -448,7 +449,8 @@ static f32 mina_row_time(MinaRowTimeGarbage *g, BPMChange *bpms, f32 row)
         g->last_seen_bpm = bpms;
     }
 
-    f32 perc = (row - bpms[0].row) / (g->event_row - bpms[0].row);
+    // Todo: figure out under what conditions safe_div is necessary
+    f32 perc = safe_div(row - bpms[0].row, g->event_row - bpms[0].row);
     return g->last_time + g->time_to_next_event * perc;
 }
 
@@ -463,14 +465,27 @@ static i32 parse_sm(Buffer data, SmFile *out)
         .env = &env
     };
 
+    i32 pa = push_allocator(current_allocator);
     i32 err = setjmp(env);
     if (err) {
+        // rn this longjmp + push/restore thing is error prone. we only do it here, so fine, whatever.
+        // but these things really belong together in a unified context thing
+        restore_allocator(pa);
         printf("sm error: %s\n", ctx->error.buf);
         return err;
     }
 
     SmStop *stops = 0;
     b32 negBPMsexclamationmark = false;
+
+    // Skip UTF8 BOM
+    validate(ctx, data.len > 4, "file is less than 4 bytes!?");
+    u32 first_word = *(u32 *)ctx->p;
+    if ((first_word & 0xffffff) == 0xBFBBEF) {
+        ctx->p += 3;
+    }
+    validate(ctx, (first_word >> 16) != 0xFEFF, "utf16 is not supported!?");
+    validate(ctx, (first_word >> 16) != 0xFFFE, "utf16 is not supported?!");
 
     SmTagValue tag = {0};
     while (try_advance_to_and_parse_tag(ctx, &tag)) {
@@ -538,7 +553,8 @@ static i32 parse_sm(Buffer data, SmFile *out)
     }
 
     validate(ctx, ctx->p == ctx->end || *ctx->p == 0, "failed to reach end of file");
-    validate(ctx, result.file_bpms != 0, "file has no bpms");
+    validate(ctx, buf_len(result.diffs) != 0, "file has no charts");
+    validate(ctx, buf_len(result.file_bpms) != 0, "file has no bpms");
 
     f32 *inserted_beats = 0;
 
@@ -588,6 +604,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
 
                 prev.bps = 10500.f * (row - prev.row);
                 prev.bpm = prev.bps * 60.0f;
+                prev.artificial = true;
 
                 buf_last(new_bpms) = prev;
                 next.time = prev.time;
@@ -607,6 +624,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
                     .bpm = bps * 60.0f,
                     .row = corrected_row,
                     .time = row_time(buf_last(new_bpms), corrected_row),
+                    .artificial = true
                 };
 
                 f32 end_row = corrected_row + 48.0f;
@@ -628,7 +646,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
                 stop++;
             }
 
-            assert(buf_last(new_bpms).row != next.row);
+            validate(ctx, buf_last(new_bpms).row != next.row, "this file is too complicated");
             buf_push(new_bpms, next);
         }
 
@@ -665,6 +683,7 @@ static i32 parse_sm(Buffer data, SmFile *out)
 
             for (i32 i = 0; i < n_rows; i++) {
                 if (file_rows[i].cccc) {
+                    validate(ctx, bpm->artificial == false, "notes during neg bpms. these could be supported but aren't");
                     buf_push(rows, (SmRow) {
                         .row = row,
                         .time = mina_row_time(&g, bpm, (f32)row),
@@ -736,6 +755,8 @@ static i32 parse_sm(Buffer data, SmFile *out)
     if (out) {
         *out = result;
     }
+
+    pop_allocator();
     return 0;
 }
 
@@ -945,7 +966,7 @@ String generate_chart_key(SmFile *sm, isize diff)
 	for (isize i = 0; i < sm->diffs[diff].n_rows; i++) {
         MinaSerializedRow row = row_mina_serialize(r[i]);
         if (row.row) {
-            while (r[i].row >= bpm[1].row) {
+            while (r[i].row >= bpm[1].row || bpm->artificial) {
                 bpm++;
             }
             buf_printf(prep, "%d%d%d%d%d",

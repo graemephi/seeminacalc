@@ -18,7 +18,9 @@
 #define SOKOL_IMGUI_IMPL
 #include "sokol/util/sokol_imgui.h"
 
-#if 0
+#define TEST_CHARTKEYS 0
+
+#if TEST_CHARTKEYS
 #include "sqlite3.c"
 // The perils of including sqlite3 in your translation unit
 // sqlite3.c also disables certain warnings.
@@ -42,7 +44,7 @@ typedef struct CacheDB
     sqlite3_stmt *note_data_stmt;
 } CacheDB;
 
-static const char *db_path = 0;
+static CacheDB cache_db = {0};
 
 CacheDB cachedb_init(const char *path)
 {
@@ -85,8 +87,6 @@ Buffer get_steps_from_db(CacheDB *db, char *key)
 }
 #endif
 
-
-
 #ifdef __EMSCRIPTEN__
 static Buffer font_data = {0};
 
@@ -115,16 +115,17 @@ Buffer load_font_file(char *path)
     return result;
 }
 
-void open_file(char *data, int len)
+void open_file(char *data, int len, b32 open_window)
 {
     Buffer buf = (Buffer) {
-        .buf = data,
+        .buf = alloc(u8, len),
         .len = len,
         .cap = len
     };
 
-    i32 parse_and_add_sm(Buffer buf);
-    parse_and_add_sm(buf);
+    memcpy(buf.buf, data, len);
+    i32 parse_and_add_sm(Buffer buf, b32 open_window);
+    parse_and_add_sm(buf, open_window);
     free(data);
 }
 #else
@@ -236,6 +237,7 @@ typedef struct SimFileInfo
     i32 *graphs;
 
     bool selected_skillsets[NumSkillsets];
+    bool display_skillsets[NumSkillsets];
 
     bool open;
     bool stops;
@@ -272,7 +274,7 @@ static State state = {0};
 
 float ssxs[19];
 
-i32 parse_and_add_sm(Buffer buf)
+i32 parse_and_add_sm(Buffer buf, b32 open_window)
 {
     push_allocator(scratch);
     SmFile sm = {0};
@@ -309,12 +311,18 @@ i32 parse_and_add_sm(Buffer buf)
         .chartkey = copy_string(ck),
         .id = copy_string(id),
         .notes = frobble_note_data(ni, buf_len(ni)),
-        .stops = sm.has_stops
+        .stops = sm.has_stops,
+        .open = open_window
     });
 
     buf_reserve(sfi->effects.weak, state.info.num_params);
     buf_reserve(sfi->effects.strong, state.info.num_params);
     // calculate_effects(&state.info, &state.calc, sfi->notes, &sfi->effects);
+
+#if TEST_CHARTKEYS
+    Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
+    assert(b.len);
+#endif
 
     sfi->min_rating = 40;
     sfi->min_relative_rating = 2;
@@ -336,7 +344,8 @@ i32 parse_and_add_sm(Buffer buf)
     }
 
     for (isize ss = 1; ss < NumSkillsets; ss++) {
-        sfi->selected_skillsets[ss] = (0.9 <= (sfi->skillsets_over_wife[ss][18] / sfi->skillsets_over_wife[0][18]));
+        sfi->display_skillsets[ss] = (0.9 <= (sfi->skillsets_over_wife[ss][18] / sfi->skillsets_over_wife[0][18]));
+        sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
     }
 
     printf("Added %s\n", id.buf);
@@ -451,6 +460,7 @@ void init(void)
     const char *files[0] = {};
 #else
     const char *files[] = {
+        "./osu.sm",
         "./03 IMAGE -MATERIAL-(Version 0).sm",
         "./Grief & Malice.sm",
         "./Odin.sm",
@@ -474,7 +484,7 @@ void init(void)
 
     for (isize i = 0; i < array_length(files); i++) {
         Buffer f = read_file(files[i]);
-        parse_and_add_sm(f);
+        parse_and_add_sm(f, i == 0);
     }
 
     for (i32 ss = 0; ss < NumSkillsets; ss++) {
@@ -640,7 +650,7 @@ void frame(void)
                     snprintf(r, sizeof(r), "%2.2f##%d", sfi->skillsets_over_wife[ss][13], (i32)ss);
                     igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
                     igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
-                    igSelectableBool(r, sfi->selected_skillsets[ss], ImGuiSelectableFlags_None, (ImVec2) { 300.0f / NumSkillsets, 0 });
+                    igSelectableBool(r, sfi->display_skillsets[ss], ImGuiSelectableFlags_None, (ImVec2) { 300.0f / NumSkillsets, 0 });
                     tooltip("%s", SkillsetNames[ss]);
                     if (igIsItemHovered(0)) {
                         ss_highlight[ss] = 1;
@@ -851,11 +861,11 @@ void frame(void)
     }
     state.num_open_windows = num_open_windows;
 
-    if (buf_len(state.files) > 0) {
+    if (buf_len(state.files) == 0) {
         igSetNextWindowPos((ImVec2) { left_width + centre_width / 2.0f, ds.y / 2.f }, 0, (ImVec2) { 0.5f, 0.5f });
 
         igBegin("Drop", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
-        igText(" Drop .sm file here ");
+        igText("Drop files, song folders or packs here");
         igEnd();
     }
 
@@ -951,7 +961,7 @@ void frame(void)
             }
         }
     }
-    state.update_index++;
+    state.update_index += 127;
 }
 
 void cleanup(void)
@@ -969,6 +979,11 @@ sapp_desc sokol_main(int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
+
+#if TEST_CHARTKEYS
+    assert(argc == 2);
+    cache_db = cachedb_init(argv[1]);
+#endif
 
     return (sapp_desc) {
         .init_cb = init,
