@@ -88,9 +88,9 @@ struct OHTrillMod
 	void setup()
 	{
 		window =
-		  CalcClamp(static_cast<int>(window_param), 1, max_moving_window_size - 1);
+		  CalcClamp(static_cast<int>(window_param), 1, max_moving_window_size);
 		cc_window =
-		  CalcClamp(static_cast<int>(window_param), 1, max_moving_window_size - 1);
+		  CalcClamp(static_cast<int>(window_param), 1, max_moving_window_size);
 	}
 
 #pragma endregion

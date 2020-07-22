@@ -19,25 +19,26 @@ static f32 absolute_value(f32 a)
 }
 
 const char *ModNames[] = {
-    "StreamMod",
-    "JSMod",
-    "HSMod",
-    "CJMod",
-    "CJDensityMod",
-    "OHJumpModGuyThing",
-    "CJOHJumpMod",
-    "BalanceMod",
-    "OHTrillMod",
-    "VOHTrillMod",
-    "ChaosMod",
-    "RunningManMod",
-    "WideRangeBalanceMod",
-    "WideRangeRollMod",
-    "WideRangeJumptrillMod",
-    "WideRangeAnchorMod",
-    "FlamJamMod",
-    "TheThingLookerFinderThing",
-    "TheThingLookerFinderThing2",
+	"StreamMod",
+	"JSMod",
+	"HSMod",
+	"CJMod",
+	"CJDensityMod",
+	"OHJumpModGuyThing",
+	"CJOHJumpMod",
+	"RollMod",
+	"BalanceMod",
+	"OHTrillMod",
+	"VOHTrillMod",
+	"ChaosMod",
+	"RunningManMod",
+	"WideRangeBalanceMod",
+	"WideRangeRollMod",
+	"WideRangeJumptrillMod",
+	"WideRangeAnchorMod",
+	"FlamJamMod",
+	"TheThingLookerFinderThing",
+	"TheThingLookerFinderThing2",
 };
 
 enum
@@ -160,6 +161,7 @@ CalcInfo calc_info()
         &shalhoub._cjd._params,
         &shalhoub._ohj._params,
         &shalhoub._cjohj._params,
+        &shalhoub._roll._params,
         &shalhoub._bal._params,
         &shalhoub._oht._params,
         &shalhoub._voht._params,
@@ -171,7 +173,7 @@ CalcInfo calc_info()
         &shalhoub._wra._params,
         &shalhoub._fj._params,
         &shalhoub._tt._params,
-        &shalhoub._tt2._params
+        &shalhoub._tt2._params,
     };
 
     i32 last_param_start_index = 0;

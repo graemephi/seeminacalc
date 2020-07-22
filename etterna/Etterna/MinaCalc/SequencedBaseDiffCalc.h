@@ -43,7 +43,7 @@ struct techyo
 		}
 
 		const auto a = seq.get_sc_ms_now(ct);
-		auto b = ms_init;
+		float b;
 		if (ct == col_ohjump) {
 			b = seq.get_sc_ms_now(ct, false);
 		} else {
@@ -62,7 +62,7 @@ struct techyo
 
 		const auto scoliosis = seq._mw_sc_ms[col_left].get_now();
 		const auto poliosis = seq._mw_sc_ms[col_right].get_now();
-		auto obliosis = 0.F;
+		float obliosis;
 
 		if (ct == col_left) {
 			obliosis = poliosis / scoliosis;

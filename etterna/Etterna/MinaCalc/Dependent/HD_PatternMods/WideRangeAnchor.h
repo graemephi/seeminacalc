@@ -52,7 +52,7 @@ struct WideRangeAnchorMod
 	{
 		// setup should be run after loading params from disk
 		window =
-		  CalcClamp(static_cast<int>(window_param), 1, max_moving_window_size - 1);
+		  CalcClamp(static_cast<int>(window_param), 1, max_moving_window_size);
 		divisor = static_cast<float>(static_cast<int>(diff_max) -
 									 static_cast<int>(diff_min));
 

@@ -142,6 +142,8 @@ class XNode
 	}
 	auto RemoveAttr(const std::string& sName) -> bool;
 
+	auto ChildrenEmpty() -> bool { return 0; }
+
 	XNode();
 	explicit XNode(const std::string& sName);
 	XNode(const XNode& cpy);
