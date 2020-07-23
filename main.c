@@ -175,6 +175,13 @@ static bool ItemDoubleClicked(int button)
     return result;
 }
 
+static f32 GetContentRegionAvailWidth()
+{
+    ImVec2 cr;
+    igGetContentRegionAvail(&cr);
+    return cr.x;
+}
+
 static void tooltip(const char *fmt, ...)
 {
     if (igIsItemHovered(0)) {
@@ -241,6 +248,7 @@ typedef struct SimFileInfo
 
     bool open;
     bool stops;
+    bool fullscreen_window;
     u64 frame_last_focused;
 } SimFileInfo;
 
@@ -267,8 +275,13 @@ typedef struct State
     u32 skillset_colors_selectable[NumSkillsets];
 
     int update_index;
-    i32 num_open_windows;
-    b32 parameters_shown_last_frame;
+    struct {
+        i32 num_open_windows;
+        b32 show_parameter_names;
+        f32 left_width;
+        f32 centre_width;
+        f32 right_width;
+    } last_frame;
 } State;
 static State state = {0};
 
@@ -670,8 +683,9 @@ void frame(void)
 
     SimFileInfo *active = state.active;
     i32 param_toggled = -1;
+    b32 show_parameter_names = state.last_frame.show_parameter_names;
 
-    f32 left_width = state.parameters_shown_last_frame ? 450.0f : 300.0f;
+    f32 left_width = show_parameter_names ? 450.0f : 302.0f;
     igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always,  V2Zero);
     igSetNextWindowSize(V2(left_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Mod Parameters", 0, fixed_window)) {
@@ -694,10 +708,8 @@ void frame(void)
             }
             if (i != 3) {
                 igSameLine(0, 4);
-                igDummy(V2(4, 4));
+                igDummy(V2(4, 0));
                 igSameLine(0, 4);
-            } else {
-                selectable_width_factor = 4.0f;
             }
             effect_mask |= (active->selected_skillsets[i] << i);
         }
@@ -714,12 +726,9 @@ void frame(void)
             igSameLine(0, 0);
             igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);
             igPushStyleColorU32(ImGuiCol_HeaderActive, 0);
-            b32 show_parameter_names = false;
-            if (igTreeNodeExStr("##parameter name toggle", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
-                show_parameter_names = true;
-            } tooltip("show parameter names");
+            show_parameter_names = igTreeNodeExStr("##parameter name toggle", ImGuiTreeNodeFlags_NoTreePushOnOpen);
+            tooltip("show parameter names");
             igPopStyleColor(2);
-            state.parameters_shown_last_frame = show_parameter_names;
 
             // The actual tabs
             if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
@@ -794,23 +803,35 @@ void frame(void)
     f32 centre_width = ds.x - left_width - right_width;
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
         if (sfi->open) {
-            if (state.num_open_windows == 0 && centre_width >= 450.0f) {
+            ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
+            if (state.last_frame.num_open_windows == 0 && centre_width >= 450.0f || sfi->fullscreen_window) {
+                sfi->fullscreen_window = true;
+                window_flags = ImGuiWindowFlags_NoResize;
                 igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
-                igSetNextWindowSize(V2(centre_width , ds.y), ImGuiCond_Always);
+                igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
             } else {
+                sfi->fullscreen_window = false;
                 ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (buf_len(sfi->graphs) + 1)));
                 ImVec2 pos = V2(rngf() * (ds.x - sz.x), rngf() * (ds.y - sz.y));
                 igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Appearing);
             }
-            if (igBegin(sfi->id.buf, &sfi->open, ImGuiWindowFlags_None)) {
+            if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
                 }
+
+                // Unset fullscreen window on drag
+                if (igIsWindowHovered(ImGuiHoveredFlags_RootWindow) && igIsMouseDragging(0, -1.f)) {
+                    sfi->fullscreen_window = false;
+                }
+
+                // File difficulty + chartkey text
                 igText(sfi->diff.buf);
-                igSameLine(clamp_low(igGetWindowWidth() - 268.f, 100), 0);
+                igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
                 igText(sfi->chartkey.buf);
 
+                // Plots
                 ipSetNextPlotLimits(82, 100, sfi->min_rating - 1.f, sfi->max_rating + 2.f, ImGuiCond_Once);
                 if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
                     for (i32 r = 0; r < NumSkillsets; r++) {
@@ -859,7 +880,6 @@ void frame(void)
             num_open_windows++;
         }
     }
-    state.num_open_windows = num_open_windows;
 
     if (buf_len(state.files) == 0) {
         igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f), 0, V2(0.5f, 0.5f));
@@ -873,6 +893,12 @@ void frame(void)
     simgui_render();
     sg_end_pass();
     sg_commit();
+
+    state.last_frame.num_open_windows = num_open_windows;
+    state.last_frame.show_parameter_names = show_parameter_names;
+    state.last_frame.left_width = left_width;
+    state.last_frame.centre_width = centre_width;
+    state.last_frame.right_width = right_width;
 
     if (active->open == false) {
         next_active = null_sfi;

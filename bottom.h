@@ -316,6 +316,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
                 total_bytes_leaked += leaked;
             }
 
+            hdr->cookie = 0;
             hdr = new_hdr;
         }
     } else {
