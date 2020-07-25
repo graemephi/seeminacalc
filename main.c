@@ -2,6 +2,12 @@
 #define SOKOL_GLCORE33
 #endif
 
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdouble-promotion"
+#pragma clang diagnostic ignored "-Wstrict-prototypes"
+#endif
+
 #define SOKOL_NO_DEPRECATED
 #define SOKOL_IMPL
 #include "sokol/sokol_app.h"
@@ -18,6 +24,10 @@
 #define SOKOL_IMGUI_IMPL
 #include "sokol/util/sokol_imgui.h"
 
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
+
 #define TEST_CHARTKEYS 0
 
 #if TEST_CHARTKEYS
@@ -29,6 +39,7 @@
 #endif
 #endif
 
+#include "thread.h"
 #include "bottom.h"
 #include "cminacalc.h"
 #include "sm.h"
@@ -118,7 +129,7 @@ Buffer load_font_file(char *path)
 void open_file(char *data, int len, b32 open_window)
 {
     Buffer buf = (Buffer) {
-        .buf = alloc(u8, len),
+        .buf = alloc(u8, len + 1),
         .len = len,
         .cap = len
     };
@@ -135,7 +146,7 @@ Buffer load_font_file(char *path)
 }
 #endif
 
-u64 rng()
+u64 rng(void)
 {
     // wikipedia
 	static usize x = 1;
@@ -145,10 +156,10 @@ u64 rng()
 	return x * 0x2545F4914F6CDD1DULL;
 }
 
-f32 rngf()
+f32 rngf(void)
 {
     u32 a = rng() & ((1 << 23) - 1);
-    return a / (f32)(1 << 23);
+    return (f32)a / (f32)(1 << 23);
 }
 
 static const ImVec2 V2Zero = {0};
@@ -175,7 +186,7 @@ static bool ItemDoubleClicked(int button)
     return result;
 }
 
-static f32 GetContentRegionAvailWidth()
+static f32 GetContentRegionAvailWidth(void)
 {
     ImVec2 cr;
     igGetContentRegionAvail(&cr);
@@ -201,29 +212,6 @@ static ImVec2 V2(f32 x, f32 y)
     return (ImVec2) { x, y };
 }
 
-typedef struct Fn
-{
-    f32 xs[1024];
-    f32 ys[1024];
-} Fn;
-
-typedef struct FnGraph FnGraph;
-struct FnGraph
-{
-    b32 active;
-    b32 is_param;
-    i32 param;
-    i32 len;
-
-    Fn absolute[NumSkillsets];
-    f32 min;
-    f32 max;
-
-    Fn relative[NumSkillsets];
-    f32 relative_min;
-};
-// 128KB
-
 typedef struct SimFileInfo
 {
     String title;
@@ -233,14 +221,6 @@ typedef struct SimFileInfo
 
     NoteData *notes;
     EffectMasks effects;
-
-    f32 *skillsets_over_wife[NumSkillsets];
-    f32 *relative_skillsets_over_wife[NumSkillsets];
-    f32 min_rating;
-    f32 max_rating;
-    f32 min_relative_rating;
-    f32 max_relative_rating;
-
     i32 *graphs;
 
     bool selected_skillsets[NumSkillsets];
@@ -255,10 +235,17 @@ typedef struct SimFileInfo
 static SimFileInfo null_sfi_ = {0};
 static SimFileInfo *const null_sfi = &null_sfi_;
 
+typedef struct FnGraph FnGraph;
+typedef struct CalcThread CalcThread;
+typedef struct CalcWork CalcWork;
 typedef struct State
 {
     u64 last_time;
     sg_pass_action pass_action;
+
+    CalcThread *threads;
+    u32 generation;
+    CalcWork *work;
 
     CalcInfo info;
     SeeCalc calc;
@@ -282,10 +269,66 @@ typedef struct State
         f32 centre_width;
         f32 right_width;
     } last_frame;
+
+    bool debug_window;
 } State;
 static State state = {0};
 
-float ssxs[19];
+#include "graphs.c"
+
+i32 make_skillsets_graph()
+{
+    FnGraph *fng = 0;
+    if (buf_len(state.free_graphs) > 0) {
+        fng = &state.graphs[buf_pop(state.free_graphs)];
+    } else {
+        fng = buf_pushn(state.graphs, 1);
+    }
+    fng->active = true;
+    fng->is_param = false;
+    fng->param = -1;
+    fng->min = FLT_MAX;
+    fng->max = FLT_MIN;
+    fng->relative_min = FLT_MAX;
+    for (i32 x = 0; x < NumGraphSamples; x++) {
+        fng->xs[x] = 82.0f + (f32)x;
+    }
+    return (i32)buf_index_of(state.graphs, fng);
+}
+
+i32 make_parameter_graph(i32 param)
+{
+    FnGraph *fng = 0;
+    if (buf_len(state.free_graphs) > 0) {
+        fng = &state.graphs[buf_pop(state.free_graphs)];
+    } else {
+        fng = buf_pushn(state.graphs, 1);
+    }
+    fng->active = true;
+    fng->is_param = true;
+    fng->param = param;
+    fng->len = state.info.params[param].integer ? (i32)state.info.params[param].max : 10;
+    fng->min = FLT_MAX;
+    fng->max = FLT_MIN;
+    fng->relative_min = FLT_MAX;
+    return (i32)buf_index_of(state.graphs, fng);
+}
+
+void free_graph(i32 handle)
+{
+    state.graphs[handle].active = false;
+    buf_push(state.free_graphs, handle);
+}
+
+void free_all_graphs(i32 handles[])
+{
+    for (i32 i = 0; i != buf_len(handles); i++) {
+        i32 handle = handles[i];
+        state.graphs[handle].active = false;
+        buf_push(state.free_graphs, handle);
+    }
+    buf_clear(handles);
+}
 
 i32 parse_and_add_sm(Buffer buf, b32 open_window)
 {
@@ -328,6 +371,8 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         .open = open_window
     });
 
+    buf_push(sfi->graphs, make_skillsets_graph());
+
     buf_reserve(sfi->effects.weak, state.info.num_params);
     buf_reserve(sfi->effects.strong, state.info.num_params);
     // calculate_effects(&state.info, &state.calc, sfi->notes, &sfi->effects);
@@ -337,67 +382,15 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
     assert(b.len);
 #endif
 
-    sfi->min_rating = 40;
-    sfi->min_relative_rating = 2;
-    for (i32 x = 0; x < 19; x++) {
-        f32 goal = 0.82f + ((f32)x / 100.f);
-        ssxs[x] = goal * 100.f;
-        SkillsetRatings ssr;
-        calc_go(&state.calc, &state.info.defaults, sfi->notes, 1.0f, goal, &ssr);
-        for (i32 r = 0; r < NumSkillsets; r++) {
-            buf_push(sfi->skillsets_over_wife[r], ssr.E[r]);
-            sfi->min_rating = min(ssr.E[r], sfi->min_rating);
-            sfi->max_rating = max(ssr.E[r], sfi->max_rating);
-
-            f32 relative_rating = ssr.E[r] / ssr.overall;
-            buf_push(sfi->relative_skillsets_over_wife[r], relative_rating);
-            sfi->min_relative_rating = min(relative_rating, sfi->min_relative_rating);
-            sfi->max_relative_rating = max(relative_rating, sfi->max_relative_rating);
-        }
-    }
-
-    for (isize ss = 1; ss < NumSkillsets; ss++) {
-        sfi->display_skillsets[ss] = (0.9 <= (sfi->skillsets_over_wife[ss][18] / sfi->skillsets_over_wife[0][18]));
-        sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
-    }
+    // for (isize ss = 1; ss < NumSkillsets; ss++) {
+    //     sfi->display_skillsets[ss] = (0.9f <= (sfi->skillsets_over_wife[ss][13] / sfi->skillsets_over_wife[0][NumGraphSamples - 1]));
+    //     sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
+    // }
 
     printf("Added %s\n", id.buf);
     return 0;
 }
 
-i32 make_parameter_graph(i32 param)
-{
-    FnGraph *fg = 0;
-    if (buf_len(state.free_graphs) > 0) {
-        fg = &state.graphs[buf_pop(state.free_graphs)];
-    } else {
-        fg = buf_pushn(state.graphs, 1);
-    }
-    fg->active = true;
-    fg->is_param = true;
-    fg->param = param;
-    fg->len = state.info.params[param].integer ? (i32)state.info.params[param].max : 10;
-    fg->min = FLT_MAX;
-    fg->max = FLT_MIN;
-    fg->relative_min = FLT_MAX;
-    return (i32)buf_index_of(state.graphs, fg);
-}
-
-void free_parameter_graph(i32 handle)
-{
-    state.graphs[handle].active = false;
-    buf_push(state.free_graphs, handle);
-}
-
-void free_all_parameter_graphs(i32 handles[])
-{
-    for (i32 i = 0; i != buf_len(handles); i++) {
-        i32 handle = handles[i];
-        state.graphs[handle].active = false;
-        buf_push(state.free_graphs, handle);
-    }
-    buf_clear(handles);
-}
 
 ParamSet copy_param_set(ParamSet *ps)
 {
@@ -513,49 +506,101 @@ void init(void)
     };
 
     state.active = null_sfi;
+
+    low_prio_work_queue.lock_id = make_lock();
+    done_queue.lock_id = make_lock();
+
+    i32 n_threads = got_any_cores() - 1;
+    for (isize i = 0; i < n_threads; i++) {
+        CalcThread *ct = buf_push(state.threads, (CalcThread) {
+            .info = &state.info,
+            .generation = &state.generation,
+            .ps = &state.ps
+        });
+
+        make_thread(calc_thread, ct);
+    }
 }
 
-static i32 param_slider_widget(i32 param_idx, b32 show_parameter_names)
+enum {
+    ParamSlider_Nothing,
+    ParamSlider_GraphToggled,
+    ParamSlider_ValueChanged,
+    ParamSlider_LowerBoundChanged,
+    ParamSlider_UpperBoundChanged
+};
+
+typedef struct ParamSliderChange
 {
-    b32 toggled = false;
+    i32 type;
+    i32 param;
+    f32 value;
+} ParamSliderChange;
+
+static void param_slider_widget(i32 param_idx, b32 show_parameter_names, ParamSliderChange *out)
+{
+    assert(out);
+    i32 type = ParamSlider_Nothing;
+    f32 value = 0.0f;
     i32 mp = param_idx;
     igPushIDInt(mp);
     if (igCheckbox("##graph", &state.parameter_graphs_enabled[mp])) {
-        toggled = true;
+        type = ParamSlider_GraphToggled;
     } tooltip("graph this parameter");
     igSameLine(0, 4);
     char slider_id[32];
     snprintf(slider_id, sizeof(slider_id), "##slider%d", mp);
     if (state.info.params[mp].integer) {
-        i32 value = (i32)state.ps.params[mp];
+        i32 value_int = (i32)state.ps.params[mp];
         i32 low = (i32)state.ps.min[mp];
         i32 high = (i32)state.ps.max[mp];
-        igSliderInt(slider_id, &value, low, high, "%d");
-        state.ps.params[mp] = (f32)value;
+        if (igSliderInt(slider_id, &value_int, low, high, "%d")) {
+            state.ps.params[mp] = (f32)value_int;
+            type = ParamSlider_ValueChanged;
+            value = (f32)value_int;
+        }
     } else {
         f32 speed = (state.ps.max[mp] - state.ps.min[mp]) / 100.f;
         igSetNextItemWidth(igGetFontSize() * 10.0f);
-        igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f);
+        if (igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f)) {
+            type = ParamSlider_ValueChanged;
+            value = state.ps.params[mp];
+        }
         if (show_parameter_names == false) {
             tooltip(state.info.params[mp].name);
         }
         if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
+            type = ParamSlider_ValueChanged;
+            value = state.ps.params[mp];
         }
         igSameLine(0, 4);
+
+        // min/max bounds
+        b32 changed = false;
+        b32 reset = false;
         igSetNextItemWidth(igGetFontSize() * 4.0f);
-        igDragFloatRange2("##range",  &state.ps.min[mp], &state.ps.max[mp], speed, -100.0f, 100.0f, "%.1f", "%.1f", 1.0f);
+        if (igDragFloatRange2("##range",  &state.ps.min[mp], &state.ps.max[mp], speed, -100.0f, 100.0f, "%.1f", "%.1f", 1.0f)) {
+            changed = true;
+        }
         tooltip("min/max override (the defaults are guesses)");
         if (ItemDoubleClicked(0)) {
+            reset = true;
+        }
+        if (changed || reset) {
             ImVec2 l, u;
             igGetItemRectMin(&l);
             igGetItemRectMax(&u);
-            u.x = l.x + (u.x - l.x) * 0.5f;;
+            u.x = l.x + (u.x - l.x) * 0.5f;
             b32 left = igIsMouseHoveringRect(l, u, true);
             if (left) {
-                state.ps.min[mp] = state.info.defaults.min[mp];
+                state.ps.min[mp] = reset ? state.info.defaults.min[mp] : state.ps.min[mp];
+                type = ParamSlider_LowerBoundChanged;
+                value = state.ps.min[mp];
             } else {
-                state.ps.max[mp] = state.info.defaults.max[mp];
+                state.ps.max[mp] = reset ? state.info.defaults.max[mp] : state.ps.max[mp];
+                type = ParamSlider_UpperBoundChanged;
+                value = state.ps.max[mp];
             }
         }
     }
@@ -564,10 +609,15 @@ static i32 param_slider_widget(i32 param_idx, b32 show_parameter_names)
         igText(state.info.params[mp].name);
     }
     igPopID();
-    return toggled;
+    if (out && type != ParamSlider_Nothing) {
+        assert(out->type == ParamSlider_Nothing);
+        out->type = type;
+        out->param = mp;
+        out->value = value;
+    }
 }
 
-static void skillset_line_plot(i32 ss, b32 highlight, f32 *xs, f32 *ys, i32 count)
+static void skillset_line_plot(i32 ss, b32 highlight, FnGraph *fng, f32 *ys)
 {
     // Recreate highlighting cause ImPlot doesn't let you tell it to highlight lines
     if (highlight) {
@@ -575,7 +625,7 @@ static void skillset_line_plot(i32 ss, b32 highlight, f32 *xs, f32 *ys, i32 coun
     }
 
     ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[ss]);
-    ipPlotLineFloatPtrFloatPtr(SkillsetNames[ss], xs, ys, count, 0, sizeof(float));
+    ipPlotLineFloatPtrFloatPtr(SkillsetNames[ss], fng->xs, ys, NumGraphSamples, 0, sizeof(float));
     ipPopStyleColor(1);
 
     if (highlight) {
@@ -616,6 +666,50 @@ void frame(void)
     bool ss_highlight[NumSkillsets] = {0};
     SimFileInfo *next_active = 0;
 
+    DoneWork done = {0};
+    while (get_done_work(&done)) {
+        SimFileInfo *sfi = done.work.sfi;
+        FnGraph *fng = 0;
+        if (done.work.type == Graph_Wife) {
+            fng = &state.graphs[done.work.sfi->graphs[0]];
+        } else if ((done.work.type & Graph_Parameter) == Graph_Parameter) {
+            for (isize i = 1; i < buf_len(sfi->graphs); i++) {
+                if (state.graphs[sfi->graphs[i]].param == done.work.param_of_fng) {
+                    fng = &state.graphs[sfi->graphs[i]];
+                    break;
+                }
+            }
+
+            if (fng == 0) {
+                // fng has been removed since calc calculation completed
+                continue;
+            }
+        } else {
+            assert_unreachable();
+        }
+
+        if (fng->generation > done.work.generation) {
+            continue;
+        }
+        fng->generation = done.work.generation;
+
+        f32 min_y = 100.f;
+        f32 rel_min_y = 0.0f;
+        for (isize ss = 0; ss < NumSkillsets; ss++) {
+            fng->xs[done.work.x_index] = (done.work.type == Graph_Wife) ? done.work.goal * 100.f : done.work.value;
+            fng->ys[ss][done.work.x_index] = done.ssr.E[ss];
+            fng->relative_ys[ss][done.work.x_index] = done.ssr.E[ss] / done.ssr.overall;
+
+            if (fng->ys[ss][0] < min_y) {
+                min_y = fng->ys[ss][0];
+                rel_min_y = safe_div(min_y, fng->ys[0][0]);
+            }
+        }
+        fng->min = min_y;
+        fng->relative_min = rel_min_y;
+        fng->max = fng->ys[0][NumGraphSamples - 1] ? fng->ys[0][NumGraphSamples - 1] : 40.0f;
+    }
+
     ImGuiIO *io = igGetIO();
     ImVec2 ds = io->DisplaySize;
 
@@ -638,9 +732,10 @@ void frame(void)
 
         // Open file list
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-            igTextColored(msd_color(sfi->skillsets_over_wife[0][13]), "%2.2f", sfi->skillsets_over_wife[0][13]);
+            FnGraph *g = &state.graphs[sfi->graphs[0]];
+            igTextColored(msd_color(g->ys[0][11]), "%2.2f", (f64)g->ys[0][11]);
             tooltip("Overall at AA"); igSameLine(0, 7.0f);
-            igTextColored(msd_color(sfi->skillsets_over_wife[0][18]), "%2.2f", sfi->skillsets_over_wife[0][18]);
+            igTextColored(msd_color(g->ys[0][18]), "%2.2f", (f64)g->ys[0][18]);
             tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
             igPushIDStr(sfi->id.buf);
             if (igSelectableBool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
@@ -660,7 +755,7 @@ void frame(void)
             if (skillsets) {
                 for (isize ss = 0; ss < NumSkillsets; ss++) {
                     char r[32] = {0};
-                    snprintf(r, sizeof(r), "%2.2f##%d", sfi->skillsets_over_wife[ss][13], (i32)ss);
+                    snprintf(r, sizeof(r), "%2.2f##%d", (f64)g->ys[ss][13], (i32)ss);
                     igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
                     igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
                     igSelectableBool(r, sfi->display_skillsets[ss], ImGuiSelectableFlags_None, V2(300.0f / NumSkillsets, 0));
@@ -682,7 +777,7 @@ void frame(void)
     igEnd();
 
     SimFileInfo *active = state.active;
-    i32 param_toggled = -1;
+    ParamSliderChange changed = {0};
     b32 show_parameter_names = state.last_frame.show_parameter_names;
 
     f32 left_width = show_parameter_names ? 450.0f : 302.0f;
@@ -737,9 +832,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.strong == 0 || (active->effects.strong[mp] & effect_mask) != 0) {
-                                if (param_slider_widget(mp, show_parameter_names)) {
-                                    param_toggled = mp;
-                                }
+                                param_slider_widget(mp, show_parameter_names, &changed);
                             }
                         }
                         igTreePop();
@@ -753,9 +846,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.weak == 0 || (active->effects.weak[mp] & effect_mask) != 0) {
-                                if (param_slider_widget(mp, show_parameter_names)) {
-                                    param_toggled = mp;
-                                }
+                                param_slider_widget(mp, show_parameter_names, &changed);
                             }
                         }
                         igTreePop();
@@ -768,9 +859,7 @@ void frame(void)
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
-                            if (param_slider_widget(mp, show_parameter_names)) {
-                                param_toggled = mp;
-                            }
+                            param_slider_widget(mp, show_parameter_names, &changed);
                         }
                         igTreePop();
                     }
@@ -783,9 +872,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.weak && (active->effects.weak[mp] & effect_mask) == 0) {
-                                if (param_slider_widget(mp, show_parameter_names)) {
-                                    param_toggled = mp;
-                                }
+                                param_slider_widget(mp, show_parameter_names, &changed);
                             }
                         }
                         igTreePop();
@@ -803,15 +890,16 @@ void frame(void)
     f32 centre_width = ds.x - left_width - right_width;
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
         if (sfi->open) {
+            // Window placement
             ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
-            if (state.last_frame.num_open_windows == 0 && centre_width >= 450.0f || sfi->fullscreen_window) {
+            if ((state.last_frame.num_open_windows == 0 && centre_width >= 450.0f) || sfi->fullscreen_window) {
                 sfi->fullscreen_window = true;
                 window_flags = ImGuiWindowFlags_NoResize;
                 igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
                 igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
             } else {
                 sfi->fullscreen_window = false;
-                ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (buf_len(sfi->graphs) + 1)));
+                ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * ((f32)buf_len(sfi->graphs) + 1.0f)));
                 ImVec2 pos = V2(rngf() * (ds.x - sz.x), rngf() * (ds.y - sz.y));
                 igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Appearing);
@@ -831,45 +919,43 @@ void frame(void)
                 igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
                 igText(sfi->chartkey.buf);
 
-                // Plots
-                ipSetNextPlotLimits(82, 100, sfi->min_rating - 1.f, sfi->max_rating + 2.f, ImGuiCond_Once);
+                // Plots. Weird rendering order: first 0, then backwards from the end
+                FnGraph *fng = &state.graphs[sfi->graphs[0]];
+                ipSetNextPlotLimits(82, 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
                 if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
-                    for (i32 r = 0; r < NumSkillsets; r++) {
-                        skillset_line_plot(r, ss_highlight[r], ssxs, sfi->skillsets_over_wife[r], 19);
+                    for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                        skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
                     }
                     ipEndPlot();
                 }
                 igSameLine(0, 4);
-                ipSetNextPlotLimits(82, 100, sfi->min_relative_rating - 0.05f, sfi->max_relative_rating + 0.05f, ImGuiCond_Once);
+                ipSetNextPlotLimits(82, 100, (f64)fng->relative_min - 0.05, 1.05, ImGuiCond_Always);
                 if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
-                    for (i32 r = 1; r < NumSkillsets; r++) {
-                        skillset_line_plot(r, ss_highlight[r], ssxs, sfi->relative_skillsets_over_wife[r], 19);
+                    for (i32 ss = 1; ss < NumSkillsets; ss++) {
+                        skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
                     }
                     ipEndPlot();
                 }
 
-                for (i32 fgi = (i32)buf_len(sfi->graphs) - 1; fgi >= 0; fgi--) {
-                    FnGraph *fg = &state.graphs[sfi->graphs[fgi]];
-                    i32 mp = fg->param;
+                for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
+                    fng = &state.graphs[sfi->graphs[fungi]];
+                    i32 mp = fng->param;
                     ParamInfo *p = &state.info.params[mp];
-                    if (fg->max == FLT_MIN) {
-                        break;
-                    }
                     u8 full_name[64] = {0};
                     snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
                     igPushIDStr(full_name);
-                    ipSetNextPlotLimits(state.ps.min[mp], state.ps.max[mp], fg->min - 1.f, fg->max + 2.f, ImGuiCond_Once);
+                    ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
                     if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
-                        for (i32 r = 0; r < NumSkillsets; r++) {
-                            skillset_line_plot(r, ss_highlight[r], fg->absolute[r].xs, fg->absolute[r].ys, fg->len);
+                        for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
                         }
                         ipEndPlot();
                     }
                     igSameLine(0, 4);
-                    ipSetNextPlotLimits(state.ps.min[mp], state.ps.max[mp], fg->relative_min - 0.05f, 1.05f, ImGuiCond_Once);
+                    ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->relative_min - 0.05,(f64) 1.05, ImGuiCond_Always);
                     if (BeginPlotDefaults("##Relative AA", full_name, 0)) {
-                        for (i32 r = 1; r < NumSkillsets; r++) {
-                            skillset_line_plot(r, ss_highlight[r], fg->relative[r].xs, fg->relative[r].ys, fg->len);
+                        for (i32 ss = 1; ss < NumSkillsets; ss++) {
+                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
                         }
                         ipEndPlot();
                     }
@@ -889,6 +975,37 @@ void frame(void)
         igEnd();
     }
 
+    if (igIsKeyPressed('`', false)) {
+        state.debug_window = !state.debug_window;
+    }
+    if (state.debug_window) {
+        debug_counters.skipped = 0;
+        debug_counters.done = 0;
+        for (CalcThread *ct = state.threads; ct != buf_end(state.threads); ct++) {
+            debug_counters.skipped += ct->debug_counters.skipped;
+            debug_counters.done += ct->debug_counters.done;
+        }
+
+        igSetNextWindowSize(V2(centre_width - 5.0f, 0), 0);
+        igSetNextWindowPos(V2(left_width + 2.f, ds.y - 2.f), 0, V2(0, 1));
+        igBegin("Debug", &state.debug_window, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
+
+        igBeginGroup(); {
+            isize used = permanent_memory->ptr - permanent_memory->buf;
+            igText("Calc version %d", state.info.version);
+            igText("Using %_$d / %_$d", used - total_bytes_leaked, used);
+        } igEndGroup();
+        igSameLine(0, 45.f);
+        igText("Calc calls ");
+        igSameLine(0, 0.f);
+        igBeginGroup(); igText("requested"); igText("%_$d", debug_counters.requested); igEndGroup(); igSameLine(0, 4);
+        igBeginGroup(); igText("skipped"); igText("%_$d", debug_counters.skipped); igEndGroup(); igSameLine(0, 4);
+        igBeginGroup(); igText("done"); igText("%_$d", debug_counters.done); igEndGroup(); igSameLine(0, 4);
+        igBeginGroup(); igText("pending"); igText("%_$d", debug_counters.requested - (debug_counters.done + debug_counters.skipped)); igEndGroup(); igSameLine(0, 4);
+
+        igEnd();
+    }
+
     sg_begin_default_pass(&state.pass_action, width, height);
     simgui_render();
     sg_end_pass();
@@ -900,6 +1017,7 @@ void frame(void)
     state.last_frame.centre_width = centre_width;
     state.last_frame.right_width = right_width;
 
+    // Restore last interacted-with window on close
     if (active->open == false) {
         next_active = null_sfi;
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
@@ -918,76 +1036,53 @@ void frame(void)
         state.active = next_active;
     }
 
-    if (param_toggled != -1) {
-        if (state.parameter_graphs_enabled[param_toggled]) {
-            buf_push(state.parameter_graph_order, param_toggled);
-            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                buf_push(sfi->graphs, make_parameter_graph(param_toggled));
-            }
-        } else {
-            for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
-                if (state.parameter_graph_order[i] == param_toggled) {
-                    buf_remove_sorted_index(state.parameter_graph_order, i);
-                    break;
-                }
-            }
+    if (changed.type) {
+        switch (changed.type) {
+            case ParamSlider_GraphToggled: {
+                if (state.parameter_graphs_enabled[changed.param]) {
+                    buf_push(state.parameter_graph_order, changed.param);
+                    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                        buf_push(sfi->graphs, make_parameter_graph(changed.param));
+                    }
 
-            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                for (isize i = 0; i != buf_len(sfi->graphs); i++) {
-                    if (state.graphs[sfi->graphs[i]].param == param_toggled) {
-                        free_parameter_graph(sfi->graphs[i]);
-                        buf_remove_sorted_index(sfi->graphs, i);
-                        break;
+                    recalculate_graphs_in_background(&state.work, changed.param, Graph_Parameter, changed.value);
+                } else {
+                    for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
+                        if (state.parameter_graph_order[i] == changed.param) {
+                            buf_remove_sorted_index(state.parameter_graph_order, i);
+                            break;
+                        }
+                    }
+
+                    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                        for (isize i = 0; i != buf_len(sfi->graphs); i++) {
+                            if (state.graphs[sfi->graphs[i]].param == changed.param) {
+                                free_graph(sfi->graphs[i]);
+                                buf_remove_sorted_index(sfi->graphs, i);
+                                break;
+                            }
+                        }
                     }
                 }
+            } break;
+            case ParamSlider_LowerBoundChanged: {
+                recalculate_graphs_in_background(&state.work, changed.param, Graph_ParameterLowerBound, changed.value);
+            } break;
+            case ParamSlider_UpperBoundChanged: {
+                recalculate_graphs_in_background(&state.work, changed.param, Graph_ParameterUpperBound, changed.value);
+            } break;
+            case ParamSlider_ValueChanged: {
+                state.generation++;
+                recalculate_graphs_in_background(&state.work, changed.param, Graph_Wife, changed.value);
+            } break;
+            default: {
+                assert_unreachable();
             }
         }
     }
 
-    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-        if (sfi->open) {
-            i32 goal_index = state.update_index % 19;
-            f32 goal = 0.82f + ((f32)goal_index / 100.f);
-            ssxs[goal_index] = goal * 100.f;
-            SkillsetRatings ssr;
-            calc_go(&state.calc, &state.ps, sfi->notes, 1.0f, goal, &ssr);
-            for (i32 r = 0; r < NumSkillsets; r++) {
-                sfi->skillsets_over_wife[r][goal_index] = ssr.E[r];
-                sfi->min_rating = min(ssr.E[r], sfi->min_rating);
-                sfi->max_rating = max(ssr.E[r], sfi->max_rating);
-
-                f32 relative_rating = ssr.E[r] / ssr.overall;
-                sfi->relative_skillsets_over_wife[r][goal_index] = relative_rating;
-                sfi->min_relative_rating = min(relative_rating, sfi->min_relative_rating);
-                sfi->max_relative_rating = max(relative_rating, sfi->max_relative_rating);
-            }
-
-            for (isize i = 0; i != buf_len(sfi->graphs); i++) {
-                FnGraph *fg = &state.graphs[sfi->graphs[i]];
-                assert(fg->active);
-                i32 x_index = state.update_index % 10;
-
-                f32 current = state.ps.params[fg->param];
-                state.ps.params[fg->param] = lerp(state.ps.min[fg->param], state.ps.max[fg->param], (f32)x_index / 9.0f);
-                calc_go(&state.calc, &state.ps, sfi->notes, 1.0f, 0.93f, &ssr);
-                state.ps.params[fg->param] = current;
-                for (i32 r = 0; r < NumSkillsets; r++) {
-                    for (isize x = 0; x < 10; x++) {
-                        fg->absolute[r].xs[x] = lerp(state.ps.min[fg->param], state.ps.max[fg->param], (f32)x / 9.0f);
-                        fg->relative[r].xs[x] = lerp(state.ps.min[fg->param], state.ps.max[fg->param], (f32)x / 9.0f);
-                    }
-                    fg->absolute[r].ys[x_index] = ssr.E[r];
-                    fg->min = min(ssr.E[r], fg->min);
-                    fg->max = max(ssr.E[r], fg->max);
-
-                    f32 relative_rating = ssr.E[r] / ssr.overall;
-                    fg->relative[r].ys[x_index] = relative_rating;
-                    fg->relative_min = min(relative_rating, fg->relative_min);
-                }
-            }
-        }
-    }
-    state.update_index += 127;
+    submit_work(state.work, state.generation);
+    fflush(0);
 }
 
 void cleanup(void)

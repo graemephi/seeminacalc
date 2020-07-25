@@ -115,9 +115,10 @@ NoteData *frobble_serialized_note_data(char *note_data, size_t length);
 // __If your note data is not bit-for-bit identical you will see error__
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
 
-CalcInfo calc_info();
+CalcInfo calc_info(void);
 SeeCalc calc_init(CalcInfo *info);
-void calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, SkillsetRatings *out);
+SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal);
+SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, i32 param, f32 value);
 
 void nddump(NoteData *nd, NoteData *nd2);
 

@@ -61,8 +61,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
     assert(masks->weak);
     assert(masks->strong);
 
-    SkillsetRatings default_ratings = {};
-    calc_go(calc, &info->defaults, note_data, 1.0f, 0.93f, &default_ratings);
+    SkillsetRatings default_ratings = calc_go(calc, &info->defaults, note_data, 1.0f, 0.93f);
     for (i32 r = 0; r < NumSkillsets; r++) {
         default_ratings.E[r] = rating_floor(default_ratings.E[r]);
     }
@@ -88,7 +87,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
                 params[i] = info->params[i].default_value * 1.05f;
             }
 
-            calc_go(calc, &params_set, note_data, 1.0f, 0.93f, &ratings);
+            ratings = calc_go(calc, &params_set, note_data, 1.0f, 0.93f);
 
             for (int r = 0; r < NumSkillsets; r++) {
                 b32 changed = rating_floor(ratings.E[r]) != default_ratings.E[r];
@@ -109,7 +108,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
                 params[i] = info->params[i].max;
             }
 
-            calc_go(calc, &params_set, note_data, 1.0f, 0.93f, &ratings);
+            ratings = calc_go(calc, &params_set, note_data, 1.0f, 0.93f);
 
             masks->weak[i] = masks->strong[i];
             for (i32 r = 0; r < NumSkillsets; r++) {
@@ -126,8 +125,7 @@ void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, Effec
 
 NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 {
-    auto result = new std::vector<NoteInfo>((NoteInfo *)note_data, (NoteInfo *)(note_data + length));
-    return (NoteData *)result;
+    return new NoteData{{ (NoteInfo *)note_data, (NoteInfo *)(note_data + length) }};
 }
 
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
@@ -288,15 +286,29 @@ SeeCalc calc_init(CalcInfo *info)
     return result;
 }
 
-void calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, SkillsetRatings *out)
+SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal)
 {
+    SkillsetRatings result = {};
     // Stupud hack related. If that wasn't necessary, we could do better than
     // memcpying every time, but it probably doesn't matter
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
-        out->E[i] = ratings[i];
+        result.E[i] = ratings[i];
     }
+    return result;
+}
+
+SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, i32 param, f32 value)
+{
+    SkillsetRatings result = {};
+    memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
+    calc->handle->mod_params[param] = value;
+    vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
+    for (int i = 0; i < NumSkillsets; i++) {
+        result.E[i] = ratings[i];
+    }
+    return result;
 }
 
 void nddump(NoteData *nd, NoteData *nd2)

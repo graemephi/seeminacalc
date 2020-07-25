@@ -161,7 +161,7 @@ Stack *current_allocator = &permanent_memory_stack;
 #define alloc_scratch(type, count) stack_alloc(scratch, type, count)
 #define alloc(type, count) stack_alloc(current_allocator, type, count)
 
-void reset_scratch()
+void reset_scratch(void)
 {
 #ifndef NDEBUG
     memset(scratch->ptr, 0x3c, scratch->ptr - scratch->buf);
@@ -209,7 +209,7 @@ Buffer read_file(const char *path)
     assert(f);
 
     fseek(f, 0, SEEK_END);
-    usize filesize = ftell(f);
+    long filesize = ftell(f);
     rewind(f);
 
     Buffer result = {
@@ -219,7 +219,6 @@ Buffer read_file(const char *path)
     };
 
     usize read = fread(result.buf, 1, filesize, f);
-    assert(read == filesize);
 
     fclose(f);
 
@@ -359,11 +358,15 @@ isize buf_index_of_(Buf *hdr, isize index)
     return -1;
 }
 
-void buf_set_len(void *buf, i32 len)
+void buf_set_len(void *buf, isize len)
 {
     Buf *hdr = buf_hdr(buf);
     if (hdr) {
-        hdr->len = len;
+        if (len < 0) {
+            len = hdr->len + len;
+        }
+        assert(len <= hdr->cap);
+        hdr->len = mins(len, hdr->cap);
     } else {
         assert(len == 0);
     }
@@ -371,7 +374,6 @@ void buf_set_len(void *buf, i32 len)
 
 #define buf_remove_unsorted_index(buf, index) buf_remove_unsorted_(buf_hdr(buf), buf_elem_size(buf), index)
 #define buf_remove_unsorted(buf, elem) buf_remove_unsorted_(buf_hdr(buf), buf_elem_size(buf), buf_index_of(buf, elem))
-force_inline
 void buf_remove_unsorted_(Buf *hdr, isize size, isize index)
 {
     if (ALWAYS(hdr && index >= 0 && index < hdr->len)) {
@@ -382,7 +384,6 @@ void buf_remove_unsorted_(Buf *hdr, isize size, isize index)
 
 #define buf_remove_sorted_index(buf, index) buf_remove_sorted_(buf_hdr(buf), buf_elem_size(buf), index)
 #define buf_remove_sorted(buf, elem) buf_remove_sorted_(buf_hdr(buf), buf_elem_size(buf), buf_index_of(buf, elem))
-force_inline
 void buf_remove_sorted_(Buf *hdr, isize size, isize index)
 {
     if (ALWAYS(hdr && index >= 0 && index < hdr->len)) {
@@ -425,7 +426,7 @@ i32 push_allocator(Stack *a)
     return (i32)buf_index_of(stack_stack, pushed);
 }
 
-void pop_allocator()
+void pop_allocator(void)
 {
     current_allocator = buf_pop(stack_stack);
 }

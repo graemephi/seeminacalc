@@ -1,16 +1,16 @@
 <!doctypehtml>
-<html lang=en-us>
+<html lang="en-us">
     <head>
-        <meta charset=utf-8>
-        <meta content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no" name=viewport>
-        <title>Emscripten-Generated Code</title>
+        <meta charset="utf-8">
+        <meta content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no" name="viewport">
+        <title>SeeMinaCalc</title>
         <style>
             body {
                 margin: 0;
                 background-color: #000
             }
 
-            .game {
+            .sokol {
                 position: absolute;
                 top: 0;
                 left: 0;
@@ -32,7 +32,7 @@
         </style>
     </head>
     <body>
-        <canvas class="game" id="canvas" oncontextmenu="event.preventDefault();" ondrop="dropHandler(event);" ondragover="event.preventDefault();"></canvas>
+        <canvas class="sokol" id="canvas" oncontextmenu="event.preventDefault();" ondrop="dropHandler(event);" ondragover="event.preventDefault();"></canvas>
         <script>
             function getAsEntry(item) {
                 return item.getAsEntry ? item.getAsEntry() : item.webkitGetAsEntry();
@@ -104,7 +104,9 @@
                     });
                 })
             }
+
             let font = fetch('NotoSansCJKjp-Regular.otf').then(res => res.arrayBuffer());
+
             var Module = {
                 preRun: [],
                 postRun: [() => {

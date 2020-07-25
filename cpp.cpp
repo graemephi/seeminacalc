@@ -22,6 +22,7 @@
 #include "cimgui/cimplot.cpp"
 
 #include "cminacalc.cpp"
+#include "thread.cpp"
 
 #ifdef _MSC_VER
 #pragma warning(pop)
@@ -33,6 +34,11 @@
 
 // ImPlot's zoom sucks??? So just hack away
 namespace ImPlot {
+
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdouble-promotion"
+#endif
 
 // Copy n pasted from implot.cpp
 extern "C" bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* sizep, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags) {
@@ -637,5 +643,9 @@ extern "C" bool BeginPlotCppCpp(const char* title, const char* x_label, const ch
     ImGui::PushID(ID);
     return true;
 }
+
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 } // namespace ImPlot
