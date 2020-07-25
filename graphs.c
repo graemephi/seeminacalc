@@ -40,6 +40,7 @@ typedef struct CalcThread
         usize skipped;
         usize discarded;
         usize done;
+        f64 time;
     } debug_counters;
 } CalcThread;
 
@@ -378,6 +379,8 @@ i32 calc_thread(void *userdata)
         CalcWork work = {0};
         while (get_work(ct, &high_prio_work_queue, &work) || get_work(ct, &low_prio_work_queue, &work)) {
             SkillsetRatings ssr = {0};
+            u64 then = 0;
+            u64 now = 0;
             switch (work.type) {
                 case Work_ParameterLowerBound:
                 case Work_ParameterUpperBound: {
@@ -385,17 +388,23 @@ i32 calc_thread(void *userdata)
                     // invalidate one. So special case it here.
                     f32 *bounds = (work.type == Work_ParameterLowerBound) ? ps->min : ps->max;
                     if (bounds[work.parameter.param] == work.parameter.bound) {
+                        then = stm_now();
                         ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 1.0f, 0.93f, work.parameter.param, work.parameter.value);
+                        now = stm_now();
                     } else {
                         ct->debug_counters.skipped++;
                         continue;
                     }
                 } break;
                 case Work_Parameter: {
+                    then = stm_now();
                     ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 1.0f, 0.93f, work.parameter.param, work.parameter.value);
+                    now = stm_now();
                 } break;
                 case Work_Wife: {
+                    then = stm_now();
                     ssr = calc_go(&calc, ps, work.sfi->notes, 1.0f, work.wife.goal);
+                    now = stm_now();
                 } break;
                 case Work_Effects: {
                     ssr = calc_go(&calc, &ct->info->defaults, work.sfi->notes, 1.0f, 0.93f);
@@ -417,6 +426,10 @@ i32 calc_thread(void *userdata)
             unlock(done_queue.lock_id);
 
             ct->debug_counters.done++;
+
+            if (now - then > 0) {
+                ct->debug_counters.time = ct->debug_counters.time*0.99 + 0.01*(stm_ms(now - then) / work.sfi->notes_len);
+            }
         }
 
         thread_wait();

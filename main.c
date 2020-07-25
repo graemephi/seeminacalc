@@ -246,6 +246,7 @@ typedef struct SimFileInfo
     String chartkey;
     String id;
 
+    i32 notes_len; // just for stats
     NoteData *notes;
     EffectMasks effects;
     i32 *graphs;
@@ -413,6 +414,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         .diff = diff,
         .chartkey = copy_string(ck),
         .id = copy_string(id),
+        .notes_len = (i32)buf_len(ni),
         .notes = frobble_note_data(ni, buf_len(ni)),
         .stops = sm.has_stops,
         .open = open_window,
@@ -962,10 +964,13 @@ void frame(void)
     if (state.debug_window) {
         debug_counters.skipped = 0;
         debug_counters.done = 0;
+        f64 time = 0;
         for (CalcThread *ct = state.threads; ct != buf_end(state.threads); ct++) {
             debug_counters.skipped += ct->debug_counters.skipped;
             debug_counters.done += ct->debug_counters.done;
+            time += ct->debug_counters.time;
         }
+        time /= (f64)buf_len(state.threads);
 
         igSetNextWindowSize(V2(centre_width - 5.0f, 0), 0);
         igSetNextWindowPos(V2(left_width + 2.f, ds.y - 2.f), 0, V2(0, 1));
@@ -983,6 +988,8 @@ void frame(void)
         igBeginGroup(); igText("skipped"); igText("%_$d", debug_counters.skipped); igEndGroup(); igSameLine(0, 4);
         igBeginGroup(); igText("done"); igText("%_$d", debug_counters.done); igEndGroup(); igSameLine(0, 4);
         igBeginGroup(); igText("pending"); igText("%_$d", debug_counters.requested - (debug_counters.done + debug_counters.skipped)); igEndGroup(); igSameLine(0, 4);
+        igSameLine(0, 45.f);
+        igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%.2fms", time * 1000.); igEndGroup();
 
         igEnd();
     }

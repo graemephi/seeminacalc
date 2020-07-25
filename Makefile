@@ -1,4 +1,4 @@
-Clang := 1
+Clang := 0
 Includes := -Ietterna -Ilib
 
 ifneq ($(OS),Windows_NT)
