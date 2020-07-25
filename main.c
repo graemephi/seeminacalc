@@ -212,6 +212,33 @@ static ImVec2 V2(f32 x, f32 y)
     return (ImVec2) { x, y };
 }
 
+static ImVec4 msd_color(f32 x)
+{
+    // -- Colorized stuff
+    // function byMSD(x)
+    // 	if x then
+    // 		return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
+    // 	end
+    // 	return HSV(0, 0.9, 0.9)
+    // end
+    ImVec4 color = { 0, 0.9f, 0.9f, 1.0f };
+    if (x) {
+        f32 h = max(95.0f - (x / 40.0f) * 150.0f, -50.0f) / 360.f;
+        h = h + (f32)(h < 0) - truncf(h);
+        f32 s = 0.9f;
+        f32 v = 0.9f;
+        igColorConvertHSVtoRGB(h, s, v, &color.x, &color.y, &color.z);
+    }
+
+    return color;
+}
+
+typedef struct EffectMasks
+{
+    u8 *weak;
+    u8 *strong;
+} EffectMasks;
+
 typedef struct SimFileInfo
 {
     String title;
@@ -245,7 +272,8 @@ typedef struct State
 
     CalcThread *threads;
     u32 generation;
-    CalcWork *work;
+    CalcWork *high_prio_work;
+    CalcWork *low_prio_work;
 
     CalcInfo info;
     SeeCalc calc;
@@ -274,6 +302,21 @@ typedef struct State
 } State;
 static State state = {0};
 
+ParamSet copy_param_set(ParamSet *ps)
+{
+    ParamSet result = {0};
+    result.num_params = ps->num_params;
+    buf_reserve(result.params, ps->num_params);
+    buf_reserve(result.min, ps->num_params);
+    buf_reserve(result.max, ps->num_params);
+    for (size_t i = 0; i < ps->num_params; i++) {
+        result.params[i] = ps->params[i];
+        result.min[i] = ps->min[i];
+        result.max[i] = ps->max[i];
+    }
+    return result;
+}
+
 #include "graphs.c"
 
 i32 make_skillsets_graph()
@@ -284,12 +327,14 @@ i32 make_skillsets_graph()
     } else {
         fng = buf_pushn(state.graphs, 1);
     }
+    *fng = (FnGraph) {0};
     fng->active = true;
     fng->is_param = false;
     fng->param = -1;
     fng->min = FLT_MAX;
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
+    fng->generation = 0;
     for (i32 x = 0; x < NumGraphSamples; x++) {
         fng->xs[x] = 82.0f + (f32)x;
     }
@@ -304,6 +349,7 @@ i32 make_parameter_graph(i32 param)
     } else {
         fng = buf_pushn(state.graphs, 1);
     }
+    *fng = (FnGraph) {0};
     fng->active = true;
     fng->is_param = true;
     fng->param = param;
@@ -311,6 +357,7 @@ i32 make_parameter_graph(i32 param)
     fng->min = FLT_MAX;
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
+    fng->generation = 0;
     return (i32)buf_index_of(state.graphs, fng);
 }
 
@@ -368,159 +415,35 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         .id = copy_string(id),
         .notes = frobble_note_data(ni, buf_len(ni)),
         .stops = sm.has_stops,
-        .open = open_window
+        .open = open_window,
+        .selected_skillsets[0] = true,
     });
 
     buf_push(sfi->graphs, make_skillsets_graph());
 
     buf_reserve(sfi->effects.weak, state.info.num_params);
     buf_reserve(sfi->effects.strong, state.info.num_params);
-    // calculate_effects(&state.info, &state.calc, sfi->notes, &sfi->effects);
+
+    CalcWork *work = 0;
+    calculate_file_graphs(&work, sfi, state.generation);
+    submit_work(&high_prio_work_queue, work, state.generation);
+
+    buf_clear(work);
+
+    calculate_effects(&work, &state.info, sfi);
+    submit_work(&low_prio_work_queue, work, state.generation);
+
+    thread_notify();
 
 #if TEST_CHARTKEYS
     Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
     assert(b.len);
 #endif
 
-    // for (isize ss = 1; ss < NumSkillsets; ss++) {
-    //     sfi->display_skillsets[ss] = (0.9f <= (sfi->skillsets_over_wife[ss][13] / sfi->skillsets_over_wife[0][NumGraphSamples - 1]));
-    //     sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
-    // }
-
     printf("Added %s\n", id.buf);
     return 0;
 }
 
-
-ParamSet copy_param_set(ParamSet *ps)
-{
-    ParamSet result = {0};
-    result.num_params = ps->num_params;
-    buf_reserve(result.params, ps->num_params);
-    buf_reserve(result.min, ps->num_params);
-    buf_reserve(result.max, ps->num_params);
-    for (size_t i = 0; i < ps->num_params; i++) {
-        result.params[i] = ps->params[i];
-        result.min[i] = ps->min[i];
-        result.max[i] = ps->max[i];
-    }
-    return result;
-}
-
-void init(void)
-{
-    isize bignumber = 100*1024*1024;
-    scratch_stack = stack_make(malloc(bignumber), bignumber);
-    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
-
-    push_allocator(scratch);
-    Buffer font = load_font_file("NotoSansCJKjp-Regular.otf");
-    pop_allocator();
-
-    sg_setup(&(sg_desc){
-        .context = sapp_sgcontext()
-    });
-    stm_setup();
-    simgui_setup(&(simgui_desc_t){
-        .no_default_font = (font.buf != 0),
-        .sample_count = _sapp.sample_count
-    });
-    state = (State) {
-        .pass_action = {
-            .colors[0] = {
-                .action = SG_ACTION_CLEAR, .val = { 0.0f, 0.0f, 0.0f, 1.0f }
-            }
-        }
-    };
-
-    igPushStyleVarFloat(ImGuiStyleVar_ScrollbarSize, 4.f);
-    igPushStyleVarFloat(ImGuiStyleVar_WindowRounding, 1.0f);
-    igPushStyleVarVec2(ImGuiStyleVar_FramePadding, V2(8.0f, 4.0f));
-
-    if (font.buf) {
-        ImGuiIO* io = igGetIO();
-        ImFontAtlas_AddFontFromMemoryTTF(io->Fonts, font.buf, (i32)font.len, 16.0f, 0, ImFontAtlas_GetGlyphRangesJapanese(io->Fonts));
-
-        // Copy pasted from simgui_setup
-        unsigned char* font_pixels;
-        int font_width, font_height;
-        int bytes_per_pixel;
-        ImFontAtlas_GetTexDataAsRGBA32(io->Fonts, &font_pixels, &font_width, &font_height, &bytes_per_pixel);
-        sg_image_desc img_desc;
-        memset(&img_desc, 0, sizeof(img_desc));
-        img_desc.width = font_width;
-        img_desc.height = font_height;
-        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
-        img_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
-        img_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        img_desc.min_filter = SG_FILTER_LINEAR;
-        img_desc.mag_filter = SG_FILTER_LINEAR;
-        img_desc.content.subimage[0][0].ptr = font_pixels;
-        img_desc.content.subimage[0][0].size = font_width * font_height * sizeof(uint32_t);
-        img_desc.label = "sokol-imgui-font";
-        _simgui.img = sg_make_image(&img_desc);
-        io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
-    }
-
-#ifdef __EMSCRIPTEN__
-    const char *files[0] = {};
-#else
-    const char *files[] = {
-        "./osu.sm",
-        "./03 IMAGE -MATERIAL-(Version 0).sm",
-        "./Grief & Malice.sm",
-        "./Odin.sm",
-        "./Skycoffin CT.sm",
-        "./The Lost Dedicated Life.sm",
-        "./m1dy - 960 BPM Speedcore.sm",
-        "./alien temple.sm",
-
-        // Junk """""""test vectors"""""""
-        "./03 IMAGE -MATERIAL-(Version 0).sm",
-        "./main.c",
-        "NotoSansCJKjp-Regular.otf"
-    };
-#endif
-
-    state.info = calc_info();
-    state.calc = calc_init(&state.info);
-    state.ps = copy_param_set(&state.info.defaults);
-    buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
-    buf_reserve(state.graphs, 128);
-
-    for (isize i = 0; i < array_length(files); i++) {
-        Buffer f = read_file(files[i]);
-        parse_and_add_sm(f, i == 0);
-    }
-
-    for (i32 ss = 0; ss < NumSkillsets; ss++) {
-        ImVec4 c = GetColormapColor(ss);
-        c.w *= 0.9f;
-        state.skillset_colors[ss] = igColorConvertFloat4ToU32(c);
-        c.w *= 0.8f;
-        state.skillset_colors_selectable[ss] = igColorConvertFloat4ToU32(c);
-    }
-
-    *null_sfi = (SimFileInfo) {
-        .id = S("nullck"),
-    };
-
-    state.active = null_sfi;
-
-    low_prio_work_queue.lock_id = make_lock();
-    done_queue.lock_id = make_lock();
-
-    i32 n_threads = got_any_cores() - 1;
-    for (isize i = 0; i < n_threads; i++) {
-        CalcThread *ct = buf_push(state.threads, (CalcThread) {
-            .info = &state.info,
-            .generation = &state.generation,
-            .ps = &state.ps
-        });
-
-        make_thread(calc_thread, ct);
-    }
-}
 
 enum {
     ParamSlider_Nothing,
@@ -633,30 +556,130 @@ static void skillset_line_plot(i32 ss, b32 highlight, FnGraph *fng, f32 *ys)
     }
 }
 
-static ImVec4 msd_color(f32 x)
+void init(void)
 {
-    // -- Colorized stuff
-    // function byMSD(x)
-    // 	if x then
-    // 		return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
-    // 	end
-    // 	return HSV(0, 0.9, 0.9)
-    // end
-    ImVec4 color = { 0, 0.9f, 0.9f, 1.0f };
-    if (x) {
-        f32 h = max(95.0f - (x / 40.0f) * 150.0f, -50.0f) / 360.f;
-        h = h + (f32)(h < 0) - truncf(h);
-        f32 s = 0.9f;
-        f32 v = 0.9f;
-        igColorConvertHSVtoRGB(h, s, v, &color.x, &color.y, &color.z);
+    isize bignumber = 100*1024*1024;
+    scratch_stack = stack_make(malloc(bignumber), bignumber);
+    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
+
+    push_allocator(scratch);
+    Buffer font = load_font_file("NotoSansCJKjp-Regular.otf");
+    pop_allocator();
+
+    sg_setup(&(sg_desc){
+        .context = sapp_sgcontext()
+    });
+    stm_setup();
+    simgui_setup(&(simgui_desc_t){
+        .no_default_font = (font.buf != 0),
+        .sample_count = _sapp.sample_count
+    });
+    state = (State) {
+        .pass_action = {
+            .colors[0] = {
+                .action = SG_ACTION_CLEAR, .val = { 0.0f, 0.0f, 0.0f, 1.0f }
+            }
+        }
+    };
+
+    ImVec4 bg = *igGetStyleColorVec4(ImGuiCol_WindowBg);
+    bg.w = 1.0f;
+    igPushStyleColorVec4(ImGuiCol_WindowBg, bg);
+    igPushStyleVarFloat(ImGuiStyleVar_ScrollbarSize, 4.f);
+    igPushStyleVarFloat(ImGuiStyleVar_WindowRounding, 1.0f);
+    igPushStyleVarVec2(ImGuiStyleVar_FramePadding, V2(8.0f, 4.0f));
+
+    if (font.buf) {
+        ImGuiIO* io = igGetIO();
+        ImFontAtlas_AddFontFromMemoryTTF(io->Fonts, font.buf, (i32)font.len, 16.0f, 0, ImFontAtlas_GetGlyphRangesJapanese(io->Fonts));
+
+        // Copy pasted from simgui_setup
+        unsigned char* font_pixels;
+        int font_width, font_height;
+        int bytes_per_pixel;
+        ImFontAtlas_GetTexDataAsRGBA32(io->Fonts, &font_pixels, &font_width, &font_height, &bytes_per_pixel);
+        sg_image_desc img_desc;
+        memset(&img_desc, 0, sizeof(img_desc));
+        img_desc.width = font_width;
+        img_desc.height = font_height;
+        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        img_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        img_desc.min_filter = SG_FILTER_LINEAR;
+        img_desc.mag_filter = SG_FILTER_LINEAR;
+        img_desc.content.subimage[0][0].ptr = font_pixels;
+        img_desc.content.subimage[0][0].size = font_width * font_height * sizeof(uint32_t);
+        img_desc.label = "sokol-imgui-font";
+        _simgui.img = sg_make_image(&img_desc);
+        io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
     }
 
-    return color;
+#ifdef __EMSCRIPTEN__
+    const char *files[0] = {};
+#else
+    const char *files[] = {
+        "./osu.sm",
+        "./03 IMAGE -MATERIAL-(Version 0).sm",
+        "./Grief & Malice.sm",
+        "./Odin.sm",
+        "./Skycoffin CT.sm",
+        "./The Lost Dedicated Life.sm",
+        "./m1dy - 960 BPM Speedcore.sm",
+        "./alien temple.sm",
+
+        // Junk """""""test vectors"""""""
+        "./03 IMAGE -MATERIAL-(Version 0).sm",
+        "./main.c",
+        "NotoSansCJKjp-Regular.otf"
+    };
+#endif
+
+    state.generation = 1;
+    state.info = calc_info();
+    state.calc = calc_init(&state.info);
+    state.ps = copy_param_set(&state.info.defaults);
+    buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
+    buf_reserve(state.graphs, 128);
+
+    for (isize i = 0; i < array_length(files); i++) {
+        Buffer f = read_file(files[i]);
+        parse_and_add_sm(f, i == 0);
+    }
+
+    for (i32 ss = 0; ss < NumSkillsets; ss++) {
+        ImVec4 c = GetColormapColor(ss);
+        c.w *= 0.9f;
+        state.skillset_colors[ss] = igColorConvertFloat4ToU32(c);
+        c.w *= 0.8f;
+        state.skillset_colors_selectable[ss] = igColorConvertFloat4ToU32(c);
+    }
+
+    *null_sfi = (SimFileInfo) {
+        .id = S("nullck"),
+    };
+
+    state.active = null_sfi;
+
+    high_prio_work_queue.lock_id = make_lock();
+    low_prio_work_queue.lock_id = make_lock();
+    done_queue.lock_id = make_lock();
+
+    i32 n_threads = got_any_cores() - 1;
+    for (isize i = 0; i < n_threads; i++) {
+        CalcThread *ct = buf_push(state.threads, (CalcThread) {
+            .info = &state.info,
+            .generation = &state.generation,
+            .ps = &state.ps
+        });
+
+        make_thread(calc_thread, ct);
+    }
 }
 
 void frame(void)
 {
     reset_scratch();
+    finish_work();
 
     i32 width = sapp_width();
     i32 height = sapp_height();
@@ -665,50 +688,6 @@ void frame(void)
 
     bool ss_highlight[NumSkillsets] = {0};
     SimFileInfo *next_active = 0;
-
-    DoneWork done = {0};
-    while (get_done_work(&done)) {
-        SimFileInfo *sfi = done.work.sfi;
-        FnGraph *fng = 0;
-        if (done.work.type == Graph_Wife) {
-            fng = &state.graphs[done.work.sfi->graphs[0]];
-        } else if ((done.work.type & Graph_Parameter) == Graph_Parameter) {
-            for (isize i = 1; i < buf_len(sfi->graphs); i++) {
-                if (state.graphs[sfi->graphs[i]].param == done.work.param_of_fng) {
-                    fng = &state.graphs[sfi->graphs[i]];
-                    break;
-                }
-            }
-
-            if (fng == 0) {
-                // fng has been removed since calc calculation completed
-                continue;
-            }
-        } else {
-            assert_unreachable();
-        }
-
-        if (fng->generation > done.work.generation) {
-            continue;
-        }
-        fng->generation = done.work.generation;
-
-        f32 min_y = 100.f;
-        f32 rel_min_y = 0.0f;
-        for (isize ss = 0; ss < NumSkillsets; ss++) {
-            fng->xs[done.work.x_index] = (done.work.type == Graph_Wife) ? done.work.goal * 100.f : done.work.value;
-            fng->ys[ss][done.work.x_index] = done.ssr.E[ss];
-            fng->relative_ys[ss][done.work.x_index] = done.ssr.E[ss] / done.ssr.overall;
-
-            if (fng->ys[ss][0] < min_y) {
-                min_y = fng->ys[ss][0];
-                rel_min_y = safe_div(min_y, fng->ys[0][0]);
-            }
-        }
-        fng->min = min_y;
-        fng->relative_min = rel_min_y;
-        fng->max = fng->ys[0][NumGraphSamples - 1] ? fng->ys[0][NumGraphSamples - 1] : 40.0f;
-    }
 
     ImGuiIO *io = igGetIO();
     ImVec2 ds = io->DisplaySize;
@@ -900,11 +879,13 @@ void frame(void)
             } else {
                 sfi->fullscreen_window = false;
                 ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * ((f32)buf_len(sfi->graphs) + 1.0f)));
-                ImVec2 pos = V2(rngf() * (ds.x - sz.x), rngf() * (ds.y - sz.y));
-                igSetNextWindowPos(pos, ImGuiCond_Appearing, V2Zero);
-                igSetNextWindowSize(sz, ImGuiCond_Appearing);
+                ImVec2 pos = V2(left_width + rngf() * (ds.x - left_width - sz.x), rngf() * (ds.y - sz.y));
+                igSetNextWindowPos(pos, ImGuiCond_Once, V2Zero);
+                igSetNextWindowSize(sz, ImGuiCond_Once);
             }
             if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
+                calculate_file_graphs(&state.high_prio_work, sfi, state.generation);
+
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
                 }
@@ -1037,6 +1018,7 @@ void frame(void)
     }
 
     if (changed.type) {
+        CalcWork **work = &state.low_prio_work;
         switch (changed.type) {
             case ParamSlider_GraphToggled: {
                 if (state.parameter_graphs_enabled[changed.param]) {
@@ -1044,8 +1026,6 @@ void frame(void)
                     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                         buf_push(sfi->graphs, make_parameter_graph(changed.param));
                     }
-
-                    recalculate_graphs_in_background(&state.work, changed.param, Graph_Parameter, changed.value);
                 } else {
                     for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
                         if (state.parameter_graph_order[i] == changed.param) {
@@ -1066,14 +1046,14 @@ void frame(void)
                 }
             } break;
             case ParamSlider_LowerBoundChanged: {
-                recalculate_graphs_in_background(&state.work, changed.param, Graph_ParameterLowerBound, changed.value);
+                calculate_graphs_in_background(work, Work_ParameterLowerBound, changed.param, changed.value);
             } break;
             case ParamSlider_UpperBoundChanged: {
-                recalculate_graphs_in_background(&state.work, changed.param, Graph_ParameterUpperBound, changed.value);
+                calculate_graphs_in_background(work, Work_ParameterUpperBound, changed.param, changed.value);
             } break;
             case ParamSlider_ValueChanged: {
                 state.generation++;
-                recalculate_graphs_in_background(&state.work, changed.param, Graph_Wife, changed.value);
+                calculate_graphs_in_background(work, Work_Wife, changed.param, changed.value);
             } break;
             default: {
                 assert_unreachable();
@@ -1081,7 +1061,18 @@ void frame(void)
         }
     }
 
-    submit_work(state.work, state.generation);
+    // Randomise submission order for the high prio queue
+    // This lets you sweep param sliders without the first graphs
+    // stealing all the work
+    for (isize i = 0; i < buf_len(state.high_prio_work); i++) {
+        isize idx = i + (rng() % (buf_len(state.high_prio_work) - i));
+        CalcWork temp = state.high_prio_work[i];
+        state.high_prio_work[i] = state.high_prio_work[idx];
+        state.high_prio_work[idx] = temp;
+    }
+
+    submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
+    submit_work(&low_prio_work_queue, state.low_prio_work, state.generation);
     fflush(0);
 }
 

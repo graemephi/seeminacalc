@@ -49,12 +49,6 @@ typedef struct NoteInfo
 } NoteInfo;
 #endif
 
-typedef struct EffectMasks
-{
-    unsigned char *weak;
-    unsigned char *strong;
-} EffectMasks;
-
 typedef struct ParamSet
 {
     float *params;
@@ -99,11 +93,6 @@ typedef struct CalcInfo
 extern "C"
 {
 #endif
-
-// EffectMasks allow basic filtering of parameters to those that are actually
-// relevant for a given file. Strong effects will almost always change the
-// rating, weak effects might not.
-void calculate_effects(CalcInfo *ci, SeeCalc *calc, NoteData *note_data, EffectMasks *masks);
 
 // Turns the SQLite binary blob from the `serializednotedata` column in the `steps`
 // table of the cache db into an opaque handle to C++ whateverisms.

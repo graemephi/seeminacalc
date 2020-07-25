@@ -51,77 +51,6 @@ struct NoteData
     const vector<NoteInfo> ref;
 };
 
-static f32 rating_floor(f32 v)
-{
-    return (f32)((i32)(v * 100.0f)) / 100.f;
-}
-
-void calculate_effects(CalcInfo *info, SeeCalc *calc, NoteData *note_data, EffectMasks *masks)
-{
-    assert(masks->weak);
-    assert(masks->strong);
-
-    SkillsetRatings default_ratings = calc_go(calc, &info->defaults, note_data, 1.0f, 0.93f);
-    for (i32 r = 0; r < NumSkillsets; r++) {
-        default_ratings.E[r] = rating_floor(default_ratings.E[r]);
-    }
-
-    size_t num_params = info->num_params;
-    f32 *params = (f32 *)calloc(num_params, sizeof(f32));
-    memcpy(params, info->defaults.params, num_params * sizeof(f32));
-    ParamSet params_set = {};
-    params_set.params = params;
-    params_set.num_params = num_params;
-
-    b8 changed[NumSkillsets] = {};
-
-    SkillsetRatings ratings = {};
-    for (int i = 0; i < num_params; i++) {
-        // stronk. they react to small changes at 93%
-        {
-            if (info->params[i].default_value == 0) {
-                params[i] = 1;
-            } else if (info->params[i].default_value > info->params[i].min) {
-                params[i] = info->params[i].default_value * 0.95f;
-            } else {
-                params[i] = info->params[i].default_value * 1.05f;
-            }
-
-            ratings = calc_go(calc, &params_set, note_data, 1.0f, 0.93f);
-
-            for (int r = 0; r < NumSkillsets; r++) {
-                b32 changed = rating_floor(ratings.E[r]) != default_ratings.E[r];
-                masks->strong[i] |= (changed << r);
-            }
-        }
-
-        // weak. they react to big changes at 96.5%, and not small changes at 93%
-        {
-            f32 distance_from_low = info->params[i].default_value - info->params[i].min;
-            f32 distance_from_high = info->params[i].max - info->params[i].max;
-            assert(info->params[i].max >= info->params[i].min);
-            if (info->params[i].default_value == 0) {
-                params[i] = 100;
-            } else if (distance_from_low > distance_from_high) {
-                params[i] = info->params[i].min;
-            } else {
-                params[i] = info->params[i].max;
-            }
-
-            ratings = calc_go(calc, &params_set, note_data, 1.0f, 0.93f);
-
-            masks->weak[i] = masks->strong[i];
-            for (i32 r = 0; r < NumSkillsets; r++) {
-                b32 changed = rating_floor(ratings.E[r]) != default_ratings.E[r];
-                masks->weak[i] |= (changed << r);
-            }
-        }
-
-        params[i] = info->params[i].default_value;
-    }
-
-    free(params);
-}
 
 NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 {
@@ -289,8 +218,6 @@ SeeCalc calc_init(CalcInfo *info)
 SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal)
 {
     SkillsetRatings result = {};
-    // Stupud hack related. If that wasn't necessary, we could do better than
-    // memcpying every time, but it probably doesn't matter
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {

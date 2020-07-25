@@ -6,7 +6,7 @@
 #include "thread.h"
 
 static std::vector<std::thread> threads;
-static std::vector<std::mutex> muts(2);
+static std::vector<std::mutex> muts(3);
 static int mut_index = 0;
 static std::mutex m;
 static std::condition_variable c;

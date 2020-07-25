@@ -458,9 +458,9 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	if (fast_walk_and_check_for_skip(NoteInfo, music_rate, *this, offset))
 		return true;
 
-	TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(*this);
+	thread_local TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(*this);
 
-	// Stupud hack. Also un-threadlocal ulbu, we don't need it
+	// Stupud hack
 	float *mod_cursor = mod_params;
     for (const auto &p : ulbu_that_which_consumes_all._s._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._js._params) *p.second = *mod_cursor++;

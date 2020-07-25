@@ -1,8 +1,8 @@
-Clang := 0
+Clang := 1
 Includes := -Ietterna -Ilib
 
 ifneq ($(OS),Windows_NT)
-	$(error haven't done this. look at emcc)
+	$(error haven't done this. look at emcc flags that dont begin with -s)
 endif
 
 
