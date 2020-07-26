@@ -332,12 +332,14 @@ i32 make_skillsets_graph()
     fng->active = true;
     fng->is_param = false;
     fng->param = -1;
+    fng->len = NumGraphSamples;
     fng->min = FLT_MAX;
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
     fng->generation = 0;
+
     for (i32 x = 0; x < NumGraphSamples; x++) {
-        fng->xs[x] = 82.0f + (f32)x;
+        fng->xs[x] = lerp(WifeXs[0] * 100.f, WifeXs[Wife965Index + 1] * 100.f, (f32)x / (NumGraphSamples - 1));
     }
     return (i32)buf_index_of(state.graphs, fng);
 }
@@ -354,7 +356,7 @@ i32 make_parameter_graph(i32 param)
     fng->active = true;
     fng->is_param = true;
     fng->param = param;
-    fng->len = state.info.params[param].integer ? (i32)state.info.params[param].max : 10;
+    fng->len = state.info.params[param].integer ? (i32)state.info.params[param].max : NumGraphSamples;
     fng->min = FLT_MAX;
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
@@ -426,14 +428,11 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
     buf_reserve(sfi->effects.weak, state.info.num_params);
     buf_reserve(sfi->effects.strong, state.info.num_params);
 
-    CalcWork *work = 0;
-    calculate_file_graphs(&work, sfi, state.generation);
-    submit_work(&high_prio_work_queue, work, state.generation);
+    calculate_file_graphs(&state.high_prio_work, sfi, state.generation);
+    submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
 
-    buf_clear(work);
-
-    calculate_effects(&work, &state.info, sfi);
-    submit_work(&low_prio_work_queue, work, state.generation);
+    calculate_effects(&state.low_prio_work, &state.info, sfi);
+    submit_work(&low_prio_work_queue, state.low_prio_work, state.generation);
 
     thread_notify();
 
@@ -550,7 +549,7 @@ static void skillset_line_plot(i32 ss, b32 highlight, FnGraph *fng, f32 *ys)
     }
 
     ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[ss]);
-    ipPlotLineFloatPtrFloatPtr(SkillsetNames[ss], fng->xs, ys, NumGraphSamples, 0, sizeof(float));
+    ipPlotLineFloatPtrFloatPtr(SkillsetNames[ss], fng->xs, ys, fng->len, 0, sizeof(float));
     ipPopStyleColor(1);
 
     if (highlight) {
@@ -620,10 +619,10 @@ void init(void)
     const char *files[0] = {};
 #else
     const char *files[] = {
+        "./Odin.sm",
         "./osu.sm",
         "./03 IMAGE -MATERIAL-(Version 0).sm",
         "./Grief & Malice.sm",
-        "./Odin.sm",
         "./Skycoffin CT.sm",
         "./The Lost Dedicated Life.sm",
         "./m1dy - 960 BPM Speedcore.sm",
@@ -714,9 +713,11 @@ void frame(void)
         // Open file list
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             FnGraph *g = &state.graphs[sfi->graphs[0]];
-            igTextColored(msd_color(g->ys[0][11]), "%2.2f", (f64)g->ys[0][11]);
+            f32 wife93 = g->ys[0][Wife930Index];
+            f32 wife965 = g->ys[0][Wife965Index];
+            igTextColored(msd_color(wife93), "%2.2f", (f64)wife93);
             tooltip("Overall at AA"); igSameLine(0, 7.0f);
-            igTextColored(msd_color(g->ys[0][18]), "%2.2f", (f64)g->ys[0][18]);
+            igTextColored(msd_color(wife965), "%2.2f", (f64)wife965);
             tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
             igPushIDStr(sfi->id.buf);
             if (igSelectableBool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
@@ -736,7 +737,7 @@ void frame(void)
             if (skillsets) {
                 for (isize ss = 0; ss < NumSkillsets; ss++) {
                     char r[32] = {0};
-                    snprintf(r, sizeof(r), "%2.2f##%d", (f64)g->ys[ss][13], (i32)ss);
+                    snprintf(r, sizeof(r), "%2.2f##%d", (f64)g->ys[ss][Wife930Index], (i32)ss);
                     igPushStyleColorU32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
                     igPushStyleColorU32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
                     igSelectableBool(r, sfi->display_skillsets[ss], ImGuiSelectableFlags_None, V2(300.0f / NumSkillsets, 0));
@@ -880,7 +881,7 @@ void frame(void)
                 igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
             } else {
                 sfi->fullscreen_window = false;
-                ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * ((f32)buf_len(sfi->graphs) + 1.0f)));
+                ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (f32)buf_len(sfi->graphs)));
                 ImVec2 pos = V2(left_width + rngf() * (ds.x - left_width - sz.x), rngf() * (ds.y - sz.y));
                 igSetNextWindowPos(pos, ImGuiCond_Once, V2Zero);
                 igSetNextWindowSize(sz, ImGuiCond_Once);
@@ -904,7 +905,7 @@ void frame(void)
 
                 // Plots. Weird rendering order: first 0, then backwards from the end
                 FnGraph *fng = &state.graphs[sfi->graphs[0]];
-                ipSetNextPlotLimits(82, 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+                ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
                 if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
                     for (i32 ss = 0; ss < NumSkillsets; ss++) {
                         skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
@@ -912,7 +913,7 @@ void frame(void)
                     ipEndPlot();
                 }
                 igSameLine(0, 4);
-                ipSetNextPlotLimits(82, 100, (f64)fng->relative_min - 0.05, 1.05, ImGuiCond_Always);
+                ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->relative_min - 0.05, 1.05, ImGuiCond_Always);
                 if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
                     for (i32 ss = 1; ss < NumSkillsets; ss++) {
                         skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);

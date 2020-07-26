@@ -31,6 +31,9 @@ build:
 	@-mkdir -p build/debug
 	@-mkdir -p build/release
 
+cog:
+	cog -rc graphs.c
+
 build/debug/cpp.obj: *.h *.cpp Makefile
 	$(Compiler) $(Common) $(CPP) $(Debug) -c cpp.cpp
 

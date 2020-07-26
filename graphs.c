@@ -1,13 +1,183 @@
+
+/*[[[cog
+import cog
+import numpy as np
+
+def lerp(a, b, t):
+    return (1 - t)*a + b*t
+
+def dump(name, xs):
+    cog.outl("static const f32 %s[%s] = {" % (name, len(xs)))
+    for x in xs:
+        cog.outl("    %sf," % x.astype(np.float32))
+    cog.outl("};")
+
+linear = np.linspace(1, 0, 127)
+
+wife_a = lerp(0.82, 0.965, 1 - linear*linear*np.sqrt(linear))
+wife_a -= 0.965
+closest_to_93 = wife_a[np.argmin(np.abs(wife_a - (0.93 - 0.965)))]
+wife_a *= (0.93 - 0.965) / closest_to_93
+
+wife_xs = np.concatenate((wife_a + 0.965, [0.98]))
+
+dump("WifeXs", wife_xs)
+cog.outl(r"""enum {
+    Wife930Index = %s,
+    Wife965Index = %s
+};""" % (np.argwhere(wife_xs == 0.93)[0,0], np.argwhere(wife_xs == 0.965)[0,0]))
+]]]*/
+static const f32 WifeXs[128] = {
+    0.81815857f,
+    0.8210548f,
+    0.82391644f,
+    0.8267437f,
+    0.8295367f,
+    0.83229554f,
+    0.83502036f,
+    0.8377114f,
+    0.8403687f,
+    0.8429924f,
+    0.8455827f,
+    0.84813976f,
+    0.85066366f,
+    0.85315454f,
+    0.85561264f,
+    0.85803795f,
+    0.8604308f,
+    0.8627912f,
+    0.8651193f,
+    0.8674153f,
+    0.8696794f,
+    0.87191164f,
+    0.8741122f,
+    0.87628126f,
+    0.878419f,
+    0.8805255f,
+    0.88260096f,
+    0.8846455f,
+    0.8866593f,
+    0.88864255f,
+    0.8905953f,
+    0.8925178f,
+    0.89441025f,
+    0.89627266f,
+    0.8981053f,
+    0.8999083f,
+    0.90168184f,
+    0.90342605f,
+    0.90514106f,
+    0.90682715f,
+    0.9084844f,
+    0.910113f,
+    0.9117131f,
+    0.9132849f,
+    0.91482854f,
+    0.91634417f,
+    0.917832f,
+    0.9192923f,
+    0.920725f,
+    0.92213047f,
+    0.92350876f,
+    0.9248602f,
+    0.92618483f,
+    0.9274829f,
+    0.92875457f,
+    0.93f,
+    0.9312194f,
+    0.932413f,
+    0.9335809f,
+    0.93472326f,
+    0.93584037f,
+    0.9369324f,
+    0.9379995f,
+    0.93904185f,
+    0.9400597f,
+    0.9410532f,
+    0.9420226f,
+    0.9429681f,
+    0.9438898f,
+    0.944788f,
+    0.94566286f,
+    0.9465146f,
+    0.9473434f,
+    0.94814956f,
+    0.9489332f,
+    0.9496945f,
+    0.9504338f,
+    0.9511512f,
+    0.95184696f,
+    0.9525214f,
+    0.9531746f,
+    0.9538068f,
+    0.95441836f,
+    0.95500934f,
+    0.9555801f,
+    0.95613086f,
+    0.9566618f,
+    0.9571732f,
+    0.9576653f,
+    0.9581384f,
+    0.95859265f,
+    0.95902836f,
+    0.95944583f,
+    0.95984524f,
+    0.96022695f,
+    0.96059114f,
+    0.96093816f,
+    0.9612682f,
+    0.96158165f,
+    0.9618787f,
+    0.96215975f,
+    0.96242505f,
+    0.96267486f,
+    0.9629095f,
+    0.9631294f,
+    0.9633348f,
+    0.963526f,
+    0.9637034f,
+    0.9638673f,
+    0.96401817f,
+    0.9641562f,
+    0.964282f,
+    0.9643957f,
+    0.9644979f,
+    0.96458894f,
+    0.96466935f,
+    0.96473944f,
+    0.96479976f,
+    0.96485084f,
+    0.96489316f,
+    0.9649273f,
+    0.96495396f,
+    0.9649736f,
+    0.96498716f,
+    0.9649953f,
+    0.9649992f,
+    0.965f,
+    0.98f,
+};
 enum {
-    NumGraphSamples = 19
+    Wife930Index = 55,
+    Wife965Index = 126
+};
+//[[[end]]] (checksum: 98d4593f5683998f6fe114f951055a5c)
+
+enum {
+    NumGraphSamples = array_length(WifeXs)
 };
 
+static_assert(NumGraphSamples < 256);
 struct FnGraph
 {
     b32 active;
     b32 is_param;
     i32 param;
     i32 len;
+
+    u8 resident[NumGraphSamples];
+    u8 resident_count;
+    f32 incoming_ys[NumSkillsets][NumGraphSamples];
 
     f32 xs[NumGraphSamples];
     f32 ys[NumSkillsets][NumGraphSamples];
@@ -98,7 +268,7 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
         }
     }
 
-    // weak. they react to big changes at 96.5%, and not small changes at 93%
+    // weak. they react to big changes at 96.5%, and small changes at 93%
     {
         f32 distance_from_low = info->params[p].default_value - info->params[p].min;
         f32 distance_from_high = info->params[p].max - info->params[p].max;
@@ -165,7 +335,7 @@ struct {
 
 static const usize WorkQueueMask = array_length(low_prio_work_queue.entries) - 1;
 static const usize DoneQueueMask = array_length(done_queue.entries) - 1;
-static_assert((array_length(low_prio_work_queue.entries) & (array_length(low_prio_work_queue.entries) - 1)) == 0, "");
+static_assert((array_length(low_prio_work_queue.entries) & (array_length(low_prio_work_queue.entries) - 1)) == 0);
 
 
 void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
@@ -179,7 +349,7 @@ void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
                 buf_push(*work, (CalcWork) {
                     .sfi = sfi,
                     .type = Work_Wife,
-                    .wife.goal = fng->xs[i] / 100.0f,
+                    .wife.goal = WifeXs[i],
                     .x_index = (i32)i,
                     .generation = state.generation,
                 });
@@ -192,13 +362,13 @@ void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
         FnGraph *fng = &state.graphs[sfi->graphs[i]];
         if (fng->pending_generation < generation) {
             fng->pending_generation = generation;
-            for (isize sample = 0; sample < NumGraphSamples; sample++) {
+            for (isize sample = 0; sample < fng->len; sample++) {
                 buf_push(*work, (CalcWork) {
                     .sfi = sfi,
                     .type = Work_Parameter,
                     .x_index = (i32)sample,
                     .parameter.param = fng->param,
-                    .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / (NumGraphSamples - 1)),
+                    .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1)),
                     .parameter.param_of_fng = fng->param,
                     .generation = state.generation,
                 });
@@ -215,15 +385,15 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
             buf_push(*work, (CalcWork) {
                 .sfi = sfi,
                 .type = Work_Wife,
-                .x_index = 11,
-                .wife.goal = 0.93f,
+                .x_index = Wife930Index,
+                .wife.goal = WifeXs[Wife930Index],
                 .generation = state.generation,
             });
             buf_push(*work, (CalcWork) {
                 .sfi = sfi,
                 .type = Work_Wife,
-                .x_index =  NumGraphSamples - 1,
-                .wife.goal = 1.0f,
+                .x_index = Wife965Index,
+                .wife.goal = WifeXs[Wife965Index],
                 .generation = state.generation,
             });
         }
@@ -231,13 +401,12 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
         // Skillsets over wife
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             if (sfi->open == false) {
-                FnGraph *fng = &state.graphs[sfi->graphs[0]];
                 for (isize i = 0; i < NumGraphSamples - 1; i++) {
-                    if (i != 11) {
+                    if (i != Wife930Index) {
                         buf_push(*work, (CalcWork) {
                             .sfi = sfi,
                             .type = Work_Wife,
-                            .wife.goal = fng->xs[i] / 100.0f,
+                            .wife.goal = WifeXs[i],
                             .x_index = (i32)i,
                             .generation = state.generation,
                         });
@@ -252,13 +421,13 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
                 if (sfi->open == false) {
                     FnGraph *fng = &state.graphs[sfi->graphs[i]];
                     if (fng->param != param) {
-                        for (isize sample = 0; sample < NumGraphSamples; sample++) {
+                        for (isize sample = 0; sample < fng->len; sample++) {
                             buf_push(*work, (CalcWork) {
                                 .sfi = sfi,
                                 .type = Work_Parameter,
                                 .x_index = (i32)sample,
                                 .parameter.param = fng->param,
-                                .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / (NumGraphSamples - 1)),
+                                .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / (f32)(fng->len - 1)),
                                 .parameter.param_of_fng = fng->param,
                                 .generation = state.generation,
                             });
@@ -469,6 +638,9 @@ void submit_work(WorkQueue *q, CalcWork work[], u32 generation)
 
 void finish_work()
 {
+    push_allocator(scratch);
+    FnGraph **updated_fngs = 0;
+
     DoneWork done = {0};
     while (get_done_work(&done)) {
         SimFileInfo *sfi = done.work.sfi;
@@ -499,27 +671,106 @@ void finish_work()
         if (fng->generation > done.work.generation) {
             continue;
         }
-        fng->generation = done.work.generation;
+        if (fng->generation < done.work.generation) {
+            memset(fng->resident, 0, sizeof(fng->resident));
+            fng->resident_count = 0;
+        }
 
-        f32 min_y = 100.f;
-        f32 rel_min_y = 0.0f;
+        fng->generation = done.work.generation;
+        assert(done.work.x_index < NumGraphSamples);
+        if (fng->resident[done.work.x_index] == 0) {
+            fng->resident_count++;
+        }
+        fng->resident[done.work.x_index] = 1;
+        assert(fng->resident_count <= array_length(fng->resident));
+
         for (isize ss = 0; ss < NumSkillsets; ss++) {
             fng->xs[done.work.x_index] = (done.work.type == Work_Wife) ? done.work.wife.goal * 100.f : done.work.parameter.value;
-            fng->ys[ss][done.work.x_index] = done.ssr.E[ss];
-            fng->relative_ys[ss][done.work.x_index] = done.ssr.E[ss] / done.ssr.overall;
+            fng->incoming_ys[ss][done.work.x_index] = done.ssr.E[ss];
+        }
 
-            if (fng->ys[ss][0] < min_y) {
-                min_y = fng->ys[ss][0];
-                rel_min_y = safe_div(min_y, fng->ys[0][0]);
+        if (fng->resident_count == array_length(fng->resident)) {
+            for (isize ss = 1; ss < NumSkillsets; ss++) {
+                FnGraph *w = &state.graphs[sfi->graphs[0]];
+                sfi->display_skillsets[ss] = (0.9f <= (w->incoming_ys[ss][Wife930Index] / w->incoming_ys[0][Wife930Index]));
             }
         }
-        fng->min = min_y;
-        fng->relative_min = rel_min_y;
-        fng->max = fng->ys[0][NumGraphSamples - 1] ? fng->ys[0][NumGraphSamples - 1] : 40.0f;
 
-        for (isize ss = 1; ss < NumSkillsets; ss++) {
-            FnGraph *w = &state.graphs[sfi->graphs[0]];
-            sfi->display_skillsets[ss] = (0.9f <= (w->ys[ss][11] / w->ys[0][NumGraphSamples - 1]));
+        isize fungi = 0;
+        for (; fungi < buf_len(updated_fngs); fungi++) {
+            if (updated_fngs[fungi] == fng) {
+                break;
+            }
+        }
+        if (fungi == buf_len(updated_fngs)) {
+            buf_push(updated_fngs, fng);
         }
     }
+
+    for (isize fungi = 0; fungi < buf_len(updated_fngs); fungi++) {
+        FnGraph *fng = updated_fngs[fungi];
+        if (fng->resident_count != array_length(fng->resident)) {
+            u8 cumsum[NumGraphSamples] = {0};
+            u8 sorted[NumGraphSamples] = {0};
+            for (isize i = 1; i < NumGraphSamples; i++) {
+                cumsum[i] = cumsum[i - 1] + fng->resident[i - 1];
+            }
+            for (isize i = 0; i < NumGraphSamples; i++) {
+                sorted[cumsum[i]] = (u8)i;
+            }
+            f32 a = 0.7f;
+            f32 b = 1.0f - a;
+            f32 min_y = 100.f;
+            f32 rel_min_y = 0.0f;
+            for (isize ss = 0; ss < NumSkillsets; ss++) {
+                if (fng->ys[ss][sorted[0]] == 0) {
+                    fng->ys[ss][sorted[0]] = fng->incoming_ys[ss][sorted[0]];
+                }
+                for (isize i = 0; i < fng->resident_count - 1; i++) {
+                    f32 inc = 1.0f / (f32)(sorted[i+1] - sorted[i]);
+                    if (fng->ys[ss][sorted[i+1]] == 0) {
+                        fng->ys[ss][sorted[i+1]] = fng->incoming_ys[ss][sorted[i+1]];
+                    }
+                    f32 t_a = fng->incoming_ys[ss][sorted[i]];
+                    f32 t_b = fng->incoming_ys[ss][sorted[i+1]];
+                    f32 t = 0;
+                    for (isize j = sorted[i]; j < sorted[i+1]; j++) {
+                        fng->ys[ss][j] = a*fng->ys[ss][j] + b*lerp(t_a, t_b, t);
+                        fng->relative_ys[ss][i] = fng->ys[ss][i] / fng->ys[0][i];
+                        t += inc;
+                    }
+                }
+                if (fng->ys[ss][0] < min_y) {
+                    min_y = fng->ys[ss][0];
+                    rel_min_y = safe_div(min_y, fng->ys[0][0]);
+                }
+                fng->ys[ss][Wife965Index + 1] = fng->ys[ss][Wife965Index];
+                fng->relative_ys[ss][Wife965Index + 1] = fng->relative_ys[ss][Wife965Index];
+            }
+            fng->min = min_y;
+            fng->relative_min = rel_min_y;
+            fng->max = fng->ys[0][NumGraphSamples - 1] ? fng->ys[0][NumGraphSamples - 1] : 40.0f;
+        } else {
+            f32 min_y = 100.f;
+            f32 rel_min_y = 0.0f;
+            for (isize ss = 0; ss < NumSkillsets; ss++) {
+                for (isize i = 0; i < NumGraphSamples; i++) {
+                    fng->ys[ss][i] = fng->incoming_ys[ss][i];
+                    fng->relative_ys[ss][i] = fng->ys[ss][i] / fng->ys[0][i];
+                }
+                if (fng->ys[ss][0] < min_y) {
+                    min_y = fng->ys[ss][0];
+                    rel_min_y = safe_div(min_y, fng->ys[0][0]);
+                }
+                fng->ys[ss][Wife965Index + 1] = fng->ys[ss][Wife965Index];
+                fng->relative_ys[ss][Wife965Index + 1] = fng->relative_ys[ss][Wife965Index];
+            }
+            fng->min = min_y;
+            fng->relative_min = rel_min_y;
+            fng->max = fng->ys[0][NumGraphSamples - 1] ? fng->ys[0][NumGraphSamples - 1] : 40.0f;
+        }
+    }
+
+
+    pop_allocator();
 }

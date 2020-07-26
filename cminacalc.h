@@ -27,7 +27,7 @@ typedef union SkillsetRatings
     };
     float E[NumSkillsets];
 } SkillsetRatings;
-static_assert(sizeof(SkillsetRatings) == (NumSkillsets * sizeof(float)), "size mismatch");
+static_assert(sizeof(SkillsetRatings) == (NumSkillsets * sizeof(float)));
 
 static const char *SkillsetNames[] = {
     "Overall",
@@ -39,7 +39,7 @@ static const char *SkillsetNames[] = {
     "Chordjacks",
     "Technical",
 };
-static_assert(sizeof(SkillsetNames) == (NumSkillsets * sizeof(const char *)), "size mismatch");
+static_assert(sizeof(SkillsetNames) == (NumSkillsets * sizeof(const char *)));
 
 #ifndef __NDSTRUCTS__
 typedef struct NoteInfo

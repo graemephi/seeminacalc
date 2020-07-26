@@ -379,7 +379,7 @@ static const u8 RowToSnap[] = {
     8,  192, 96, 64, 48, 192, 32, 192, 12, 64, 96, 192,
     16, 192, 96, 64, 24, 192, 32, 192, 48, 64, 96, 192,
 };
-static_assert(sizeof(RowToSnap) == 192, "RowToSnap must have value for every snap");
+static_assert(sizeof(RowToSnap) == 192);
 
 enum
 {

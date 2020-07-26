@@ -12,6 +12,10 @@
 
 #ifdef _MSC_VER
 
+#if !defined(static_assert)
+#define static_assert(cond) static_assert(cond, #cond)
+#endif
+
 #undef min
 #undef max
 
@@ -235,7 +239,7 @@ typedef struct Buf
     i32 leaked;
     i32 cookie;
 } Buf;
-static_assert(alignof(Buf) == sizeof(usize), "Buf depends on it aligning to word size (lazy)");
+static_assert(alignof(Buf) == sizeof(usize));
 enum {
     BufCookie = 0xAC00C1E4U
 };
