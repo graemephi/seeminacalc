@@ -145,7 +145,7 @@ typedef struct DoneQueue
 {
     alignas(64) usize read;
     alignas(64) usize write;
-    DoneWork entries[4096];
+    DoneWork entries[4096*4];
     int lock_id;
 } DoneQueue;
 
@@ -164,8 +164,8 @@ struct {
 } debug_counters = {0};
 
 static const usize WorkQueueMask = array_length(low_prio_work_queue.entries) - 1;
+static const usize DoneQueueMask = array_length(done_queue.entries) - 1;
 static_assert((array_length(low_prio_work_queue.entries) & (array_length(low_prio_work_queue.entries) - 1)) == 0, "");
-static_assert(array_length(low_prio_work_queue.entries) == array_length(done_queue.entries), "");
 
 
 void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
@@ -326,7 +326,7 @@ b32 get_done_work(DoneWork *out)
         return false;
     }
 
-    *out = done_queue.entries[read & WorkQueueMask];
+    *out = done_queue.entries[read & DoneQueueMask];
     wag_tail();
     done_queue.read++;
     return true;
@@ -419,10 +419,12 @@ i32 calc_thread(void *userdata)
             }
 
             lock(done_queue.lock_id);
-            done_queue.entries[done_queue.write++ & WorkQueueMask] = (DoneWork) {
+            done_queue.entries[done_queue.write & DoneQueueMask] = (DoneWork) {
                 .work = work,
                 .ssr = ssr
             };
+            wag_tail();
+            done_queue.write++;
             unlock(done_queue.lock_id);
 
             ct->debug_counters.done++;
