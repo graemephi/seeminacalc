@@ -47,7 +47,7 @@ EMCCFlags :=
 EMCCFlags += -s DISABLE_EXCEPTION_CATCHING=1
 EMCCFlags += -s ERROR_ON_UNDEFINED_SYMBOLS=1
 # emcc warns that this is slow with threads; haven't investigated
-# EMCCFlags += -s ALLOW_MEMORY_GROWTH=1
+EMCCFlags += -s ALLOW_MEMORY_GROWTH=1
 EMCCFlags += -s USE_WEBGL2=1
 EMCCFlags += -s "MALLOC='emmalloc'"
 EMCCFlags += -s NO_FILESYSTEM=1
@@ -60,12 +60,11 @@ EMCCFlags += -flto
 EMCCFlags += -DNDEBUG
 EMCCFlags += -DSOKOL_GLES3
 EMCCFlags += -s ENVIRONMENT=web,worker
-EMCCFlags += -O0
+EMCCFlags += -O3
 EMCCFlags += -s "EXPORTED_FUNCTIONS=['_main', '_set_font', '_open_file', '_calloc']"
 EMCCFlags += -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall']"
 EMCCFlags += -s USE_PTHREADS=1
 EMCCFlags += -s PTHREAD_POOL_SIZE=4
-EMCCFlags += -s INITIAL_MEMORY 268435456
 
 emscripten:
 	emcc $(EMCCFlags) -msse -msimd128 $(Includes) main.c cpp.cpp -o web/main.js

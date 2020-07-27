@@ -192,12 +192,11 @@ struct FnGraph
 };
 
 typedef enum {
-    Work_Invalid,
+    Work_Nothing,
     Work_Wife = 1,
     Work_Parameter = 2,
-    Work_ParameterLowerBound = 4 | Work_Parameter,
-    Work_ParameterUpperBound = 8 | Work_Parameter,
-    Work_Effects = 16,
+    Work_Effects = 4,
+    Work_Skillsets = 8,
 } WorkType;
 
 typedef struct CalcThread
@@ -224,7 +223,8 @@ typedef struct CalcWork
             f32 goal;
         } wife;
         struct {
-            f32 bound;
+            f32 lower_bound;
+            f32 upper_bound;
             i32 param;
             f32 value;
             i32 param_of_fng;
@@ -245,7 +245,6 @@ static f32 rating_floor(f32 v)
 void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_data, i32 param, SkillsetRatings *default_ratings, EffectMasks *out)
 {
     i32 p = param;
-
 
     SkillsetRatings ratings = {0};
 
@@ -301,6 +300,8 @@ typedef struct DoneWork
 #if defined(_MSC_VER) && !defined(alignas)
 #define alignas(n) __declspec(align(n))
 #pragma warning(disable : 4324) // structure was padded due to alignment specifier
+#else
+#define alignas(n) _Alignas(n)
 #endif
 
 typedef struct WorkQueue
@@ -319,8 +320,6 @@ typedef struct DoneQueue
     int lock_id;
 } DoneQueue;
 
-// High prio queue gets work for currently open windows
-// Low prio queue gets all work, including those in the high prio queue
 // Low prio is only accessed if high prio is empty
 // A generation counter is used to skip out of date work
 static WorkQueue high_prio_work_queue = {0};
@@ -337,12 +336,12 @@ static const usize WorkQueueMask = array_length(low_prio_work_queue.entries) - 1
 static const usize DoneQueueMask = array_length(done_queue.entries) - 1;
 static_assert((array_length(low_prio_work_queue.entries) & (array_length(low_prio_work_queue.entries) - 1)) == 0);
 
-
-void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
+void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation, i32 param_to_exclude)
 {
     // Skillsets over wife
     {
         FnGraph *fng = &state.graphs[sfi->graphs[0]];
+        assert(fng->is_param == false);
         if (fng->pending_generation < generation) {
             fng->pending_generation = generation;
             for (isize i = 0; i < NumGraphSamples; i++) {
@@ -351,7 +350,7 @@ void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
                     .type = Work_Wife,
                     .wife.goal = WifeXs[i],
                     .x_index = (i32)i,
-                    .generation = state.generation,
+                    .generation = generation,
                 });
             }
         }
@@ -360,24 +359,46 @@ void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
     // Skillsets over parameter
     for (isize i = buf_len(sfi->graphs) - 1; i >= 1; i--) {
         FnGraph *fng = &state.graphs[sfi->graphs[i]];
+        assert(fng->is_param);
         if (fng->pending_generation < generation) {
             fng->pending_generation = generation;
-            for (isize sample = 0; sample < fng->len; sample++) {
-                buf_push(*work, (CalcWork) {
-                    .sfi = sfi,
-                    .type = Work_Parameter,
-                    .x_index = (i32)sample,
-                    .parameter.param = fng->param,
-                    .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1)),
-                    .parameter.param_of_fng = fng->param,
-                    .generation = state.generation,
-                });
+            if (fng->param != param_to_exclude) {
+                for (isize sample = 0; sample < fng->len; sample++) {
+                    buf_push(*work, (CalcWork) {
+                        .sfi = sfi,
+                        .type = Work_Parameter,
+                        .x_index = (i32)sample,
+                        .parameter.lower_bound = state.ps.min[fng->param],
+                        .parameter.upper_bound = state.ps.max[fng->param],
+                        .parameter.param = fng->param,
+                        .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1)),
+                        .parameter.param_of_fng = fng->param,
+                        .generation = generation,
+                    });
+                }
             }
         }
     }
 }
 
-void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, f32 value)
+void calculate_parameter_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
+{
+    for (isize sample = 0; sample < fng->len; sample++) {
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_Parameter,
+            .x_index = (i32)sample,
+            .parameter.lower_bound = state.ps.min[fng->param],
+            .parameter.upper_bound = state.ps.max[fng->param],
+            .parameter.param = fng->param,
+            .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1)),
+            .parameter.param_of_fng = fng->param,
+            .generation = generation,
+        });
+    }
+}
+
+void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, u32 generation)
 {
     if (type == Work_Wife) {
         // 93 and 96.5, for the files list
@@ -387,28 +408,28 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
                 .type = Work_Wife,
                 .x_index = Wife930Index,
                 .wife.goal = WifeXs[Wife930Index],
-                .generation = state.generation,
+                .generation = generation,
             });
             buf_push(*work, (CalcWork) {
                 .sfi = sfi,
                 .type = Work_Wife,
                 .x_index = Wife965Index,
                 .wife.goal = WifeXs[Wife965Index],
-                .generation = state.generation,
+                .generation = generation,
             });
         }
 
         // Skillsets over wife
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             if (sfi->open == false) {
-                for (isize i = 0; i < NumGraphSamples - 1; i++) {
-                    if (i != Wife930Index) {
+                for (isize i = 0; i < NumGraphSamples; i++) {
+                    if (i != Wife930Index && i < Wife965Index) {
                         buf_push(*work, (CalcWork) {
                             .sfi = sfi,
                             .type = Work_Wife,
                             .wife.goal = WifeXs[i],
                             .x_index = (i32)i,
-                            .generation = state.generation,
+                            .generation = generation,
                         });
                     }
                 }
@@ -426,10 +447,12 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
                                 .sfi = sfi,
                                 .type = Work_Parameter,
                                 .x_index = (i32)sample,
+                                .parameter.lower_bound = state.ps.min[fng->param],
+                                .parameter.upper_bound = state.ps.max[fng->param],
                                 .parameter.param = fng->param,
                                 .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / (f32)(fng->len - 1)),
                                 .parameter.param_of_fng = fng->param,
-                                .generation = state.generation,
+                                .generation = generation,
                             });
                         }
                     }
@@ -438,7 +461,7 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
         }
     }
 
-    if ((type & Work_Parameter) == Work_Parameter) {
+    if (type == Work_Parameter) {
         // Skillsets over parameter (that is the one that just changed)
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             for (isize i = 1; i < buf_len(sfi->graphs); i++) {
@@ -450,11 +473,12 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
                                 .sfi = sfi,
                                 .type = type,
                                 .x_index = (i32)sample,
-                                .parameter.bound = value,
+                                .parameter.lower_bound = state.ps.min[fng->param],
+                                .parameter.upper_bound = state.ps.max[fng->param],
                                 .parameter.param = param,
                                 .parameter.value = lerp(state.ps.min[param], state.ps.max[param], (f32)sample / (NumGraphSamples - 1)),
                                 .parameter.param_of_fng = param,
-                                .generation = state.generation,
+                                .generation = generation,
                             });
                         }
                     }
@@ -464,25 +488,36 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
     }
 }
 
-void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi)
+void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, u32 generation)
 {
-    i32 stride = 8;
-    i32 i = 1;
     buf_push(*work, (CalcWork) {
         .sfi = sfi,
-        .type = Work_Effects,
-        .effects.start = 0,
-        .effects.end = 1,
-        .generation = state.generation,
+        .type = Work_Skillsets,
+        .x_index = Wife930Index,
+        .generation = generation,
     });
-    for (; i < info->num_params; i += stride) {
-        buf_push(*work, (CalcWork) {
-            .sfi = sfi,
-            .type = Work_Effects,
-            .effects.start = i,
-            .effects.end =  (i32)mins(i + stride, info->num_params),
-            .generation = state.generation,
-        });
+    buf_push(*work, (CalcWork) {
+        .sfi = sfi,
+        .type = Work_Skillsets,
+        .x_index = Wife965Index,
+        .generation = generation,
+    });
+}
+
+void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, u32 generation)
+{
+    i32 stride = 8;
+    if (sfi->effects_generation != generation && sfi->num_effects_computed < info->num_params) {
+        sfi->effects_generation = generation;
+        for (i32 i = 0; i < info->num_params; i += stride) {
+            buf_push(*work, (CalcWork) {
+                .sfi = sfi,
+                .type = Work_Effects,
+                .effects.start = i,
+                .effects.end =  (i32)mins(i + stride, info->num_params),
+                .generation = generation,
+            });
+        }
     }
 }
 
@@ -513,7 +548,7 @@ b32 get_work(CalcThread *ct, WorkQueue *q, CalcWork *out)
 
     usize read = q->read;
     usize write = q->write;
-    u32 generation = * ct->generation;
+    u32 generation = *ct->generation;
 
     CalcWork *cw = 0;
     usize r = read;
@@ -551,21 +586,12 @@ i32 calc_thread(void *userdata)
             u64 then = 0;
             u64 now = 0;
             switch (work.type) {
-                case Work_ParameterLowerBound:
-                case Work_ParameterUpperBound: {
-                    // Generations invalidate every graph, but these only
-                    // invalidate one. So special case it here.
-                    f32 *bounds = (work.type == Work_ParameterLowerBound) ? ps->min : ps->max;
-                    if (bounds[work.parameter.param] == work.parameter.bound) {
-                        then = stm_now();
-                        ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 1.0f, 0.93f, work.parameter.param, work.parameter.value);
-                        now = stm_now();
-                    } else {
-                        ct->debug_counters.skipped++;
+                case Work_Parameter: {
+                    if (work.parameter.lower_bound != ps->min[work.parameter.param]
+                     || work.parameter.upper_bound != ps->max[work.parameter.param]) {
+                         ct->debug_counters.skipped++;
                         continue;
                     }
-                } break;
-                case Work_Parameter: {
                     then = stm_now();
                     ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 1.0f, 0.93f, work.parameter.param, work.parameter.value);
                     now = stm_now();
@@ -576,13 +602,15 @@ i32 calc_thread(void *userdata)
                     now = stm_now();
                 } break;
                 case Work_Effects: {
-                    ssr = calc_go(&calc, &ct->info->defaults, work.sfi->notes, 1.0f, 0.93f);
-                    for (i32 r = 0; r < NumSkillsets; r++) {
-                        ssr.E[r] = rating_floor(ssr.E[r]);
-                    }
                     for (i32 i = work.effects.start; i < work.effects.end; i++) {
-                        calculate_effect_for_param(ct->info, &calc, work.sfi->notes, i, &ssr, &work.sfi->effects);
+                        // nb. modifies sfi->effects from this thread; it is otherwise read-only
+                        calculate_effect_for_param(ct->info, &calc, work.sfi->notes, i, &work.sfi->default_ratings, &work.sfi->effects);
                     }
+                } break;
+                case Work_Skillsets: {
+                    then = stm_now();
+                    ssr = calc_go(&calc, ps, work.sfi->notes, 1.0f, WifeXs[work.x_index]);
+                    now = stm_now();
                 } break;
                 default: assert_unreachable();
             }
@@ -598,7 +626,7 @@ i32 calc_thread(void *userdata)
 
             ct->debug_counters.done++;
 
-            if (now - then > 0) {
+            if (now - then > 0 && work.sfi->notes_len > 0) {
                 ct->debug_counters.time = ct->debug_counters.time*0.99 + 0.01*(stm_ms(now - then) / work.sfi->notes_len);
             }
         }
@@ -645,27 +673,52 @@ void finish_work()
     while (get_done_work(&done)) {
         SimFileInfo *sfi = done.work.sfi;
         FnGraph *fng = 0;
-        if (done.work.type == Work_Wife) {
-            fng = &state.graphs[done.work.sfi->graphs[0]];
-        } else if ((done.work.type & Work_Parameter) == Work_Parameter) {
-            for (isize i = 1; i < buf_len(sfi->graphs); i++) {
-                if (state.graphs[sfi->graphs[i]].param == done.work.parameter.param_of_fng) {
-                    fng = &state.graphs[sfi->graphs[i]];
-                    break;
+        switch (done.work.type) {
+            case Work_Wife: {
+                fng = &state.graphs[done.work.sfi->graphs[0]];
+            } break;
+            case Work_Parameter: {
+                for (isize i = 1; i < buf_len(sfi->graphs); i++) {
+                    if (state.graphs[sfi->graphs[i]].param == done.work.parameter.param_of_fng) {
+                        fng = &state.graphs[sfi->graphs[i]];
+                        break;
+                    }
                 }
-            }
 
-            if (fng == 0) {
-                // fng has been removed since calc calculation completed
+                if (fng == 0) {
+                    // fng has been removed since calc calculation completed
+                    continue;
+                }
+            } break;
+            case Work_Effects: {
+                sfi->num_effects_computed += done.work.effects.end - done.work.effects.start;
                 continue;
-            }
-        } else {
-            assert(done.work.type == Work_Effects);
-            for (isize ss = 1; ss < NumSkillsets; ss++) {
-                sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
-            }
+            } break;
+            case Work_Skillsets: {
+                fng = &state.graphs[done.work.sfi->graphs[0]];
 
-            continue;
+                for (isize ss = 0; ss < NumSkillsets; ss++) {
+                    if (done.work.x_index == Wife930Index) {
+                        sfi->display_skillsets[ss] = 0.9f <= (done.ssr.E[ss] / done.ssr.overall);
+                        sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
+                    }
+
+                    fng->ys[ss][done.work.x_index] = done.ssr.E[ss];
+                }
+
+                if (done.work.x_index == Wife930Index) {
+                    sfi->aa_rating = done.ssr.overall;
+                    sfi->default_ratings = done.ssr;
+                    for (isize ss = 0; ss < NumSkillsets; ss++) {
+                        sfi->default_ratings.E[ss] = rating_floor(sfi->default_ratings.E[ss]);
+                    }
+                } else {
+                    assert(done.work.x_index == Wife965Index);
+                    sfi->max_rating = done.ssr.overall;
+                }
+                continue;
+            } break;
+            default: assert_unreachable();
         }
 
         if (fng->generation > done.work.generation) {
@@ -689,11 +742,15 @@ void finish_work()
             fng->incoming_ys[ss][done.work.x_index] = done.ssr.E[ss];
         }
 
-        if (fng->resident_count == array_length(fng->resident)) {
+        if (fng->resident_count == array_length(fng->resident) && fng->is_param == false) {
             for (isize ss = 1; ss < NumSkillsets; ss++) {
-                FnGraph *w = &state.graphs[sfi->graphs[0]];
-                sfi->display_skillsets[ss] = (0.9f <= (w->incoming_ys[ss][Wife930Index] / w->incoming_ys[0][Wife930Index]));
+                sfi->display_skillsets[ss] = (0.9f <= (fng->incoming_ys[ss][Wife930Index] / fng->incoming_ys[0][Wife930Index]));
             }
+        }
+
+        if (fng->is_param == false) {
+            sfi->aa_rating = fng->ys[0][Wife930Index];
+            sfi->max_rating = fng->ys[0][Wife965Index];
         }
 
         isize fungi = 0;
@@ -710,6 +767,7 @@ void finish_work()
     for (isize fungi = 0; fungi < buf_len(updated_fngs); fungi++) {
         FnGraph *fng = updated_fngs[fungi];
         if (fng->resident_count != array_length(fng->resident)) {
+            // 🧙‍♂️
             u8 cumsum[NumGraphSamples] = {0};
             u8 sorted[NumGraphSamples] = {0};
             for (isize i = 1; i < NumGraphSamples; i++) {
@@ -731,6 +789,12 @@ void finish_work()
                     if (fng->ys[ss][sorted[i+1]] == 0) {
                         fng->ys[ss][sorted[i+1]] = fng->incoming_ys[ss][sorted[i+1]];
                     }
+
+                    if (fng->ys[ss][sorted[i]] == fng->incoming_ys[ss][sorted[i]]
+                     && fng->ys[ss][sorted[i+1]] == fng->incoming_ys[ss][sorted[i+1]]) {
+                        continue;
+                    }
+
                     f32 t_a = fng->incoming_ys[ss][sorted[i]];
                     f32 t_b = fng->incoming_ys[ss][sorted[i+1]];
                     f32 t = 0;

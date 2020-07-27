@@ -13,7 +13,7 @@ static std::condition_variable c;
 
 int make_thread(int (fn)(void *), void *userdata)
 {
-    std::lock_guard lock(m);
+    std::lock_guard<std::mutex> lock(m);
     threads.emplace_back(fn, userdata);
     threads.back().detach();
     return (int)threads.size() - 1;
@@ -31,13 +31,13 @@ void wag_tail()
 
 void thread_wait()
 {
-    std::unique_lock lock(m);
+    std::unique_lock<std::mutex> lock(m);
     c.wait(lock);
 }
 
 void thread_notify()
 {
-    std::lock_guard lock(m);
+    std::lock_guard<std::mutex> lock(m);
     c.notify_all();
 }
 

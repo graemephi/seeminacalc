@@ -246,10 +246,17 @@ typedef struct SimFileInfo
     String chartkey;
     String id;
 
+    f32 aa_rating;
+    f32 max_rating;
+
     i32 notes_len; // just for stats
     NoteData *notes;
     EffectMasks effects;
     i32 *graphs;
+
+    SkillsetRatings default_ratings;
+    u32 num_effects_computed;
+    u32 effects_generation;
 
     bool selected_skillsets[NumSkillsets];
     bool display_skillsets[NumSkillsets];
@@ -337,9 +344,8 @@ i32 make_skillsets_graph()
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
     fng->generation = 0;
-
-    for (i32 x = 0; x < NumGraphSamples; x++) {
-        fng->xs[x] = lerp(WifeXs[0] * 100.f, WifeXs[Wife965Index + 1] * 100.f, (f32)x / (NumGraphSamples - 1));
+    for (i32 x = 0; x < fng->len; x++) {
+        fng->xs[x] = lerp(WifeXs[0] * 100.f, WifeXs[Wife965Index + 1] * 100.f, (f32)x / (fng->len - 1));
     }
     return (i32)buf_index_of(state.graphs, fng);
 }
@@ -361,6 +367,9 @@ i32 make_parameter_graph(i32 param)
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
     fng->generation = 0;
+    for (i32 x = 0; x < fng->len; x++) {
+        fng->xs[x] = lerp(state.ps.min[param], state.ps.max[param], (f32)x / (fng->len - 1));
+    }
     return (i32)buf_index_of(state.graphs, fng);
 }
 
@@ -382,69 +391,73 @@ void free_all_graphs(i32 handles[])
 
 i32 parse_and_add_sm(Buffer buf, b32 open_window)
 {
-    push_allocator(scratch);
     SmFile sm = {0};
+    push_allocator(scratch);
     i32 err = parse_sm(buf, &sm);
+    pop_allocator();
     if (err) {
-        pop_allocator();
         return -1;
     }
 
-    NoteInfo *ni = sm_to_ett_note_info(&sm, 0);
-    String ck = generate_chart_key(&sm, 0);
     String title = sm_tag_inplace(&sm, Tag_Title);
     String author = sm_tag_inplace(&sm, Tag_Credit);
-    String diff = DifficultyStrings[sm.diffs[0].diff];
-    String id = {0};
-    id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
-        title.len, title.buf,
-        author.len, author.buf,
-        author.len == 0 ? 0 : 2, ", ",
-        diff.len, diff.buf,
-        ck.len, ck.buf
-    );
-    pop_allocator();
 
-    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-        if (strings_are_equal(sfi->id, id)) {
-            return -2;
+    for (isize i = 0; i < buf_len(sm.diffs); i++) {
+        NoteInfo *ni = sm_to_ett_note_info(&sm, (i32)i);
+        String ck = generate_chart_key(&sm, i);
+        String diff = DifficultyStrings[sm.diffs[i].diff];
+        String id = {0};
+        push_allocator(scratch);
+        id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
+            title.len, title.buf,
+            author.len, author.buf,
+            author.len == 0 ? 0 : 2, ", ",
+            diff.len, diff.buf,
+            ck.len, ck.buf
+        );
+        pop_allocator();
+
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            if (strings_are_equal(sfi->id, id)) {
+                return -2;
+            }
         }
+
+        SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
+            .title = copy_string(title),
+            .diff = diff,
+            .chartkey = copy_string(ck),
+            .id = copy_string(id),
+            .notes_len = (i32)buf_len(ni),
+            .notes = frobble_note_data(ni, buf_len(ni)),
+            .stops = sm.has_stops,
+            .open = open_window,
+            .selected_skillsets[0] = true,
+        });
+
+        buf_push(sfi->graphs, make_skillsets_graph());
+
+        buf_reserve(sfi->effects.weak, state.info.num_params);
+        buf_reserve(sfi->effects.strong, state.info.num_params);
+
+        calculate_skillsets(&state.high_prio_work, sfi, state.generation);
+        calculate_file_graphs(&state.low_prio_work, sfi, state.generation, -1);
+        calculate_effects(&state.low_prio_work, &state.info, sfi, state.generation);
+
+    #if TEST_CHARTKEYS
+        Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
+        assert(b.len);
+    #endif
+
+        printf("Added %s\n", id.buf);
     }
 
-    SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
-        .title = copy_string(title),
-        .diff = diff,
-        .chartkey = copy_string(ck),
-        .id = copy_string(id),
-        .notes_len = (i32)buf_len(ni),
-        .notes = frobble_note_data(ni, buf_len(ni)),
-        .stops = sm.has_stops,
-        .open = open_window,
-        .selected_skillsets[0] = true,
-    });
-
-    buf_push(sfi->graphs, make_skillsets_graph());
-
-    buf_reserve(sfi->effects.weak, state.info.num_params);
-    buf_reserve(sfi->effects.strong, state.info.num_params);
-
-    calculate_file_graphs(&state.high_prio_work, sfi, state.generation);
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
-
-    calculate_effects(&state.low_prio_work, &state.info, sfi);
     submit_work(&low_prio_work_queue, state.low_prio_work, state.generation);
-
     thread_notify();
 
-#if TEST_CHARTKEYS
-    Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
-    assert(b.len);
-#endif
-
-    printf("Added %s\n", id.buf);
     return 0;
 }
-
 
 enum {
     ParamSlider_Nothing,
@@ -695,6 +708,8 @@ void frame(void)
 
     ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
 
+    SimFileInfo *active = state.active;
+
     f32 right_width = 400.0f;
     igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
@@ -713,13 +728,16 @@ void frame(void)
         // Open file list
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             FnGraph *g = &state.graphs[sfi->graphs[0]];
-            f32 wife93 = g->ys[0][Wife930Index];
-            f32 wife965 = g->ys[0][Wife965Index];
+            f32 wife93 = sfi->aa_rating;
+            f32 wife965 = sfi->max_rating;
             igTextColored(msd_color(wife93), "%2.2f", (f64)wife93);
             tooltip("Overall at AA"); igSameLine(0, 7.0f);
             igTextColored(msd_color(wife965), "%2.2f", (f64)wife965);
             tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
             igPushIDStr(sfi->id.buf);
+            if (sfi == active) {
+                igPushStyleColorVec4(ImGuiCol_Header, msd_color(sfi->aa_rating));
+            }
             if (igSelectableBool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
                 if (sfi->open) {
                     sfi->open = false;
@@ -728,11 +746,14 @@ void frame(void)
                     next_active = sfi;
                 }
             }
+            if (sfi == active) {
+                igPopStyleColor(1);
+            }
             if (sfi->stops) {
                 igSameLine(igGetWindowWidth() - 30.f, 4);
                 igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
-                tooltip("This file has stops or negBPMs. These are parsed differently from Etterna, so the ratings will differ from what you see in Ettera.\n\n"
-                        "Note that the calc is VERY sensitive to tiny variations in ms row times.");
+                tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
+                        "Note that the calc is VERY sensitive to tiny variations in ms row times. This is the case even if the chartkeys match.");
             }
             if (skillsets) {
                 for (isize ss = 0; ss < NumSkillsets; ss++) {
@@ -758,7 +779,6 @@ void frame(void)
     }
     igEnd();
 
-    SimFileInfo *active = state.active;
     ParamSliderChange changed = {0};
     b32 show_parameter_names = state.last_frame.show_parameter_names;
 
@@ -867,6 +887,10 @@ void frame(void)
     }
     igEnd();
 
+    if (changed.type == ParamSlider_ValueChanged) {
+        state.generation++;
+    }
+
     // MSD graph windows
     i32 num_open_windows = 0;
     f32 centre_width = ds.x - left_width - right_width;
@@ -887,7 +911,8 @@ void frame(void)
                 igSetNextWindowSize(sz, ImGuiCond_Once);
             }
             if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
-                calculate_file_graphs(&state.high_prio_work, sfi, state.generation);
+                calculate_effects(&state.low_prio_work, &state.info, sfi, state.generation);
+                calculate_file_graphs(&state.high_prio_work, sfi, state.generation, changed.type ? changed.param : -1);
 
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
@@ -899,7 +924,7 @@ void frame(void)
                 }
 
                 // File difficulty + chartkey text
-                igText(sfi->diff.buf);
+                igTextColored(msd_color(sfi->aa_rating), "%.2f", sfi->aa_rating);
                 igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
                 igText(sfi->chartkey.buf);
 
@@ -923,6 +948,10 @@ void frame(void)
 
                 for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
                     fng = &state.graphs[sfi->graphs[fungi]];
+                    if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
+                        calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
+                    }
+
                     i32 mp = fng->param;
                     ParamInfo *p = &state.info.params[mp];
                     u8 full_name[64] = {0};
@@ -1053,18 +1082,11 @@ void frame(void)
                     }
                 }
             } break;
-            case ParamSlider_LowerBoundChanged: {
-                calculate_graphs_in_background(work, Work_ParameterLowerBound, changed.param, changed.value);
-            } break;
-            case ParamSlider_UpperBoundChanged: {
-                calculate_graphs_in_background(work, Work_ParameterUpperBound, changed.param, changed.value);
-            } break;
             case ParamSlider_ValueChanged: {
-                state.generation++;
-                calculate_graphs_in_background(work, Work_Wife, changed.param, changed.value);
+                calculate_graphs_in_background(work, Work_Wife, changed.param, state.generation);
             } break;
             default: {
-                assert_unreachable();
+                // Nothing
             }
         }
     }
