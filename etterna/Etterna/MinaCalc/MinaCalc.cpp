@@ -50,15 +50,15 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 {
 	// in flux
 	const auto grindscaler =
-	  CalcClamp(
+	  std::clamp(
 		0.9F + (0.1F * ((NoteInfo.back().rowTime / music_rate) - 35.F) / 35.F),
 		0.9F,
 		1.F) *
-	  CalcClamp(
+	  std::clamp(
 		0.9F + (0.1F * ((NoteInfo.back().rowTime / music_rate) - 15.F) / 15.F),
 		0.9F,
 		1.F) *
-	  CalcClamp(
+	  std::clamp(
 		0.4F + (0.6F * ((NoteInfo.back().rowTime / music_rate) - 10.F) / 10.F),
 		0.4F,
 		1.F);
@@ -159,7 +159,7 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		 * don't want to push up the high end stuff anymore so just add to let
 		 * stuff down the curve catch up a little remember we're operating on a
 		 * multiplier */
-		mcfroggerbopper = CalcClamp(mcfroggerbopper, 0.8F, 1.08F);
+		mcfroggerbopper = std::clamp(mcfroggerbopper, 0.8F, 1.08F);
 		mcbloop[Skill_Stamina] = poodle_in_a_porta_potty * mcfroggerbopper *
 								 basescalers[Skill_Stamina];
 
@@ -183,7 +183,7 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 			for (auto& r : mcbloop) {
 				// so 50%s on 60s don't give 35s
 				r = downscale_low_accuracy_scores(r, score_goal);
-				r = CalcClamp(r, r, ssrcap);
+				r = std::clamp(r, r, ssrcap);
 
 				if (highest_stam_adjusted_skillset == Skill_JackSpeed) {
 					r = downscale_low_accuracy_scores(r, score_goal);
@@ -271,7 +271,7 @@ StamAdjust(const float x,
 			}
 			local_ceil = stam_ceil * stam_floor;
 
-			mod = min(CalcClamp(mod, stam_floor, local_ceil), super_stam_ceil);
+			mod = min(std::clamp(mod, stam_floor, local_ceil), super_stam_ceil);
 			calc.stam_adj_diff.at(i) = diff->at(i) * mod;
 			calc.debugValues.at(hi)[2][StamMod][i] = mod;
 		}
@@ -285,7 +285,7 @@ StamAdjust(const float x,
 			}
 			local_ceil = stam_ceil * stam_floor;
 
-			mod = min(CalcClamp(mod, stam_floor, local_ceil), super_stam_ceil);
+			mod = min(std::clamp(mod, stam_floor, local_ceil), super_stam_ceil);
 			calc.stam_adj_diff.at(i) = diff->at(i) * mod;
 		}
 	}
@@ -321,7 +321,7 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
 		}
 		const auto local_ceil = stam_ceil * stam_floor;
 
-		mod = min(CalcClamp(mod, stam_floor, local_ceil), super_stam_ceil);
+		mod = min(std::clamp(mod, stam_floor, local_ceil), super_stam_ceil);
 
 		doot.at(i).first = diff.at(i).first;
 		doot.at(i).second = diff.at(i).second * mod;
@@ -332,7 +332,7 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
 	return doot;
 }
 
-static const float magic_num = 16.F;
+constexpr float magic_num = 16.F;
 
 [[nodiscard]] inline auto
 hit_the_road(const float& x, const float& y) -> float
@@ -458,7 +458,9 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	if (fast_walk_and_check_for_skip(NoteInfo, music_rate, *this, offset))
 		return true;
 
-	TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(*this);
+	// ulbu calculates everything needed for the block below (mostly pmods)
+	TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(
+	  *this);
 
 	// Stupud hack
 	float *mod_cursor = mod_params;
@@ -483,6 +485,9 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
     for (const auto &p : ulbu_that_which_consumes_all._tt._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._tt2._params) *p.second = *mod_cursor++;
 
+	// if debug, force params to load
+	if (debugmode)
+		ulbu_that_which_consumes_all.load_calc_params_from_disk(true);
 	ulbu_that_which_consumes_all();
 
 	// main hand loop
@@ -533,10 +538,10 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 /* pbm = point buffer multiplier, or basically starting with a max points some
  * degree above the actual max points as a cheap hack to water down some of the
  * absurd scaling hs/js/cj had. Note: do not set these values below 1 */
-static const float tech_pbm = 1.F;
-static const float jack_pbm = 1.0175F;
-static const float stream_pbm = 1.01F;
-static const float bad_newbie_skillsets_pbm = 1.05F;
+constexpr float tech_pbm = 1.F;
+constexpr float jack_pbm = 1.0175F;
+constexpr float stream_pbm = 1.01F;
+constexpr float bad_newbie_skillsets_pbm = 1.05F;
 
 // each skillset should just be a separate calc function [todo]
 auto
@@ -935,7 +940,7 @@ MinaSDCalcDebug(
 	}
 }
 
-int mina_calc_version = 437;
+int mina_calc_version = 438;
 auto
 GetCalcVersion() -> int
 {

@@ -20,6 +20,18 @@ using std::vector;
 #undef _mm_mul_ss
 #endif
 
+#if defined(__EMSCRIPTEN__) && __cplusplus < 201703L
+namespace std {
+template<typename T>
+T clamp(T t, T a, T b)
+{
+    return (t < a) ? a
+         : (t > b) ? b
+         : t;
+}
+}
+#endif
+
 // Note on updating the calc: not quite drag-and-drop. grep for "Stupud hack"
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/MinaCalc.cpp"
