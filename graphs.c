@@ -380,6 +380,41 @@ void calculate_file_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 
     }
 }
 
+void calculate_parameter_graph_no_generation(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng)
+{
+    assert(fng->is_param == true);
+    if (state.info.params[fng->param].integer == false) {
+        for (isize sample = 0; sample < fng->len; sample++) {
+            buf_push(*work, (CalcWork) {
+                .sfi = sfi,
+                .type = Work_Parameter,
+                .x_index = (i32)sample,
+                .parameter.lower_bound = state.ps.min[fng->param],
+                .parameter.upper_bound = state.ps.max[fng->param],
+                .parameter.param = fng->param,
+                .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1.0f)),
+                .parameter.param_of_fng = fng->param,
+                .generation = state.generation,
+            });
+        }
+    } else {
+        for (isize sample = 0; sample < fng->len; sample++) {
+            buf_push(*work, (CalcWork) {
+                .sfi = sfi,
+                .type = Work_Parameter,
+                .x_index = (i32)sample,
+                .parameter.lower_bound = state.ps.min[fng->param],
+                .parameter.upper_bound = state.ps.max[fng->param],
+                .parameter.param = fng->param,
+                .parameter.value = (f32)sample,
+                .parameter.param_of_fng = fng->param,
+                .generation = state.generation,
+            });
+        }
+    }
+}
+
+
 void calculate_parameter_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == true);

@@ -966,7 +966,8 @@ void frame(void)
                         fng->zoomable_once = true;
                     }
                     if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
-                        calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
+                        calculate_parameter_graph_no_generation(&state.high_prio_work, sfi, fng);
+                        zoomable = ImGuiCond_Always;
                     }
 
                     i32 mp = fng->param;
