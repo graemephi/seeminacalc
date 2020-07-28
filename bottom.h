@@ -139,7 +139,7 @@ void *stack_alloc_(Stack *stack, usize elem_size, usize alignment, isize count)
     usize alignment_offset = (alignment - (ptr & alignment_mask)) & alignment_mask;
 
     if ((stack->ptr + alignment_offset + size) > stack->end) {
-        printf("oom :(");
+        printf("oom :(\n");
         exit(1);
     }
 

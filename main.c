@@ -128,6 +128,11 @@ Buffer load_font_file(char *path)
 
 void open_file(char *data, int len, b32 open_window)
 {
+    if (permanent_memory->end - permanent_memory->ptr < 4*1024*1024) {
+        printf("oom :(\n");
+        return;
+    }
+
     Buffer buf = (Buffer) {
         .buf = alloc(u8, len + 1),
         .len = len,
