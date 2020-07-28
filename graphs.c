@@ -349,6 +349,20 @@ static const usize WorkQueueMask = WorkQueueSize - 1;
 static const usize DoneQueueMask = DoneQueueSize - 1;
 static_assert((WorkQueueSize & (WorkQueueSize - 1)) == 0);
 
+void calculate_file_graph_no_generation(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng)
+{
+    assert(fng->is_param == false);
+    for (isize i = 0; i < NumGraphSamples; i++) {
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_Wife,
+            .wife.goal = WifeXs[i],
+            .x_index = (i32)i,
+            .generation = state.generation,
+        });
+    }
+}
+
 void calculate_file_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == false);
@@ -758,7 +772,9 @@ void finish_work()
         assert(fng->resident_count <= array_length(fng->resident));
 
         for (isize ss = 0; ss < NumSkillsets; ss++) {
-            fng->xs[done.work.x_index] = (done.work.type == Work_Wife) ? done.work.wife.goal * 100.f : done.work.parameter.value;
+            if (done.work.type == Work_Parameter) {
+                fng->xs[done.work.x_index] = done.work.parameter.value;
+            }
             fng->incoming_ys[ss][done.work.x_index] = done.ssr.E[ss];
         }
 
@@ -797,23 +813,23 @@ void finish_work()
                 sorted[cumsum[i]] = (u8)i;
             }
 
-            f32 a = fng->initialised ? 0.7f : 0.0f;
+            f32 a = fng->have_ys ? 0.7f : 0.0f;
             f32 b = 1.0f - a;
             f32 min_y = 100.f;
             f32 rel_min_y = 0.0f;
             for (isize ss = 0; ss < NumSkillsets; ss++) {
-                for (isize i = 0; i < fng->resident_count - 1; i++) {
-                    if (fng->ys[ss][sorted[i]] == fng->incoming_ys[ss][sorted[i]]
-                     && fng->ys[ss][sorted[i+1]] == fng->incoming_ys[ss][sorted[i+1]]) {
+                for (isize r = 0; r < fng->resident_count - 1; r++) {
+                    if (fng->ys[ss][sorted[r]] == fng->incoming_ys[ss][sorted[r]]
+                     && fng->ys[ss][sorted[r+1]] == fng->incoming_ys[ss][sorted[r+1]]) {
                         continue;
                     }
 
-                    f32 t_a = fng->incoming_ys[ss][sorted[i]];
-                    f32 t_b = fng->incoming_ys[ss][sorted[i+1]];
-                    f32 t = 0;
-                    f32 inc = 1.0f / (f32)(sorted[i+1] - sorted[i]);
-                    for (isize j = sorted[i]; j < sorted[i+1]; j++) {
-                        fng->ys[ss][j] = a*fng->ys[ss][j] + b*lerp(t_a, t_b, t);
+                    f32 t_a = fng->incoming_ys[ss][sorted[r]];
+                    f32 t_b = fng->incoming_ys[ss][sorted[r+1]];
+                    f32 inc = 1.0f / (f32)(sorted[r+1] - sorted[r]);
+                    f32 t = 0.0f;
+                    for (isize i = sorted[r]; i < sorted[r+1]; i++) {
+                        fng->ys[ss][i] = a*fng->ys[ss][i] + b*lerp(t_a, t_b, t);
                         fng->relative_ys[ss][i] = fng->ys[ss][i] / fng->ys[0][i];
                         t += inc;
                     }
@@ -828,6 +844,7 @@ void finish_work()
             fng->min = min_y;
             fng->relative_min = rel_min_y;
             fng->max = fng->ys[0][fng->len - 1] ? fng->ys[0][fng->len - 1] : 40.0f;
+            fng->have_ys = true;
         } else {
             f32 min_y = 100.f;
             f32 rel_min_y = 0.0f;

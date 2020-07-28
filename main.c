@@ -452,7 +452,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         buf_reserve(sfi->effects.strong, state.info.num_params);
 
         calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
-        calculate_file_graphs(&state.low_prio_work, sfi, state.generation, -1);
+        calculate_file_graph_no_generation(&state.low_prio_work, sfi, &state.graphs[sfi->graphs[0]]);
 
 #if TEST_CHARTKEYS
         Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
@@ -765,7 +765,7 @@ void frame(void)
                 igSameLine(igGetWindowWidth() - 30.f, 4);
                 igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
                 tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
-                        "Note that the calc is VERY sensitive to tiny variations in ms row times. This is the case even if the chartkeys match.");
+                        "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
             }
             if (skillsets) {
                 for (isize ss = 0; ss < NumSkillsets; ss++) {
