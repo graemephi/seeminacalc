@@ -3,6 +3,7 @@
     <head>
         <meta charset="utf-8">
         <meta content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no" name="viewport">
+        <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline'; worker-src 'self';">
         <title>SeeMinaCalc</title>
         <style>
             body {
@@ -34,7 +35,7 @@
     <body>
         <canvas class="sokol" id="canvas" oncontextmenu="event.preventDefault();" ondrop="dropHandler(event);" ondragover="event.preventDefault();"></canvas>
         <script>
-            function have_SSE() {
+            function testSSE() {
                 let simdfeaturetest = "AGFzbQEAAAABCAJgAABgAAF7AwMCAAEFBgEBgAKAAgcxBAZtZW1vcnkCABFfX3dhc21fY2FsbF9jdG9ycwAAAmZuAAELX2luaXRpYWxpemUAAAoPAgMAAQsJAEMAAAAA/RMLCwoBAEGADAsDoAZQ";
                 return WebAssembly.compile(Uint8Array.from(atob(simdfeaturetest), c => c.charCodeAt(0)))
                     .then(_ => true)
@@ -113,7 +114,7 @@
             }
 
             let font = fetch('NotoSansCJKjp-Regular.otf').then(res => res.arrayBuffer());
-            let SSE = have_SSE().then(isSSEAvailable => {
+            testSSE().then(isSSEAvailable => {
                 let js = document.createElement("script");
                 js.async = true;
                 js.type = "text/javascript";
