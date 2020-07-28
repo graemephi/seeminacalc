@@ -458,7 +458,7 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	if (fast_walk_and_check_for_skip(NoteInfo, music_rate, *this, offset))
 		return true;
 
-	thread_local TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(*this);
+	TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(*this);
 
 	// Stupud hack
 	float *mod_cursor = mod_params;
