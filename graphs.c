@@ -238,6 +238,9 @@ typedef struct CalcWork
             i32 start;
             i32 end;
         } effects;
+        struct {
+            b32 initialisation;
+        } skillsets;
     };
     u32 generation;
 } CalcWork;
@@ -484,18 +487,20 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
     }
 }
 
-void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, u32 generation)
+void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, b32 initialisation, u32 generation)
 {
     buf_push(*work, (CalcWork) {
         .sfi = sfi,
         .type = Work_Skillsets,
         .x_index = Wife930Index,
+        .skillsets.initialisation = initialisation,
         .generation = generation,
     });
     buf_push(*work, (CalcWork) {
         .sfi = sfi,
         .type = Work_Skillsets,
         .x_index = Wife965Index,
+        .skillsets.initialisation = initialisation,
         .generation = generation,
     });
 }
@@ -503,7 +508,7 @@ void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, u32 generation)
 void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
 {
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-        calculate_skillsets(work, sfi, generation);
+        calculate_skillsets(work, sfi, false, generation);
     }
 }
 
@@ -716,11 +721,16 @@ void finish_work()
 
                 if (done.work.x_index == Wife930Index) {
                     sfi->aa_rating = done.ssr.overall;
-                    sfi->default_ratings = done.ssr;
                     for (isize ss = 0; ss < NumSkillsets; ss++) {
-                        sfi->default_ratings.E[ss] = rating_floor(sfi->default_ratings.E[ss]);
                         sfi->display_skillsets[ss] = 0.9f <= (done.ssr.E[ss] / done.ssr.overall);
-                        sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
+                    }
+
+                    if (done.work.skillsets.initialisation) {
+                        sfi->default_ratings = done.ssr;
+                        for (isize ss = 0; ss < NumSkillsets; ss++) {
+                            sfi->default_ratings.E[ss] = rating_floor(sfi->default_ratings.E[ss]);
+                            sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
+                        }
                     }
                 } else {
                     assert(done.work.x_index == Wife965Index);
@@ -752,15 +762,15 @@ void finish_work()
             fng->incoming_ys[ss][done.work.x_index] = done.ssr.E[ss];
         }
 
-        if (fng->resident_count == array_length(fng->resident) && fng->is_param == false) {
-            for (isize ss = 1; ss < NumSkillsets; ss++) {
-                sfi->display_skillsets[ss] = (0.9f <= (fng->incoming_ys[ss][Wife930Index] / fng->incoming_ys[0][Wife930Index]));
-            }
-        }
-
         if (fng->is_param == false) {
             sfi->aa_rating = fng->ys[0][Wife930Index];
             sfi->max_rating = fng->ys[0][Wife965Index];
+
+            if (fng->resident_count == array_length(fng->resident)) {
+                for (isize ss = 1; ss < NumSkillsets; ss++) {
+                    sfi->display_skillsets[ss] = (0.9f <= (fng->incoming_ys[ss][Wife930Index] / fng->incoming_ys[0][Wife930Index]));
+                }
+            }
         }
 
         isize fungi = 0;
@@ -818,7 +828,6 @@ void finish_work()
             fng->min = min_y;
             fng->relative_min = rel_min_y;
             fng->max = fng->ys[0][fng->len - 1] ? fng->ys[0][fng->len - 1] : 40.0f;
-
         } else {
             f32 min_y = 100.f;
             f32 rel_min_y = 0.0f;

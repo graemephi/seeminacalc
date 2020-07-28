@@ -451,7 +451,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         buf_reserve(sfi->effects.weak, state.info.num_params);
         buf_reserve(sfi->effects.strong, state.info.num_params);
 
-        calculate_skillsets(&state.high_prio_work, sfi, state.generation);
+        calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
         calculate_file_graphs(&state.low_prio_work, sfi, state.generation, -1);
 
 #if TEST_CHARTKEYS
