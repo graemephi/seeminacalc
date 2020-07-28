@@ -34,6 +34,13 @@
     <body>
         <canvas class="sokol" id="canvas" oncontextmenu="event.preventDefault();" ondrop="dropHandler(event);" ondragover="event.preventDefault();"></canvas>
         <script>
+            function have_SSE() {
+                let simdfeaturetest = "AGFzbQEAAAABCAJgAABgAAF7AwMCAAEFBgEBgAKAAgcxBAZtZW1vcnkCABFfX3dhc21fY2FsbF9jdG9ycwAAAmZuAAELX2luaXRpYWxpemUAAAoPAgMAAQsJAEMAAAAA/RMLCwoBAEGADAsDoAZQ";
+                return WebAssembly.compile(Uint8Array.from(atob(simdfeaturetest), c => c.charCodeAt(0)))
+                    .then(_ => true)
+                    .catch(_ => false);
+            }
+
             function getAsEntry(item) {
                 return item.getAsEntry ? item.getAsEntry() : item.webkitGetAsEntry();
             }
@@ -106,6 +113,13 @@
             }
 
             let font = fetch('NotoSansCJKjp-Regular.otf').then(res => res.arrayBuffer());
+            let SSE = have_SSE().then(isSSEAvailable => {
+                let js = document.createElement("script");
+                js.async = true;
+                js.type = "text/javascript";
+                js.src = isSSEAvailable ? "seeminacalc.js" : "seeminacalc.nosse.js";
+                document.head.appendChild(js);
+            });
 
             var Module = {
                 preRun: [],
@@ -126,12 +140,8 @@
                 printErr: (...args) => console.error(...args),
                 canvas: document.getElementById("canvas"),
                 setStatus: (...args) => console.log("status:", ...args),
-                noInitialRun: true
+                noInitialRun: true,
             };
-            window.onerror = function() {
-                console.log("onerror: " + event.message)
-            }
         </script>
-        <script async type="text/javascript" src="main.js"></script>
     </body>
 </html>

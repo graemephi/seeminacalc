@@ -986,6 +986,15 @@ void frame(void)
         igBegin("Drop", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
         igText("Drop files, song folders or packs here");
         igEnd();
+#ifdef NO_SSE
+        igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f + 20.f), 0, V2(0.5f, 0.0f));
+        igBegin("SSE", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
+        igTextColored((ImVec4) { 1, 0, 0, 1.0f}, "No SSE available");
+        igText("Turn on SIMD support in about:flags if you want the calc to be exactly the same as in game");
+        igTextColored((ImVec4) { 1, 1, 1, 0.5f}, "(Computer touchers: this is a numerical precision thing, not a speed thing)");
+        igEnd();
+#endif
+
     }
 
     if (igIsKeyPressed('`', false)) {

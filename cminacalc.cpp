@@ -6,9 +6,24 @@
 
 using std::vector;
 
+#if defined(NO_SSE)
+// Replace fastsqrt with sqrt without modifying MinaCalc source
+#define __SSE__
+#include <xmmintrin.h>
+#undef __SSE__
+#define _mm_load_ss(f) *(f)
+#define _mm_store_ss(out, val) (*(out) = (val))
+#define _mm_mul_ss(a, b) sqrt(a)
+#include "Etterna/MinaCalc/PatternModHelpers.h"
+#undef _mm_load_ss
+#undef _mm_store_ss
+#undef _mm_mul_ss
+#endif
+
 // Note on updating the calc: not quite drag-and-drop. grep for "Stupud hack"
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/MinaCalc.cpp"
+
 
 #include "common.h"
 #include "cminacalc.h"

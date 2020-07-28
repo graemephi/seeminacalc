@@ -46,7 +46,6 @@ build/release/main.exe: *.h *.c build/release/cpp.obj Makefile
 EMCCFlags :=
 EMCCFlags += -s DISABLE_EXCEPTION_CATCHING=1
 EMCCFlags += -s ERROR_ON_UNDEFINED_SYMBOLS=1
-# emcc warns that this is slow with threads; haven't investigated
 EMCCFlags += -s ALLOW_MEMORY_GROWTH=1
 EMCCFlags += -s USE_WEBGL2=1
 EMCCFlags += -s "MALLOC='emmalloc'"
@@ -67,7 +66,11 @@ EMCCFlags += -s USE_PTHREADS=1
 EMCCFlags += -s PTHREAD_POOL_SIZE=4
 
 emscripten:
-	emcc $(EMCCFlags) -msse -msimd128 $(Includes) main.c cpp.cpp -o web/main.js
+	emcc $(EMCCFlags) -msse -msimd128 $(Includes) main.c cpp.cpp -o web/seeminacalc.js
+	emcc $(EMCCFlags) -DNO_SSE $(Includes) main.c cpp.cpp -o web/seeminacalc.nosse.js
+
+ssefeaturetest:
+	emcc -Os --no-entry -msse -msimd128 ssefeaturetest.c -o ssefeaturetest.wasm
 
 debug: build/debug/main.exe
 release: build/release/main.exe
