@@ -345,7 +345,7 @@ i32 make_skillsets_graph()
     fng->relative_min = FLT_MAX;
     fng->generation = 0;
     for (i32 x = 0; x < fng->len; x++) {
-        fng->xs[x] = lerp(WifeXs[0] * 100.f, WifeXs[Wife965Index + 1] * 100.f, (f32)x / (fng->len - 1));
+        fng->xs[x] = lerp(WifeXs[0] * 100.f, WifeXs[Wife965Index + 1] * 100.f, (f32)x / (f32)(fng->len - 1));
     }
     return (i32)buf_index_of(state.graphs, fng);
 }
@@ -362,13 +362,19 @@ i32 make_parameter_graph(i32 param)
     fng->active = true;
     fng->is_param = true;
     fng->param = param;
-    fng->len = state.info.params[param].integer ? (i32)state.info.params[param].max : NumGraphSamples;
+    fng->len = state.info.params[param].integer ? (i32)state.info.params[param].max + 1 : NumGraphSamples;
     fng->min = FLT_MAX;
     fng->max = FLT_MIN;
     fng->relative_min = FLT_MAX;
     fng->generation = 0;
-    for (i32 x = 0; x < fng->len; x++) {
-        fng->xs[x] = lerp(state.ps.min[param], state.ps.max[param], (f32)x / (fng->len - 1));
+    if (state.info.params[param].integer) {
+        for (i32 x = 0; x < fng->len; x++) {
+            fng->xs[x] = (f32)x;
+        }
+    } else {
+        for (i32 x = 0; x < fng->len; x++) {
+            fng->xs[x] = lerp(state.ps.min[param], state.ps.max[param], (f32)x / (f32)(fng->len - 1));
+        }
     }
     return (i32)buf_index_of(state.graphs, fng);
 }
@@ -391,6 +397,11 @@ void free_all_graphs(i32 handles[])
 
 i32 parse_and_add_sm(Buffer buf, b32 open_window)
 {
+    if (buf_len(state.files) == buf_cap(state.files)) {
+        printf("please.. no more files");
+        return -1;
+    }
+
     SmFile sm = {0};
     push_allocator(scratch);
     i32 err = parse_sm(buf, &sm);
@@ -404,10 +415,10 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
 
     for (isize i = 0; i < buf_len(sm.diffs); i++) {
         NoteInfo *ni = sm_to_ett_note_info(&sm, (i32)i);
+        push_allocator(scratch);
         String ck = generate_chart_key(&sm, i);
         String diff = DifficultyStrings[sm.diffs[i].diff];
         String id = {0};
-        push_allocator(scratch);
         id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
             title.len, title.buf,
             author.len, author.buf,
@@ -442,19 +453,16 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
 
         calculate_skillsets(&state.high_prio_work, sfi, state.generation);
         calculate_file_graphs(&state.low_prio_work, sfi, state.generation, -1);
-        calculate_effects(&state.low_prio_work, &state.info, sfi, state.generation);
 
-    #if TEST_CHARTKEYS
+#if TEST_CHARTKEYS
         Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
         assert(b.len);
-    #endif
+#endif
 
         printf("Added %s\n", id.buf);
     }
 
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
-    submit_work(&low_prio_work_queue, state.low_prio_work, state.generation);
-    thread_notify();
 
     return 0;
 }
@@ -586,7 +594,8 @@ void init(void)
     stm_setup();
     simgui_setup(&(simgui_desc_t){
         .no_default_font = (font.buf != 0),
-        .sample_count = _sapp.sample_count
+        .sample_count = _sapp.sample_count,
+        .max_vertices = 65536*8,
     });
     state = (State) {
         .pass_action = {
@@ -655,6 +664,24 @@ void init(void)
     buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
     buf_reserve(state.graphs, 128);
 
+    // todo: use handles instead
+    buf_reserve(state.files, 1024);
+
+    high_prio_work_queue.lock_id = make_lock();
+    low_prio_work_queue.lock_id = make_lock();
+
+    i32 n_threads = got_any_cores() - 1;
+    for (isize i = 0; i < n_threads; i++) {
+        CalcThread *ct = buf_push(state.threads, (CalcThread) {
+            .info = &state.info,
+            .generation = &state.generation,
+            .ps = &state.ps,
+            .done = buf_pushn(done_queues, 1)
+        });
+
+        make_thread(calc_thread, ct);
+    }
+
     for (isize i = 0; i < array_length(files); i++) {
         Buffer f = read_file(files[i]);
         parse_and_add_sm(f, i == 0);
@@ -673,21 +700,6 @@ void init(void)
     };
 
     state.active = null_sfi;
-
-    high_prio_work_queue.lock_id = make_lock();
-    low_prio_work_queue.lock_id = make_lock();
-    done_queue.lock_id = make_lock();
-
-    i32 n_threads = got_any_cores() - 1;
-    for (isize i = 0; i < n_threads; i++) {
-        CalcThread *ct = buf_push(state.threads, (CalcThread) {
-            .info = &state.info,
-            .generation = &state.generation,
-            .ps = &state.ps
-        });
-
-        make_thread(calc_thread, ct);
-    }
 }
 
 void frame(void)
@@ -912,7 +924,6 @@ void frame(void)
             }
             if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
                 calculate_effects(&state.low_prio_work, &state.info, sfi, state.generation);
-                calculate_file_graphs(&state.high_prio_work, sfi, state.generation, changed.type ? changed.param : -1);
 
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
@@ -924,21 +935,23 @@ void frame(void)
                 }
 
                 // File difficulty + chartkey text
-                igTextColored(msd_color(sfi->aa_rating), "%.2f", sfi->aa_rating);
+                igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
                 igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
                 igText(sfi->chartkey.buf);
 
                 // Plots. Weird rendering order: first 0, then backwards from the end
                 FnGraph *fng = &state.graphs[sfi->graphs[0]];
-                ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+                b32 zoomable = fng->initialised ? ImGuiCond_Once : ImGuiCond_Always;
+                ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, zoomable);
                 if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
+                    calculate_file_graph(&state.high_prio_work, sfi, fng, state.generation);
                     for (i32 ss = 0; ss < NumSkillsets; ss++) {
                         skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
                     }
                     ipEndPlot();
                 }
                 igSameLine(0, 4);
-                ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->relative_min - 0.05, 1.05, ImGuiCond_Always);
+                ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->relative_min - 0.05, 1.05, zoomable);
                 if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
                     for (i32 ss = 1; ss < NumSkillsets; ss++) {
                         skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
@@ -948,6 +961,10 @@ void frame(void)
 
                 for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
                     fng = &state.graphs[sfi->graphs[fungi]];
+                    zoomable = fng->initialised && fng->zoomable_once ? ImGuiCond_Once : ImGuiCond_Always;
+                    if (fng->initialised && !fng->zoomable_once) {
+                        fng->zoomable_once = true;
+                    }
                     if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
                         calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
                     }
@@ -957,15 +974,16 @@ void frame(void)
                     u8 full_name[64] = {0};
                     snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
                     igPushIDStr(full_name);
-                    ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+                    ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, zoomable);
                     if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
+                        calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
                         for (i32 ss = 0; ss < NumSkillsets; ss++) {
                             skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
                         }
                         ipEndPlot();
                     }
                     igSameLine(0, 4);
-                    ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->relative_min - 0.05,(f64) 1.05, ImGuiCond_Always);
+                    ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->relative_min - 0.05, (f64)1.05, zoomable);
                     if (BeginPlotDefaults("##Relative AA", full_name, 0)) {
                         for (i32 ss = 1; ss < NumSkillsets; ss++) {
                             skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
@@ -1061,10 +1079,10 @@ void frame(void)
         assert(next_active->open);
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
+        calculate_file_graphs(&state.high_prio_work, state.active, state.generation, -1);
     }
 
     if (changed.type) {
-        CalcWork **work = &state.low_prio_work;
         switch (changed.type) {
             case ParamSlider_GraphToggled: {
                 if (state.parameter_graphs_enabled[changed.param]) {
@@ -1092,7 +1110,7 @@ void frame(void)
                 }
             } break;
             case ParamSlider_ValueChanged: {
-                calculate_graphs_in_background(work, Work_Wife, changed.param, state.generation);
+                calculate_skillsets_in_background(&state.low_prio_work, state.generation);
             } break;
             default: {
                 // Nothing
@@ -1144,7 +1162,6 @@ sapp_desc sokol_main(int argc, char* argv[])
         .width = 1920,
         .height = 1080,
         .sample_count = 8,
-        .gl_force_gles2 = true,
         .window_title = "SeeMinaCalc",
         .ios_keyboard_resizes_canvas = false
     };
