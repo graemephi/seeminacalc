@@ -657,7 +657,7 @@ void init(void)
 
         // Junk """""""test vectors"""""""
         "./03 IMAGE -MATERIAL-(Version 0).sm",
-        "./main.c",
+        "./seeminacalc.c",
         "web/NotoSansCJKjp-Regular.otf"
     };
 #endif

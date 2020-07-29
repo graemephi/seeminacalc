@@ -22,7 +22,7 @@ Common := -Oi -nologo -EHsc -W4 -WX $(Includes) $(ExtraWarnings)
 C := -Od -Ob1 -MT -Zi
 CPP := -std:c++17 -O2 -Ob2 -MT
 
-all: build build/debug/main.exe
+all: build build/debug/seeminacalc.exe
 
 clean:
 	rm -r build
@@ -37,11 +37,11 @@ cog:
 build/debug/cpp.obj: *.h *.cpp Makefile
 	$(Compiler) $(Common) $(CPP) $(Debug) -c cpp.cpp
 
-build/debug/main.exe: *.h *.c build/debug/cpp.obj Makefile
-	$(Compiler) $(Common) $(C) $(Debug) main.c build/debug/cpp.obj
+build/debug/seeminacalc.exe: *.h *.c build/debug/cpp.obj Makefile
+	$(Compiler) $(Common) $(C) $(Debug) seeminacalc.c build/debug/cpp.obj
 
-build/release/main.exe: *.h *.c build/release/cpp.obj Makefile
-	$(Compiler) $(Common) $(CPP) $(Release) main.c cpp.cpp
+build/release/seeminacalc.exe: *.h *.c build/release/cpp.obj Makefile
+	$(Compiler) $(Common) $(CPP) $(Release) seeminacalc.c cpp.cpp
 
 EMCCFlags :=
 EMCCFlags += -s DISABLE_EXCEPTION_CATCHING=1
@@ -66,12 +66,12 @@ EMCCFlags += -s USE_PTHREADS=1
 EMCCFlags += -s PTHREAD_POOL_SIZE=4
 
 emscripten:
-	emcc $(EMCCFlags) -msse -msimd128 $(Includes) main.c cpp.cpp -o web/seeminacalc.js
-	emcc $(EMCCFlags) -DNO_SSE $(Includes) main.c cpp.cpp -o web/seeminacalc.nosse.js
+	emcc $(EMCCFlags) -msse -msimd128 $(Includes) seeminacalc.c cpp.cpp -o web/seeminacalc.js
+	emcc $(EMCCFlags) -DNO_SSE $(Includes) seeminacalc.c cpp.cpp -o web/seeminacalc.nosse.js
 
 ssefeaturetest:
 	emcc -Os --no-entry -msse -msimd128 ssefeaturetest.c -o ssefeaturetest.wasm
 
-debug: build/debug/main.exe
-release: build/release/main.exe
+debug: build/debug/seeminacalc.exe
+release: build/release/seeminacalc.exe
 .PHONY: all clean debug release
