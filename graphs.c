@@ -850,8 +850,9 @@ void finish_work()
 
             f32 a = fng->have_ys ? 0.7f : 0.0f;
             f32 b = 1.0f - a;
-            f32 min_y = 100.f;
-            f32 rel_min_y = 0.0f;
+            f32 min_y = 100.0f;
+            f32 rel_min_y = 100.0f;
+            f32 max_y = 0.0f;
             for (isize ss = 0; ss < NumSkillsets; ss++) {
                 for (isize r = 0; r < fng->resident_count - 1; r++) {
                     if (fng->ys[ss][sorted[r]] == fng->incoming_ys[ss][sorted[r]]
@@ -869,35 +870,47 @@ void finish_work()
                         t += inc;
                     }
                 }
-                if (fng->ys[ss][0] < min_y) {
-                    min_y = fng->ys[ss][0];
-                    rel_min_y = safe_div(min_y, fng->ys[0][0]);
+                for (isize i = 0; i < fng->len; i++) {
+                    if (fng->ys[ss][i] < min_y) {
+                        min_y = fng->ys[ss][i];
+                    }
+                    if (fng->relative_ys[ss][i] < rel_min_y) {
+                        rel_min_y = fng->relative_ys[ss][i];
+                    }
+                    if (fng->ys[ss][i] > max_y) {
+                        max_y = fng->ys[ss][i];
+                    }
                 }
                 fng->ys[ss][Wife965Index + 1] = fng->ys[ss][Wife965Index];
                 fng->relative_ys[ss][Wife965Index + 1] = fng->relative_ys[ss][Wife965Index];
             }
-            fng->min = min_y;
-            fng->relative_min = rel_min_y;
-            fng->max = fng->ys[0][fng->len - 1] ? fng->ys[0][fng->len - 1] : 40.0f;
+            fng->min = (min_y == 100.f) ? 0.f : min_y;
+            fng->relative_min = (rel_min_y == 100.f) ? 0.f : rel_min_y;
+            fng->max = (max_y == 0.f) ? 40.f : max_y;
             fng->have_ys = true;
         } else {
-            f32 min_y = 100.f;
-            f32 rel_min_y = 0.0f;
+            f32 min_y = 100.0f;
+            f32 rel_min_y = 100.0f;
+            f32 max_y = 0.0f;
             for (isize ss = 0; ss < NumSkillsets; ss++) {
                 for (isize i = 0; i < fng->len; i++) {
                     fng->ys[ss][i] = fng->incoming_ys[ss][i];
                     fng->relative_ys[ss][i] = fng->ys[ss][i] / fng->ys[0][i];
+
+                    if (fng->ys[ss][i] < min_y) {
+                        min_y = fng->ys[ss][i];
+                    }
+                    if (fng->relative_ys[ss][i] < rel_min_y) {
+                        rel_min_y = fng->relative_ys[ss][i];
+                    }
+                    if (fng->ys[ss][i] > max_y) {
+                        max_y = fng->ys[ss][i];
+                    }
                 }
-                if (fng->ys[ss][0] < min_y) {
-                    min_y = fng->ys[ss][0];
-                    rel_min_y = safe_div(min_y, fng->ys[0][0]);
-                }
-                fng->ys[ss][Wife965Index + 1] = fng->ys[ss][Wife965Index];
-                fng->relative_ys[ss][Wife965Index + 1] = fng->relative_ys[ss][Wife965Index];
             }
-            fng->min = min_y;
-            fng->relative_min = rel_min_y;
-            fng->max = fng->ys[0][fng->len - 1] ? fng->ys[0][fng->len - 1] : 40.0f;
+            fng->min = (min_y == 100.f) ? 0.f : min_y;
+            fng->relative_min = (rel_min_y == 100.f) ? 0.f : rel_min_y;
+            fng->max = (max_y == 0.f) ? 40.f : max_y;
             fng->initialised = true;
         }
     }

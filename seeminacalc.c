@@ -946,7 +946,10 @@ void frame(void)
 
                 // Plots. Weird rendering order: first 0, then backwards from the end
                 FnGraph *fng = &state.graphs[sfi->graphs[0]];
-                b32 zoomable = fng->initialised ? ImGuiCond_Once : ImGuiCond_Always;
+                i32 zoomable = fng->initialised && fng->zoomable_once ? ImGuiCond_Once : ImGuiCond_Always;
+                if (fng->initialised && !fng->zoomable_once) {
+                    fng->zoomable_once = true;
+                }
                 ipSetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, zoomable);
                 if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
                     calculate_file_graph(&state.high_prio_work, sfi, fng, state.generation);
