@@ -267,7 +267,7 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
             value = info->params[p].default_value * 1.05f;
         }
 
-        ratings = calc_go_with_param(calc, &info->defaults, note_data, 1.0f, 0.93f, param, value);
+        ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, value);
 
         for (int r = 0; r < NumSkillsets; r++) {
             b32 changed = rating_floor(ratings.E[r]) != default_ratings->E[r];
@@ -289,7 +289,7 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
             value = info->params[p].max;
         }
 
-        ratings = calc_go_with_param(calc, &info->defaults, note_data, 1.0f, 0.93f, param, value);
+        ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, value);
 
         out->weak[p] = out->strong[p];
         for (i32 r = 0; r < NumSkillsets; r++) {
@@ -662,12 +662,12 @@ i32 calc_thread(void *userdata)
                         continue;
                     }
                     then = stm_now();
-                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 1.0f, 0.93f, work.parameter.param, work.parameter.value);
+                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 0.93f, work.parameter.param, work.parameter.value);
                     now = stm_now();
                 } break;
                 case Work_Wife: {
                     then = stm_now();
-                    ssr = calc_go(&calc, ps, work.sfi->notes, 1.0f, work.wife.goal);
+                    ssr = calc_go(&calc, ps, work.sfi->notes, work.wife.goal);
                     now = stm_now();
                 } break;
                 case Work_Effects: {
@@ -678,7 +678,7 @@ i32 calc_thread(void *userdata)
                 } break;
                 case Work_Skillsets: {
                     then = stm_now();
-                    ssr = calc_go(&calc, ps, work.sfi->notes, 1.0f, WifeXs[work.x_index]);
+                    ssr = calc_go(&calc, ps, work.sfi->notes, WifeXs[work.x_index]);
                     now = stm_now();
                 } break;
                 default: assert_unreachable();

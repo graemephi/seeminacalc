@@ -463,7 +463,7 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	  *this);
 
 	// Stupud hack
-	float *mod_cursor = mod_params;
+	float *mod_cursor = mod_params + 1;
     for (const auto &p : ulbu_that_which_consumes_all._s._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._js._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._hs._params) *p.second = *mod_cursor++;

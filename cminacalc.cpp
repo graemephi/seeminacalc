@@ -46,26 +46,27 @@ static f32 absolute_value(f32 a)
 }
 
 const char *ModNames[] = {
-	"StreamMod",
-	"JSMod",
-	"HSMod",
-	"CJMod",
-	"CJDensityMod",
-	"OHJumpModGuyThing",
-	"CJOHJumpMod",
-	"RollMod",
-	"BalanceMod",
-	"OHTrillMod",
-	"VOHTrillMod",
-	"ChaosMod",
-	"RunningManMod",
-	"WideRangeBalanceMod",
-	"WideRangeRollMod",
-	"WideRangeJumptrillMod",
-	"WideRangeAnchorMod",
-	"FlamJamMod",
-	"TheThingLookerFinderThing",
-	"TheThingLookerFinderThing2",
+    "Rate",
+    "StreamMod",
+    "JSMod",
+    "HSMod",
+    "CJMod",
+    "CJDensityMod",
+    "OHJumpModGuyThing",
+    "CJOHJumpMod",
+    "RollMod",
+    "BalanceMod",
+    "OHTrillMod",
+    "VOHTrillMod",
+    "ChaosMod",
+    "RunningManMod",
+    "WideRangeBalanceMod",
+    "WideRangeRollMod",
+    "WideRangeJumptrillMod",
+    "WideRangeAnchorMod",
+    "FlamJamMod",
+    "TheThingLookerFinderThing",
+    "TheThingLookerFinderThing2",
 };
 
 enum
@@ -78,6 +79,8 @@ struct NoteData
     const vector<NoteInfo> ref;
 };
 
+static float RateParam = 1.0f;
+static const std::vector<std::pair<std::string,float*>> RateMod{{ "rate", (float *)&RateParam }};
 
 NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 {
@@ -108,6 +111,7 @@ CalcInfo calc_info()
     static auto shalhoub = TheGreatBazoinkazoinkInTheSky(*dummy_calc);
 
     const std::vector<std::pair<std::string,float*>> *params[NumMods] = {
+        &RateMod,
         &shalhoub._s._params,
         &shalhoub._js._params,
         &shalhoub._hs._params,
@@ -210,6 +214,9 @@ CalcInfo calc_info()
         }
     }
 
+    param_info[0].min = 0.5;
+    param_info[0].max = 3.0;
+
     ParamSet defaults = {};
     defaults.params = (f32 *)calloc(num_params, sizeof(f32));
     defaults.min = (f32 *)calloc(num_params, sizeof(f32));
@@ -242,23 +249,23 @@ SeeCalc calc_init(CalcInfo *info)
     return result;
 }
 
-SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal)
+SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal)
 {
     SkillsetRatings result = {};
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
-    vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
+    vector<float> ratings = MinaSDCalc(note_data->ref, params->params[0], goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
     }
     return result;
 }
 
-SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate, float goal, i32 param, f32 value)
+SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, i32 param, f32 value)
 {
     SkillsetRatings result = {};
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     calc->handle->mod_params[param] = value;
-    vector<float> ratings = MinaSDCalc(note_data->ref, rate, goal, calc->handle);
+    vector<float> ratings = MinaSDCalc(note_data->ref, param == 0 ? value : params->params[0], goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
     }

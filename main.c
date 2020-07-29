@@ -590,7 +590,7 @@ void init(void)
     permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
 
     push_allocator(scratch);
-    Buffer font = load_font_file("NotoSansCJKjp-Regular.otf");
+    Buffer font = load_font_file("web/NotoSansCJKjp-Regular.otf");
     pop_allocator();
 
     sg_setup(&(sg_desc){
@@ -658,7 +658,7 @@ void init(void)
         // Junk """""""test vectors"""""""
         "./03 IMAGE -MATERIAL-(Version 0).sm",
         "./main.c",
-        "NotoSansCJKjp-Regular.otf"
+        "web/NotoSansCJKjp-Regular.otf"
     };
 #endif
 
