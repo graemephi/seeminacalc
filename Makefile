@@ -63,7 +63,6 @@ EMCCFlags += -O3
 EMCCFlags += -s "EXPORTED_FUNCTIONS=['_main', '_set_font', '_open_file', '_calloc']"
 EMCCFlags += -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall']"
 EMCCFlags += -s USE_PTHREADS=1
-EMCCFlags += -s PTHREAD_POOL_SIZE=4
 
 emscripten:
 	emcc $(EMCCFlags) -msse -msimd128 $(Includes) seeminacalc.c cpp.cpp -o web/seeminacalc.js
