@@ -929,7 +929,7 @@ void frame(void)
                 igSetNextWindowSize(sz, ImGuiCond_Once);
             }
             if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
-                calculate_effects(&state.low_prio_work, &state.info, sfi, state.generation);
+                calculate_effects(sfi == active ? &state.high_prio_work : &state.low_prio_work, &state.info, sfi, state.generation);
 
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
