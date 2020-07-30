@@ -276,19 +276,10 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
         }
     }
 
-    // weak. they react to big changes at 96.5%, and small changes at 93%
+    // weak. they react to big changes at 94%, and small changes at 93%
     {
-        f32 distance_from_low = info->params[p].default_value - info->params[p].min;
-        f32 distance_from_high = info->params[p].max - info->params[p].max;
         assert(info->params[p].max >= info->params[p].min);
-        f32 value = 0.f;
-        if (info->params[p].default_value == 0) {
-            value = 100.0f;
-        } else if (distance_from_low > distance_from_high) {
-            value = info->params[p].min;
-        } else {
-            value = info->params[p].max;
-        }
+        f32 value = value = info->params[p].max;
 
         ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, value);
 
@@ -296,6 +287,14 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
         for (i32 r = 0; r < NumSkillsets; r++) {
             b32 changed = rating_floor(ratings.E[r]) != default_ratings->E[r];
             out->weak[p] |= (changed << r);
+        }
+
+        if (out->weak[p] == 0) {
+            ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, info->params[p].min);
+            for (i32 r = 0; r < NumSkillsets; r++) {
+                b32 changed = rating_floor(ratings.E[r]) != default_ratings->E[r];
+                out->weak[p] |= (changed << r);
+            }
         }
     }
 }

@@ -646,7 +646,7 @@ void init(void)
     const char *files[0] = {};
 #else
     const char *files[] = {
-        "_sync music.sm"
+        "_sync music.sm",
 #if 0
         "./Odin.sm",
         "./osu.sm",
