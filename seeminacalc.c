@@ -457,7 +457,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         buf_reserve(sfi->effects.strong, state.info.num_params);
 
         calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
-        calculate_file_graph_no_generation(&state.low_prio_work, sfi, &state.graphs[sfi->graphs[0]]);
+        calculate_file_graph_force(&state.low_prio_work, sfi, &state.graphs[sfi->graphs[0]], state.generation);
 
 #if TEST_CHARTKEYS
         Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
@@ -974,7 +974,7 @@ void frame(void)
                         fng->zoomable_once = true;
                     }
                     if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
-                        calculate_parameter_graph_no_generation(&state.high_prio_work, sfi, fng);
+                        calculate_parameter_graph_force(&state.high_prio_work, sfi, fng, state.generation);
                         zoomable = ImGuiCond_Always;
                     }
 
@@ -1044,7 +1044,7 @@ void frame(void)
 
         igBeginGroup(); {
             isize used = permanent_memory->ptr - permanent_memory->buf;
-            igText("Calc version %d", state.info.version);
+            igText("Calc version %d (%d mods, %d params)", state.info.version, state.info.num_mods, state.info.num_params - 1);
             igText("Using %_$d / %_$d", used - total_bytes_leaked, used);
         } igEndGroup();
         igSameLine(0, 45.f);
@@ -1088,7 +1088,7 @@ void frame(void)
         assert(next_active->open);
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
-        calculate_file_graphs(&state.high_prio_work, state.active, state.generation, -1);
+        calculate_file_graphs(&state.high_prio_work, state.active, state.generation);
     }
 
     if (changed.type) {

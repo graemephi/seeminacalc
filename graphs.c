@@ -15,11 +15,12 @@ def dump(name, xs):
 linear = np.linspace(1, 0, 127)
 
 wife_a = lerp(0.82, 0.965, 1 - linear*linear*np.sqrt(linear))
+closest_to_93 = wife_a[np.argmin(np.abs(wife_a - 0.93))]
 wife_a -= 0.965
-closest_to_93 = wife_a[np.argmin(np.abs(wife_a - (0.93 - 0.965)))]
-wife_a *= (0.93 - 0.965) / closest_to_93
+wife_a *= (0.93 - 0.965) / (closest_to_93 - 0.965)
+wife_a += 0.965
 
-wife_xs = np.concatenate((wife_a + 0.965, [0.98]))
+wife_xs = np.concatenate((wife_a, [0.98]))
 
 dump("WifeXs", wife_xs)
 cog.outl(r"""enum {
@@ -349,7 +350,7 @@ static const usize WorkQueueMask = WorkQueueSize - 1;
 static const usize DoneQueueMask = DoneQueueSize - 1;
 static_assert((WorkQueueSize & (WorkQueueSize - 1)) == 0);
 
-void calculate_file_graph_no_generation(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng)
+void calculate_file_graph_force(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == false);
     for (isize i = 0; i < NumGraphSamples; i++) {
@@ -358,7 +359,7 @@ void calculate_file_graph_no_generation(CalcWork *work[], SimFileInfo *sfi, FnGr
             .type = Work_Wife,
             .wife.goal = WifeXs[i],
             .x_index = (i32)i,
-            .generation = state.generation,
+            .generation = generation,
         });
     }
 }
@@ -380,7 +381,7 @@ void calculate_file_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 
     }
 }
 
-void calculate_parameter_graph_no_generation(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng)
+void calculate_parameter_graph_force(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == true);
     if (state.info.params[fng->param].integer == false) {
@@ -394,7 +395,7 @@ void calculate_parameter_graph_no_generation(CalcWork *work[], SimFileInfo *sfi,
                 .parameter.param = fng->param,
                 .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1.0f)),
                 .parameter.param_of_fng = fng->param,
-                .generation = state.generation,
+                .generation = generation,
             });
         }
     } else {
@@ -408,51 +409,22 @@ void calculate_parameter_graph_no_generation(CalcWork *work[], SimFileInfo *sfi,
                 .parameter.param = fng->param,
                 .parameter.value = (f32)sample,
                 .parameter.param_of_fng = fng->param,
-                .generation = state.generation,
+                .generation = generation,
             });
         }
     }
 }
-
 
 void calculate_parameter_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == true);
     if (fng->pending_generation < generation) {
         fng->pending_generation = generation;
-        if (state.info.params[fng->param].integer == false) {
-            for (isize sample = 0; sample < fng->len; sample++) {
-                buf_push(*work, (CalcWork) {
-                    .sfi = sfi,
-                    .type = Work_Parameter,
-                    .x_index = (i32)sample,
-                    .parameter.lower_bound = state.ps.min[fng->param],
-                    .parameter.upper_bound = state.ps.max[fng->param],
-                    .parameter.param = fng->param,
-                    .parameter.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1.0f)),
-                    .parameter.param_of_fng = fng->param,
-                    .generation = generation,
-                });
-            }
-        } else {
-            for (isize sample = 0; sample < fng->len; sample++) {
-                buf_push(*work, (CalcWork) {
-                    .sfi = sfi,
-                    .type = Work_Parameter,
-                    .x_index = (i32)sample,
-                    .parameter.lower_bound = state.ps.min[fng->param],
-                    .parameter.upper_bound = state.ps.max[fng->param],
-                    .parameter.param = fng->param,
-                    .parameter.value = (f32)sample,
-                    .parameter.param_of_fng = fng->param,
-                    .generation = generation,
-                });
-            }
-        }
+        calculate_parameter_graph_force(work, sfi, fng, generation);
     }
 }
 
-void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation, i32 param_to_exclude)
+void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
 {
     // Skillsets over wife
     calculate_file_graph(work, sfi, &state.graphs[sfi->graphs[0]], generation);
@@ -460,13 +432,7 @@ void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation, i
     // Skillsets over parameter
     for (isize i = buf_len(sfi->graphs) - 1; i >= 1; i--) {
         FnGraph *fng = &state.graphs[sfi->graphs[i]];
-        assert(fng->is_param);
-        if (fng->pending_generation < generation) {
-            fng->pending_generation = generation;
-            if (fng->param != param_to_exclude) {
-                calculate_parameter_graph(work, sfi, fng, generation);
-            }
-        }
+        calculate_parameter_graph(work, sfi, fng, generation);
     }
 }
 
@@ -578,9 +544,10 @@ void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, u32 g
     }
 }
 
-static isize next_queue_to_read = 0;
 b32 get_done_work(DoneWork *out)
 {
+    static isize next_queue_to_read = 0;
+
     isize q = 0;
     isize i = 0;
     for (; i < buf_len(done_queues); i++) {

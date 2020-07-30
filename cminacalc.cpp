@@ -45,6 +45,11 @@ static f32 absolute_value(f32 a)
     return (a >= 0) ? a : -a;
 }
 
+static f32 clamp_low(f32 a, f32 t)
+{
+    return (a > t) ? a : t;
+}
+
 const char *ModNames[] = {
     "Rate",
     "StreamMod",
@@ -253,7 +258,7 @@ SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, fl
 {
     SkillsetRatings result = {};
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
-    vector<float> ratings = MinaSDCalc(note_data->ref, params->params[0], goal, calc->handle);
+    vector<float> ratings = MinaSDCalc(note_data->ref, clamp_low(1e-5f, params->params[0]), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
     }
@@ -265,7 +270,7 @@ SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *no
     SkillsetRatings result = {};
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     calc->handle->mod_params[param] = value;
-    vector<float> ratings = MinaSDCalc(note_data->ref, param == 0 ? value : params->params[0], goal, calc->handle);
+    vector<float> ratings = MinaSDCalc(note_data->ref, clamp_low(1e-5f, param == 0 ? value : params->params[0]), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
     }
