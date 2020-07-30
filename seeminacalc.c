@@ -732,6 +732,7 @@ void frame(void)
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
         // Header + arrow drop down fake thing
+        igTextUnformatted("github", 0);
         igSameLine(igGetWindowWidth() - 36.0f, 4);
         b32 skillsets = false;
         igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);

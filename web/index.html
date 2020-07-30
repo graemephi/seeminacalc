@@ -4,11 +4,26 @@
         <meta charset="utf-8">
         <meta content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no" name="viewport">
         <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline'; worker-src 'self';">
+        <link rel="preload" href="NotoSansCJKjp-Regular.otf" as="fetch">
+        <link rel="preload" href="seeminacalc.nosse.js" as="script">
+        <link rel="preload" href="seeminacalc.nosse.worker.js" as="worker">
+        <link rel="preload" href="seeminacalc.nosse.wasm" as="fetch">
         <title>SeeMinaCalc</title>
         <style>
             body {
                 margin: 0;
                 background-color: #000
+            }
+
+            #gh {
+                position: absolute;
+                z-index: 1;
+                top: 7px;
+                right: 355px;
+            }
+
+            #gh > a {
+                color: #00000000;
             }
 
             .sokol {
@@ -33,6 +48,9 @@
         </style>
     </head>
     <body>
+        <div id="gh">
+            <a href="." target="_blank">github</a>
+        </div>
         <canvas class="sokol" id="canvas" oncontextmenu="event.preventDefault();" ondrop="dropHandler(event);" ondragover="event.preventDefault();"></canvas>
         <script>
             function testSSE() {
