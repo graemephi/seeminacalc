@@ -154,11 +154,11 @@ Buffer load_font_file(char *path)
 u64 rng(void)
 {
     // wikipedia
-	static usize x = 1;
-	x ^= x >> 12;
-	x ^= x << 25;
-	x ^= x >> 27;
-	return x * 0x2545F4914F6CDD1DULL;
+    static usize x = 1;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    return x * 0x2545F4914F6CDD1DULL;
 }
 
 f32 rngf(void)
@@ -221,10 +221,10 @@ static ImVec4 msd_color(f32 x)
 {
     // -- Colorized stuff
     // function byMSD(x)
-    // 	if x then
-    // 		return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
-    // 	end
-    // 	return HSV(0, 0.9, 0.9)
+    //     if x then
+    //         return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
+    //     end
+    //     return HSV(0, 0.9, 0.9)
     // end
     ImVec4 color = { 0, 0.9f, 0.9f, 1.0f };
     if (x) {

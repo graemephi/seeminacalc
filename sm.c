@@ -769,13 +769,13 @@ typedef union MinaSerializedRow
 static MinaSerializedRow row_mina_serialize(SmRow r)
 {
     static u8 tap_note_type[256] = {
-	    [Note_Off] = 0,
-	    [Note_On] = 1,
-	    [Note_HoldStart] = 2,
-	    [Note_RollStart] = 2,
-	    [Note_Mine] = 4,
-	    [Note_Lift] = 5,
-	    [Note_Fake] = 7,
+        [Note_Off] = 0,
+        [Note_On] = 1,
+        [Note_HoldStart] = 2,
+        [Note_RollStart] = 2,
+        [Note_Mine] = 4,
+        [Note_Lift] = 5,
+        [Note_Fake] = 7,
     };
     MinaSerializedRow result = {0};
     result.taps[0] = tap_note_type[r.columns[0]];
@@ -960,10 +960,10 @@ static SHA1Hash sha1(u8 *data, isize len)
 
 String generate_chart_key(SmFile *sm, isize diff)
 {
-	BPMChange *bpm = sm->bpms;
+    BPMChange *bpm = sm->bpms;
     SmRow *r = sm->diffs[diff].rows;
     char *prep = 0;
-	for (isize i = 0; i < sm->diffs[diff].n_rows; i++) {
+    for (isize i = 0; i < sm->diffs[diff].n_rows; i++) {
         MinaSerializedRow row = row_mina_serialize(r[i]);
         if (row.row) {
             while (r[i].row >= bpm[1].row || bpm->artificial) {
@@ -977,7 +977,7 @@ String generate_chart_key(SmFile *sm, isize diff)
                 (int)(bpm->bpm + 0.374643f)
             );
         }
-	}
+    }
 
     SHA1Hash hash = sha1(prep, buf_len(prep));
 
