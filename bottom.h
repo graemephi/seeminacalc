@@ -295,7 +295,12 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
         hdr->cap = cap;
         hdr->leaked = 0;
     } else if (hdr->len + count > hdr->cap) {
-        isize cap = hdr->cap * 2;
+        isize cap = 0;
+        if (count > hdr->cap) {
+            cap = hdr->cap + count;
+        } else {
+            cap = hdr->cap * 2;
+        }
 
         if (hdr->alloc->ptr == hdr_buf(hdr) + size*hdr->cap) {
             stack_alloc(hdr->alloc, u8, size * (cap - hdr->cap));

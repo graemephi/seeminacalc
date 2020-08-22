@@ -2,9 +2,8 @@ Clang := 0
 Includes := -Ietterna -Ilib
 
 ifneq ($(OS),Windows_NT)
-	$(error haven't done this. look at emcc flags that dont begin with -s)
+$(error haven't done this. look at emcc flags that dont begin with -s)
 endif
-
 
 ifeq ($(Clang), 1)
 Compiler := clang-cl

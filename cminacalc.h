@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdbool.h>
 
 typedef struct NoteData NoteData;
 typedef struct TheGreatBazoinkazoinkInTheSky TheGreatBazoinkazoinkInTheSky;
@@ -27,7 +28,6 @@ typedef union SkillsetRatings
     };
     float E[NumSkillsets];
 } SkillsetRatings;
-static_assert(sizeof(SkillsetRatings) == (NumSkillsets * sizeof(float)));
 
 static const char *SkillsetNames[] = {
     "Overall",
@@ -39,7 +39,6 @@ static const char *SkillsetNames[] = {
     "Chordjacks",
     "Technical",
 };
-static_assert(sizeof(SkillsetNames) == (NumSkillsets * sizeof(const char *)));
 
 #ifndef __NDSTRUCTS__
 typedef struct NoteInfo
@@ -107,7 +106,7 @@ NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
 CalcInfo calc_info(void);
 SeeCalc calc_init(CalcInfo *info);
 SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal);
-SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, i32 param, f32 value);
+SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, int param, float value);
 
 void nddump(NoteData *nd, NoteData *nd2);
 
