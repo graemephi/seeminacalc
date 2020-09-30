@@ -1,9 +1,10 @@
 // Buncha top-of-the-file crap that will just confuse anyone trying to look at
-// main.c to see where the good stuff is.
+// seeminacalc.c to see where the good stuff is.
 
 #include <float.h>
 #include <math.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -331,6 +332,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
         assert_unreachable();
     }
 
+    assert(hdr->len < hdr->cap);
     hdr->cookie = BufCookie;
     return hdr + 1;
 }
@@ -446,4 +448,20 @@ void restore_allocator(i32 handle)
     assert(handle < buf_len(stack_stack));
     buf_set_len(stack_stack, handle);
     current_allocator = handle > 0 ? buf_last(stack_stack) : permanent_memory;
+}
+
+u64 rng(void)
+{
+    // wikipedia
+    static usize x = 1;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    return x * 0x2545F4914F6CDD1DULL;
+}
+
+f32 rngf(void)
+{
+    u32 a = rng() & ((1 << 23) - 1);
+    return (f32)a / (f32)(1 << 23);
 }

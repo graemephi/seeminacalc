@@ -178,15 +178,6 @@ static const u8 SmFileNoteValid[256] = {
     ['F'] = true,
 };
 
-static const String DifficultyStrings[DiffCount] = {
-    SS("Beginner"),
-    SS("Easy"),
-    SS("Medium"),
-    SS("Hard"),
-    SS("Challenge"),
-    SS("Edit"),
-};
-
 static const String TagStrings[TagCount] = {
     SS("ARTISTTRANSLIT"),
     SS("ARTIST"),
@@ -276,7 +267,7 @@ SmDifficulty parse_notes_difficulty(SmParser *ctx)
 {
     SmDifficulty result = DiffCount;
     for (isize i = 0; i < DiffCount; i++) {
-        if (try_consume_string(ctx, DifficultyStrings[i])) {
+        if (try_consume_string(ctx, SmDifficultyStrings[i])) {
             result = i;
             break;
         }

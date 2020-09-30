@@ -349,9 +349,8 @@ static const usize WorkQueueMask = WorkQueueSize - 1;
 static const usize DoneQueueMask = DoneQueueSize - 1;
 static_assert((WorkQueueSize & (WorkQueueSize - 1)) == 0);
 
-void calculate_file_graph_force(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
+void calculate_file_graph_force(CalcWork *work[], SimFileInfo *sfi, u32 generation)
 {
-    assert(fng->is_param == false);
     for (isize i = 0; i < NumGraphSamples; i++) {
         buf_push(*work, (CalcWork) {
             .sfi = sfi,

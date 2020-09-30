@@ -3,6 +3,7 @@
 #endif
 
 #ifdef __clang__
+// for libs only
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdouble-promotion"
 #pragma clang diagnostic ignored "-Wstrict-prototypes"
@@ -28,75 +29,11 @@
 #pragma clang diagnostic pop
 #endif
 
-#define TEST_CHARTKEYS 0
-
-#if TEST_CHARTKEYS
-#include "sqlite3.c"
-// The perils of including sqlite3 in your translation unit
-// sqlite3.c also disables certain warnings.
-#if defined(_DEBUG) && NDEBUG == 1
-#undef NDEBUG
-#endif
-#endif
-
 #include "thread.h"
 #include "bottom.h"
 #include "cminacalc.h"
 #include "sm.h"
-
-#pragma float_control(precise, on, push)
-#include "sm.c"
-#pragma float_control(pop)
-
-#ifdef SQLITE_CORE
-typedef struct CacheDB
-{
-    sqlite3 *db;
-    sqlite3_stmt *note_data_stmt;
-} CacheDB;
-
-static CacheDB cache_db = {0};
-
-CacheDB cachedb_init(const char *path)
-{
-    CacheDB result;
-    int rc = sqlite3_open(path, &result.db);
-    if (rc) {
-        goto err;
-    }
-
-    char query[] = "select serializednotedata from steps where chartkey=?;";
-    rc = sqlite3_prepare_v2(result.db, query, sizeof(query), &result.note_data_stmt, 0);
-    if (rc) {
-        goto err;
-    }
-
-    return result;
-
-err:
-    fprintf(stderr, "Sqlite3 oops: %s\n", sqlite3_errmsg(result.db));
-    sqlite3_close(result.db);
-    result = (CacheDB) {0};
-    return result;
-}
-
-Buffer get_steps_from_db(CacheDB *db, char *key)
-{
-    Buffer result = (Buffer) {0};
-    sqlite3_bind_text(db->note_data_stmt, 1, key, -1, 0);
-    sqlite3_step(db->note_data_stmt);
-    const void *blob = sqlite3_column_blob(db->note_data_stmt, 0);
-    size_t len = sqlite3_column_bytes(db->note_data_stmt, 0);
-
-    result.buf = calloc(len, sizeof(char));
-    memcpy(result.buf, blob, len);
-    result.len = len;
-    result.cap = len;
-
-    sqlite3_reset(db->note_data_stmt);
-    return result;
-}
-#endif
+#include "cachedb.h"
 
 #ifdef __EMSCRIPTEN__
 static Buffer font_data = {0};
@@ -150,93 +87,6 @@ Buffer load_font_file(char *path)
     return read_file(path);
 }
 #endif
-
-u64 rng(void)
-{
-    // wikipedia
-    static usize x = 1;
-    x ^= x >> 12;
-    x ^= x << 25;
-    x ^= x >> 27;
-    return x * 0x2545F4914F6CDD1DULL;
-}
-
-f32 rngf(void)
-{
-    u32 a = rng() & ((1 << 23) - 1);
-    return (f32)a / (f32)(1 << 23);
-}
-
-static const ImVec2 V2Zero = {0};
-
-bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
-static bool BeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
-{
-    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
-}
-
-static ImVec4 GetColormapColor(int index)
-{
-    ImVec4 result;
-    ipGetColormapColor(&result, index);
-    return result;
-}
-
-static bool ItemDoubleClicked(int button)
-{
-    bool result = igIsItemHovered(0) && igIsMouseDoubleClicked(button);
-    if (result) {
-        igClearActiveID();
-    }
-    return result;
-}
-
-static f32 GetContentRegionAvailWidth(void)
-{
-    ImVec2 cr;
-    igGetContentRegionAvail(&cr);
-    return cr.x;
-}
-
-static void tooltip(const char *fmt, ...)
-{
-    if (igIsItemHovered(0)) {
-        igBeginTooltip();
-        igPushTextWrapPos(400.0f);
-        va_list args;
-        va_start(args, fmt);
-        igTextV(fmt, args);
-        va_end(args);
-        igPopTextWrapPos();
-        igEndTooltip();
-    }
-}
-
-static ImVec2 V2(f32 x, f32 y)
-{
-    return (ImVec2) { x, y };
-}
-
-static ImVec4 msd_color(f32 x)
-{
-    // -- Colorized stuff
-    // function byMSD(x)
-    //     if x then
-    //         return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
-    //     end
-    //     return HSV(0, 0.9, 0.9)
-    // end
-    ImVec4 color = { 0, 0.9f, 0.9f, 1.0f };
-    if (x) {
-        f32 h = max(95.0f - (x / 40.0f) * 150.0f, -50.0f) / 360.f;
-        h = h + (f32)(h < 0) - truncf(h);
-        f32 s = 0.9f;
-        f32 v = 0.9f;
-        igColorConvertHSVtoRGB(h, s, v, &color.x, &color.y, &color.z);
-    }
-
-    return color;
-}
 
 typedef struct EffectMasks
 {
@@ -315,6 +165,83 @@ typedef struct State
 } State;
 static State state = {0};
 
+#include "graphs.c"
+
+#pragma float_control(precise, on, push)
+#include "sm.c"
+#pragma float_control(pop)
+
+static const ImVec2 V2Zero = {0};
+
+bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
+static bool BeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
+{
+    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
+}
+
+static ImVec4 GetColormapColor(int index)
+{
+    ImVec4 result;
+    ipGetColormapColor(&result, index);
+    return result;
+}
+
+static bool ItemDoubleClicked(int button)
+{
+    bool result = igIsItemHovered(0) && igIsMouseDoubleClicked(button);
+    if (result) {
+        igClearActiveID();
+    }
+    return result;
+}
+
+static f32 GetContentRegionAvailWidth(void)
+{
+    ImVec2 cr;
+    igGetContentRegionAvail(&cr);
+    return cr.x;
+}
+
+static void tooltip(const char *fmt, ...)
+{
+    if (igIsItemHovered(0)) {
+        igBeginTooltip();
+        igPushTextWrapPos(400.0f);
+        va_list args;
+        va_start(args, fmt);
+        igTextV(fmt, args);
+        va_end(args);
+        igPopTextWrapPos();
+        igEndTooltip();
+    }
+}
+
+static ImVec2 V2(f32 x, f32 y)
+{
+    return (ImVec2) { x, y };
+}
+
+static ImVec4 msd_color(f32 x)
+{
+    // -- Colorized stuff
+    // function byMSD(x)
+    //     if x then
+    //         return HSV(math.max(95 - (x / 40) * 150, -50), 0.9, 0.9)
+    //     end
+    //     return HSV(0, 0.9, 0.9)
+    // end
+    ImVec4 color = { 0, 0.9f, 0.9f, 1.0f };
+    if (x) {
+        f32 h = max(95.0f - (x / 40.0f) * 150.0f, -50.0f) / 360.f;
+        h = h + (f32)(h < 0) - truncf(h);
+        f32 s = 0.9f;
+        f32 v = 0.9f;
+        igColorConvertHSVtoRGB(h, s, v, &color.x, &color.y, &color.z);
+    }
+
+    return color;
+}
+
 ParamSet copy_param_set(ParamSet *ps)
 {
     ParamSet result = {0};
@@ -329,8 +256,6 @@ ParamSet copy_param_set(ParamSet *ps)
     }
     return result;
 }
-
-#include "graphs.c"
 
 i32 make_skillsets_graph()
 {
@@ -422,7 +347,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         NoteInfo *ni = sm_to_ett_note_info(&sm, (i32)i);
         push_allocator(scratch);
         String ck = generate_chart_key(&sm, i);
-        String diff = DifficultyStrings[sm.diffs[i].diff];
+        String diff = SmDifficultyStrings[sm.diffs[i].diff];
         String id = {0};
         id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
             title.len, title.buf,
@@ -457,12 +382,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
         buf_reserve(sfi->effects.strong, state.info.num_params);
 
         calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
-        calculate_file_graph_force(&state.low_prio_work, sfi, &state.graphs[sfi->graphs[0]], state.generation);
-
-#if TEST_CHARTKEYS
-        Buffer b = get_steps_from_db(&cache_db, sfi->chartkey.buf);
-        assert(b.len);
-#endif
+        calculate_file_graph_force(&state.low_prio_work, sfi, state.generation);
 
         printf("Added %s\n", id.buf);
     }
@@ -1161,11 +1081,6 @@ sapp_desc sokol_main(int argc, char* argv[])
 {
     (void)argc;
     (void)argv;
-
-#if TEST_CHARTKEYS
-    assert(argc == 2);
-    cache_db = cachedb_init(argv[1]);
-#endif
 
     return (sapp_desc) {
         .init_cb = init,

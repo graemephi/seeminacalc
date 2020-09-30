@@ -97,6 +97,11 @@ NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
     return frobble_serialized_note_data((char *)note_data, length * sizeof(NoteInfo));
 }
 
+void free_note_data(NoteData *note_data)
+{
+    delete note_data;
+}
+
 static const f32 BigNArbitrary = 100.5438f;
 static f32 make_test_value(f32 default_value)
 {

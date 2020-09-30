@@ -70,6 +70,15 @@ typedef enum SmDifficulty
     DiffCount
 } SmDifficulty;
 
+static const String SmDifficultyStrings[DiffCount] = {
+    SS("Beginner"),
+    SS("Easy"),
+    SS("Medium"),
+    SS("Hard"),
+    SS("Challenge"),
+    SS("Edit"),
+};
+
 typedef struct BPMChange
 {
     f32 bpm; // can remove

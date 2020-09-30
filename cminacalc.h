@@ -102,6 +102,7 @@ NoteData *frobble_serialized_note_data(char *note_data, size_t length);
 // use Etterna's code because the calc is *very* sensitive to rounding error.
 // __If your note data is not bit-for-bit identical you will see error__
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
+void free_note_data(NoteData *note_data);
 
 CalcInfo calc_info(void);
 SeeCalc calc_init(CalcInfo *info);
