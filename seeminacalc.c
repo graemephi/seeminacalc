@@ -1014,7 +1014,6 @@ void frame(void)
         igTextColored((ImVec4) { 1, 1, 1, 0.5f}, "(Computer touchers: this is a numerical precision thing, not a speed thing)");
         igEnd();
 #endif
-
     }
 
     if (igIsKeyPressed('`', false)) {

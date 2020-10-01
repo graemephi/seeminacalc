@@ -799,7 +799,7 @@ void finish_work()
         }
 
         if (fng->is_param == false) {
-            sfi->aa_rating = fng->ys[0][Wife930Index];
+            sfi->aa_rating = rating_floor(fng->ys[0][Wife930Index]);
             sfi->max_rating = fng->ys[0][Wife965Index];
 
             if (fng->resident_count == array_length(fng->resident)) {
