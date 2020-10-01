@@ -33,7 +33,6 @@
 #include "bottom.h"
 #include "cminacalc.h"
 #include "sm.h"
-#include "cachedb.h"
 
 #ifdef __EMSCRIPTEN__
 static Buffer font_data = {0};
@@ -109,6 +108,15 @@ typedef struct SimFileInfo
     EffectMasks effects;
     i32 *graphs;
 
+    struct {
+        f32 want_msd;
+        f32 rate;
+        i32 skillset;
+
+        f32 got_msd;
+        f32 delta;
+    } target;
+
     SkillsetRatings default_ratings;
     u32 num_effects_computed;
     u32 effects_generation;
@@ -143,6 +151,8 @@ typedef struct State
     SimFileInfo *files;
     SimFileInfo *active;
 
+    SkillsetRatings average_target_delta;
+
     ParamSet ps;
     bool *parameter_graphs_enabled;
     i32 *parameter_graph_order;
@@ -166,6 +176,9 @@ typedef struct State
 static State state = {0};
 
 #include "graphs.c"
+
+#define SEEMINACALC
+#include "cachedb.c"
 
 #pragma float_control(precise, on, push)
 #include "sm.c"
@@ -392,6 +405,68 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
     return 0;
 }
 
+// copy n paste
+i32 add_target_files()
+{
+    if (buf_len(state.files) + array_length(TargetFiles) == buf_cap(state.files)) {
+        printf("please.. no more files");
+        return -1;
+    }
+
+    for (isize i = 0; i < array_length(TargetFiles); i++) {
+        push_allocator(scratch);
+        TargetFile *target = &TargetFiles[i];
+        String ck = target->key;
+        String title = target->title;
+        String author = target->author;
+        String diff = SmDifficultyStrings[target->difficulty];
+        String id = {0};
+        id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
+            title.len, title.buf,
+            author.len, author.buf,
+            author.len == 0 ? 0 : 2, ", ",
+            diff.len, diff.buf,
+            ck.len, ck.buf
+        );
+        pop_allocator();
+
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            if (strings_are_equal(sfi->id, id)) {
+                return -2;
+            }
+        }
+
+        char *ni = target->note_data.buf;
+        isize ni_len = target->note_data.len;
+
+        SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
+            .title = copy_string(title),
+            .diff = diff,
+            .chartkey = copy_string(ck),
+            .id = copy_string(id),
+            .target.want_msd = target->target,
+            .target.rate = target->rate,
+            .target.skillset = target->skillset,
+            .notes_len = (i32)ni_len,
+            .notes = frobble_serialized_note_data(ni, ni_len),
+            .selected_skillsets[0] = true,
+        });
+
+        buf_push(sfi->graphs, make_skillsets_graph());
+
+        buf_reserve(sfi->effects.weak, state.info.num_params);
+        buf_reserve(sfi->effects.strong, state.info.num_params);
+
+        calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
+
+        printf("Added %s\n", id.buf);
+    }
+
+    submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
+
+    return 0;
+}
+
 enum {
     ParamSlider_Nothing,
     ParamSlider_GraphToggled,
@@ -562,29 +637,6 @@ void init(void)
         io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
     }
 
-#ifdef __EMSCRIPTEN__
-    const char *files[0] = {};
-#else
-    const char *files[] = {
-        "_sync music.sm",
-#if 0
-        "./Odin.sm",
-        "./osu.sm",
-        "./03 IMAGE -MATERIAL-(Version 0).sm",
-        "./Grief & Malice.sm",
-        "./Skycoffin CT.sm",
-        "./The Lost Dedicated Life.sm",
-        "./m1dy - 960 BPM Speedcore.sm",
-        "./alien temple.sm",
-
-        // Junk """""""test vectors"""""""
-        "./03 IMAGE -MATERIAL-(Version 0).sm",
-        "./seeminacalc.c",
-        "web/NotoSansCJKjp-Regular.otf"
-#endif
-    };
-#endif
-
     state.generation = 1;
     state.info = calc_info();
     state.calc = calc_init(&state.info);
@@ -610,11 +662,6 @@ void init(void)
         make_thread(calc_thread, ct);
     }
 
-    for (isize i = 0; i < array_length(files); i++) {
-        Buffer f = read_file(files[i]);
-        parse_and_add_sm(f, i == 0);
-    }
-
     for (i32 ss = 0; ss < NumSkillsets; ss++) {
         ImVec4 c = GetColormapColor(ss);
         c.w *= 0.9f;
@@ -628,6 +675,10 @@ void init(void)
     };
 
     state.active = null_sfi;
+
+#if !defined(EMSCRIPTEN)
+    add_target_files();
+#endif
 }
 
 void frame(void)
@@ -655,7 +706,13 @@ void frame(void)
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
         // Header + arrow drop down fake thing
-        igTextUnformatted("github", 0);
+        if (state.average_target_delta.E[0] != 0.0f) {
+            for (isize i = 0; i < NumSkillsets; i++) {
+                igTextColored(msd_color(fabsf(state.average_target_delta.E[i]) * 3.0f), "%02.2f", (f64)state.average_target_delta.E[i]);
+                tooltip("CalcTestList: %s delta", SkillsetNames[i]);
+                igSameLine(0, 12.0f);
+            }
+        }
         igSameLine(igGetWindowWidth() - 36.0f, 4);
         b32 skillsets = false;
         igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);
@@ -671,6 +728,10 @@ void frame(void)
             FnGraph *g = &state.graphs[sfi->graphs[0]];
             f32 wife93 = sfi->aa_rating;
             f32 wife965 = sfi->max_rating;
+            if (sfi->target.got_msd) {
+                igTextColored(msd_color(fabsf(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
+                tooltip("CalcTestList: %.2f %s, want %.2f at %.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
+            }
             igTextColored(msd_color(wife93), "%2.2f", (f64)wife93);
             tooltip("Overall at AA"); igSameLine(0, 7.0f);
             igTextColored(msd_color(wife965), "%2.2f", (f64)wife965);
@@ -932,6 +993,14 @@ void frame(void)
     }
 
     if (buf_len(state.files) == 0) {
+
+        igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f - 40.f), 0, V2(0.5f, 1.0f));
+        igBegin("MinaButan", 0, ImGuiWindowFlags_NoDecoration);
+        if (igButton("Add Mina's CalcTestList.xml", V2Zero)) {
+            add_target_files();
+        }
+        igEnd();
+
         igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f), 0, V2(0.5f, 0.5f));
 
         igBegin("Drop", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
@@ -960,7 +1029,7 @@ void frame(void)
             debug_counters.done += ct->debug_counters.done;
             time += ct->debug_counters.time;
         }
-        time /= (f64)buf_len(state.threads);
+        time = 1000. * time / (f64)buf_len(state.threads);
 
         igSetNextWindowSize(V2(centre_width - 5.0f, 0), 0);
         igSetNextWindowPos(V2(left_width + 2.f, ds.y - 2.f), 0, V2(0, 1));
@@ -979,7 +1048,7 @@ void frame(void)
         igBeginGroup(); igText("done"); igText("%_$d", debug_counters.done); igEndGroup(); igSameLine(0, 4);
         igBeginGroup(); igText("pending"); igText("%_$d", debug_counters.requested - (debug_counters.done + debug_counters.skipped)); igEndGroup(); igSameLine(0, 4);
         igSameLine(0, 45.f);
-        igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%.2fms", time * 1000.); igEndGroup();
+        igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%.2fms", time); igEndGroup();
 
         igEnd();
     }
@@ -1052,8 +1121,7 @@ void frame(void)
     }
 
     // Randomise submission order for the high prio queue
-    // This lets you sweep param sliders without the first graphs
-    // stealing all the work
+    // This lets you sweep param sliders without the first graphs stealing all the work
     for (isize i = 0; i < buf_len(state.high_prio_work); i++) {
         isize idx = i + (rng() % (buf_len(state.high_prio_work) - i));
         CalcWork temp = state.high_prio_work[i];

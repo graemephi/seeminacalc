@@ -15,13 +15,13 @@ LTO := -GL
 ExtraWarnings :=
 endif
 
-Debug := -Fd"build/debug/" -Fo"build/debug/" -Fe"build/debug/"
-Release := -O2 -Ob2 -MT $(LTO) -Fd"build/release/" -Fo"build/release/" -Fe"build/release/"
+Debug := -DDEBUG -Fd"build/debug/" -Fo"build/debug/" -Fe"build/debug/"
+Release := -DRELEASE -O2 -Ob2 -MT $(LTO) -Fd"build/release/" -Fo"build/release/" -Fe"build/release/"
 Common := -Oi -nologo -EHsc -W4 -WX $(Includes) $(ExtraWarnings)
 C := -Od -Ob1 -MT -Zi
-CPP := -std:c++17 -O2 -Ob2 -MT
+CPP := -std:c++17 -O2 -Ob2 -MT -Zi
 
-all: build build/debug/seeminacalc.exe
+all: build build/cachedb/cachedb.exe build/debug/seeminacalc.exe
 
 clean:
 	rm -r build
@@ -39,7 +39,11 @@ build/debug/cpp.obj: *.h *.cpp Makefile
 build/debug/seeminacalc.exe: *.h *.c build/debug/cpp.obj Makefile
 	$(Compiler) $(Common) $(C) $(Debug) seeminacalc.c build/debug/cpp.obj
 
-build/release/seeminacalc.exe: *.h *.c build/release/cpp.obj Makefile
+build/cachedb/cachedb.exe: cachedb.c
+	@-mkdir -p build/cachedb
+	$(Compiler) $(Common) $(C) -DDEBUG -Fd"build/cachedb/" -Fo"build/cachedb/" -Fe"build/cachedb/"  cachedb.c build/debug/cpp.obj
+
+build/release/seeminacalc.exe: *.h *.c Makefile
 	$(Compiler) $(Common) $(CPP) $(Release) seeminacalc.c cpp.cpp
 
 EMCCFlags :=
@@ -72,4 +76,5 @@ ssefeaturetest:
 
 debug: build/debug/seeminacalc.exe
 release: build/release/seeminacalc.exe
+cachedb: build/cachedb/cachedb.exe
 .PHONY: all clean debug release

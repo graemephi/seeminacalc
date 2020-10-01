@@ -201,6 +201,7 @@ typedef enum {
     Work_Parameter = 2,
     Work_Effects = 4,
     Work_Skillsets = 8,
+    Work_Target = 16,
 } WorkType;
 
 typedef struct DoneQueue DoneQueue;
@@ -276,7 +277,7 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
         }
     }
 
-    // weak. they react to big changes at 94%, and small changes at 93%
+    // weak. they react to big changes at 93%, and small changes at 93%
     {
         assert(info->params[p].max >= info->params[p].min);
         f32 value = value = info->params[p].max;
@@ -516,6 +517,13 @@ void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, b32 initialisation,
         .skillsets.initialisation = initialisation,
         .generation = generation,
     });
+    if (sfi->target.want_msd != 0.0f) {
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_Target,
+            .generation = generation,
+        });
+    }
 }
 
 void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
@@ -646,6 +654,11 @@ i32 calc_thread(void *userdata)
                     ssr = calc_go(&calc, ps, work.sfi->notes, WifeXs[work.x_index]);
                     now = stm_now();
                 } break;
+                case Work_Target: {
+                    then = stm_now();
+                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                    now = stm_now();
+                } break;
                 default: assert_unreachable();
             }
 
@@ -700,6 +713,7 @@ void finish_work()
 {
     push_allocator(scratch);
     FnGraph **updated_fngs = 0;
+    b32 targets_updated = false;
 
     DoneWork done = {0};
     while (get_done_work(&done)) {
@@ -750,6 +764,12 @@ void finish_work()
                     assert(done.work.x_index == Wife965Index);
                     sfi->max_rating = done.ssr.overall;
                 }
+                continue;
+            } break;
+            case Work_Target: {
+                targets_updated = true;
+                sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
+                sfi->target.delta = sfi->target.got_msd - sfi->target.want_msd;
                 continue;
             } break;
             default: assert_unreachable();
@@ -877,6 +897,26 @@ void finish_work()
             fng->relative_min = (rel_min_y == 100.f) ? 0.f : rel_min_y;
             fng->max = (max_y == 0.f) ? 40.f : max_y;
             fng->initialised = true;
+        }
+    }
+
+    if (targets_updated) {
+        f32 delta_sum[NumSkillsets] = {0};
+        i32 targets[NumSkillsets] = {0};
+        for (isize i = 0; i < buf_len(state.files); i++) {
+            if (state.files[i].target.got_msd != 0.0f) {
+                // In principle, the target skillset could be 0 (overall), but we use the first index
+                // for the error over all skillsets
+                assert(state.files[i].target.skillset != 0);
+                assert(state.files[i].target.skillset < NumSkillsets);
+                delta_sum[0] += state.files[i].target.delta;
+                targets[0]++;
+                delta_sum[state.files[i].target.skillset] += state.files[i].target.delta;
+                targets[state.files[i].target.skillset]++;
+            }
+        }
+        for (isize i = 0; i < NumSkillsets; i++) {
+            state.average_target_delta.E[i] = delta_sum[i] / (f32)targets[i];
         }
     }
 

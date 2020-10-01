@@ -20,7 +20,7 @@
 #undef min
 #undef max
 
-#if !defined(NDEBUG)
+#if defined(DEBUG)
 // force_inline is a debugging aid mostly
 // So force msvc to emit em
 #define force_inline __forceinline extern
@@ -200,36 +200,6 @@ i32 buffer_printf(Buffer *buf, char *fmt, ...)
 Buffer alloc_buffer(isize size)
 {
     return (Buffer) { alloc(u8, size), 0, size };
-}
-
-// This is for development stuff and so doesn't need to handle errors properly!!
-Buffer read_file(const char *path)
-{
-#ifdef _MSC_VER
-    FILE *f;
-    fopen_s(&f, path, "rb");
-#else
-    FILE *f = fopen(path, "rb");
-#endif
-    assert(f);
-
-    fseek(f, 0, SEEK_END);
-    long filesize = ftell(f);
-    rewind(f);
-
-    Buffer result = {
-        alloc(u8, filesize + 1),
-        filesize + 1,
-        filesize + 1
-    };
-
-    usize read = fread(result.buf, 1, filesize, f);
-
-    fclose(f);
-
-    result.buf[read] = 0;
-
-    return result;
 }
 
 typedef struct Buf
@@ -464,4 +434,47 @@ f32 rngf(void)
 {
     u32 a = rng() & ((1 << 23) - 1);
     return (f32)a / (f32)(1 << 23);
+}
+
+// This is for development stuff and so doesn't need to handle errors properly!!
+Buffer read_file(const char *path)
+{
+#ifdef _MSC_VER
+    FILE *f;
+    fopen_s(&f, path, "rb");
+#else
+    FILE *f = fopen(path, "rb");
+#endif
+    assert(f);
+
+    fseek(f, 0, SEEK_END);
+    long filesize = ftell(f);
+    rewind(f);
+
+    Buffer result = {
+        alloc(u8, filesize + 1),
+        filesize + 1,
+        filesize + 1
+    };
+
+    usize read = fread(result.buf, 1, filesize, f);
+
+    fclose(f);
+
+    result.buf[read] = 0;
+
+    return result;
+}
+
+void write_file(const char *path, u8 *buf)
+{
+#ifdef _MSC_VER
+    FILE *f;
+    fopen_s(&f, path, "wb");
+#else
+    FILE *f = fopen(path, "wb");
+#endif
+    assert(f);
+    fwrite(buf, 1, buf_len(buf), f);
+    fclose(f);
 }
