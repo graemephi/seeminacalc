@@ -413,6 +413,11 @@ i32 add_target_files()
         return -1;
     }
 
+    push_allocator(scratch);
+    NoteInfo *ni = 0;
+    buf_reserve(ni, 40000);
+    pop_allocator();
+
     for (isize i = 0; i < array_length(TargetFiles); i++) {
         push_allocator(scratch);
         TargetFile *target = &TargetFiles[i];
@@ -436,8 +441,10 @@ i32 add_target_files()
             }
         }
 
-        char *ni = target->note_data.buf;
-        isize ni_len = target->note_data.len;
+        buf_clear(ni);
+        for (isize k = 0; k < target->note_data_len; k++) {
+            buf_push(ni, (NoteInfo) { .notes = target->note_data_notes[k], .rowTime = target->note_data_times[k] });
+        }
 
         SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
             .title = copy_string(title),
@@ -447,8 +454,8 @@ i32 add_target_files()
             .target.want_msd = target->target,
             .target.rate = target->rate,
             .target.skillset = target->skillset,
-            .notes_len = (i32)ni_len,
-            .notes = frobble_serialized_note_data(ni, ni_len),
+            .notes_len = (i32)buf_len(ni),
+            .notes = frobble_note_data(ni, buf_len(ni)),
             .selected_skillsets[0] = true,
         });
 

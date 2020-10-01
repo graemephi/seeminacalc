@@ -284,12 +284,25 @@ int main(int argc, char **argv)
     for (isize i = 0; i < array_length(TestFiles); i++) {
         DBFile dbf = db_get_file(TestFiles[i].key);
         if (dbf.ok) {
-            buf_printf(gen, "u8 TargetFileData_%zd[] = { ", i);
-            for (isize byte_index = 0; byte_index < dbf.note_data.len; byte_index++) {
-                if ((byte_index & 31) == 0) {
+            NoteInfo *nd = (NoteInfo *)dbf.note_data.buf;
+            isize nd_len = dbf.note_data.len / sizeof(NoteInfo);
+
+            buf_printf(gen, "i32 TargetFileData_%zd_Notes[] = { ", i);
+            for (isize index = 0; index < nd_len; index++) {
+                if ((index & 31) == 0) {
                     buf_printf(gen, "\n    ");
                 }
-                buf_printf(gen, "0x%.2x,", dbf.note_data.buf[byte_index]);
+                buf_printf(gen, "%2d,", nd[index].notes);
+            }
+            buf_pop(gen);
+            buf_printf(gen, "\n};\n\n");
+
+            buf_printf(gen, "f32 TargetFileData_%zd_RowTime[] = { ", i);
+            for (isize index = 0; index < nd_len; index++) {
+                if ((index & 7) == 0) {
+                    buf_printf(gen, "\n    ");
+                }
+                buf_printf(gen, "%a,", nd[index].rowTime);
             }
             buf_pop(gen);
             buf_printf(gen, "\n};\n\n");
@@ -317,8 +330,9 @@ int main(int argc, char **argv)
             buf_printf(gen, "        .skillset = %d,\n", TestFiles[i].skillset);
             buf_printf(gen, "        .rate = %af,\n", TestFiles[i].rate);
             buf_printf(gen, "        .target = %af,\n", TestFiles[i].target);
-            buf_printf(gen, "        .note_data.buf = TargetFileData_%zd,\n", i);
-            buf_printf(gen, "        .note_data.len = sizeof(TargetFileData_%zd)\n", i);
+            buf_printf(gen, "        .note_data_len = array_length(TargetFileData_%zd_Notes),\n", i);
+            buf_printf(gen, "        .note_data_notes = TargetFileData_%zd_Notes,\n", i);
+            buf_printf(gen, "        .note_data_times = TargetFileData_%zd_RowTime\n", i);
             buf_printf(gen, "    },\n");
         }
     }
@@ -338,7 +352,9 @@ typedef struct TargetFile
     i32 skillset;
     f32 rate;
     f32 target;
-    Buffer note_data;
+    isize note_data_len;
+    u32 *note_data_notes;
+    f32 *note_data_times;
 } TargetFile;
 
 #include "cachedb.gen.c"
