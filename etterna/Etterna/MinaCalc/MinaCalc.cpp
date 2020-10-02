@@ -460,7 +460,7 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 		return true;
 
 	// ulbu calculates everything needed for the block below (mostly pmods)
-	TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(
+	thread_local TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(
 	  *this);
 
 	// Stupud hack
