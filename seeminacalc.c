@@ -816,7 +816,7 @@ void frame(void)
     }
     igEnd();
 
-    ParamSliderChange changed = {0};
+    ParamSliderChange changed_param = {0};
     b32 show_parameter_names = state.last_frame.show_parameter_names;
 
     f32 left_width = show_parameter_names ? 450.0f : 302.0f;
@@ -871,7 +871,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.strong == 0 || (active->effects.strong[mp] & effect_mask) != 0) {
-                                param_slider_widget(mp, show_parameter_names, &changed);
+                                param_slider_widget(mp, show_parameter_names, &changed_param);
                             }
                         }
                         igTreePop();
@@ -885,7 +885,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.weak == 0 || (active->effects.weak[mp] & effect_mask) != 0) {
-                                param_slider_widget(mp, show_parameter_names, &changed);
+                                param_slider_widget(mp, show_parameter_names, &changed_param);
                             }
                         }
                         igTreePop();
@@ -898,7 +898,7 @@ void frame(void)
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
-                            param_slider_widget(mp, show_parameter_names, &changed);
+                            param_slider_widget(mp, show_parameter_names, &changed_param);
                         }
                         igTreePop();
                     }
@@ -911,7 +911,7 @@ void frame(void)
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
                             i32 mp = state.info.mods[i].index + j;
                             if (active->effects.weak && (active->effects.weak[mp] & effect_mask) == 0) {
-                                param_slider_widget(mp, show_parameter_names, &changed);
+                                param_slider_widget(mp, show_parameter_names, &changed_param);
                             }
                         }
                         igTreePop();
@@ -924,7 +924,7 @@ void frame(void)
     }
     igEnd();
 
-    if (changed.type == ParamSlider_ValueChanged) {
+    if (changed_param.type == ParamSlider_ValueChanged) {
         state.generation++;
     }
 
@@ -993,7 +993,7 @@ void frame(void)
                     if (fng->initialised && !fng->zoomable_once) {
                         fng->zoomable_once = true;
                     }
-                    if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
+                    if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
                         calculate_parameter_graph_force(&state.high_prio_work, sfi, fng, state.generation);
                         zoomable = ImGuiCond_Always;
                     }
@@ -1035,7 +1035,7 @@ void frame(void)
             num_open_windows++;
             for (isize fungi = buf_len(state.target.graphs) - 1; fungi >= 0; fungi--) {
                 FnGraph *fng = &state.graphs[state.target.graphs[fungi]];
-                if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
+                if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
                     calculate_parameter_loss_graph_force(&state.low_prio_work, state.files, fng, state.generation);
                 }
 
@@ -1148,18 +1148,18 @@ void frame(void)
         calculate_file_graphs(&state.high_prio_work, state.active, state.generation);
     }
 
-    if (changed.type) {
-        switch (changed.type) {
+    if (changed_param.type) {
+        switch (changed_param.type) {
             case ParamSlider_GraphToggled: {
-                if (state.parameter_graphs_enabled[changed.param]) {
-                    buf_push(state.parameter_graph_order, changed.param);
+                if (state.parameter_graphs_enabled[changed_param.param]) {
+                    buf_push(state.parameter_graph_order, changed_param.param);
                     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                        buf_push(sfi->graphs, make_parameter_graph(changed.param));
+                        buf_push(sfi->graphs, make_parameter_graph(changed_param.param));
                     }
-                    buf_push(state.target.graphs, make_parameter_graph(changed.param));
+                    buf_push(state.target.graphs, make_parameter_graph(changed_param.param));
                 } else {
                     for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
-                        if (state.parameter_graph_order[i] == changed.param) {
+                        if (state.parameter_graph_order[i] == changed_param.param) {
                             buf_remove_sorted_index(state.parameter_graph_order, i);
                             break;
                         }
@@ -1167,7 +1167,7 @@ void frame(void)
 
                     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                         for (isize i = 0; i != buf_len(sfi->graphs); i++) {
-                            if (state.graphs[sfi->graphs[i]].param == changed.param) {
+                            if (state.graphs[sfi->graphs[i]].param == changed_param.param) {
                                 free_graph(sfi->graphs[i]);
                                 buf_remove_sorted_index(sfi->graphs, i);
                                 break;
@@ -1177,7 +1177,7 @@ void frame(void)
 
                     for (isize fungi = 0; fungi < buf_len(state.target.graphs); fungi++) {
                         FnGraph *fng = &state.graphs[state.target.graphs[fungi]];
-                        if (fng->param == changed.param) {
+                        if (fng->param == changed_param.param) {
                             free_graph(state.target.graphs[fungi]);
                             buf_remove_sorted_index(state.target.graphs, fungi);
                             break;
