@@ -338,7 +338,7 @@ typedef struct WorkQueue
     alignas(64) usize read;
     alignas(64) usize write;
     CalcWork entries[WorkQueueSize];
-    int lock_id;
+    Lock *lock;
 } WorkQueue;
 
 typedef struct DoneQueue
@@ -633,7 +633,7 @@ b32 get_work(CalcThread *ct, WorkQueue *q, CalcWork *out)
         return false;
     }
 
-    lock(q->lock_id);
+    lock(q->lock);
 
     usize read = q->read;
     usize write = q->write;
@@ -656,7 +656,7 @@ b32 get_work(CalcThread *ct, WorkQueue *q, CalcWork *out)
         q->read = r;
     }
 
-    unlock(q->lock_id);
+    unlock(q->lock);
 
     ct->debug_counters.skipped += r - read;
     return ok;

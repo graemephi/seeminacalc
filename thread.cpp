@@ -6,8 +6,6 @@
 #include "thread.h"
 
 static std::vector<std::thread> threads;
-static std::vector<std::mutex> muts(3);
-static int mut_index = 0;
 static std::mutex m;
 static std::condition_variable c;
 
@@ -41,22 +39,17 @@ void thread_notify()
     c.notify_all();
 }
 
-int make_lock()
+Lock *make_lock()
 {
-    if (mut_index < muts.size()) {
-        return ++mut_index;
-    }
-
-    assert_unreachable();
-    return 0;
+    return new std::mutex;
 }
 
-void lock(int lock_id)
+void lock(Lock *lock)
 {
-    muts[lock_id - 1].lock();
+    lock->lock();
 }
 
-void unlock(int lock_id)
+void unlock(Lock *lock)
 {
-    muts[lock_id - 1].unlock();
+    lock->unlock();
 }

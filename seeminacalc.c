@@ -682,10 +682,10 @@ void init(void)
     // todo: use handles instead
     buf_reserve(state.files, 1024);
 
-    high_prio_work_queue.lock_id = make_lock();
-    low_prio_work_queue.lock_id = make_lock();
+    high_prio_work_queue.lock = make_lock();
+    low_prio_work_queue.lock = make_lock();
 
-    i32 n_threads = got_any_cores() - 1;
+    isize n_threads = maxs(1, got_any_cores() - 1);
     for (isize i = 0; i < n_threads; i++) {
         CalcThread *ct = buf_push(state.threads, (CalcThread) {
             .info = &state.info,
