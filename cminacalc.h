@@ -108,6 +108,7 @@ CalcInfo calc_info(void);
 SeeCalc calc_init(CalcInfo *info);
 SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal);
 SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, int param, float value);
+SkillsetRatings calc_go_with_rate_and_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, float rate, int param, float value);
 
 void nddump(NoteData *nd, NoteData *nd2);
 

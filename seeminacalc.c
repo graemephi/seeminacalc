@@ -109,6 +109,7 @@ typedef struct SimFileInfo
     i32 *graphs;
 
     struct {
+        i32 index;
         f32 want_msd;
         f32 rate;
         i32 skillset;
@@ -159,6 +160,12 @@ typedef struct State
     FnGraph *graphs;
     i32 *free_graphs;
 
+    struct {
+        i32 *graphs;
+        f32 msd_mean;
+        f32 msd_sd;
+    } target;
+
     u32 skillset_colors[NumSkillsets];
     u32 skillset_colors_selectable[NumSkillsets];
 
@@ -171,14 +178,13 @@ typedef struct State
         f32 right_width;
     } last_frame;
 
-    bool debug_window;
+    b8 debug_window;
+    b8 loss_window;
 } State;
 static State state = {0};
 
+#include "cachedb.gen.c"
 #include "graphs.c"
-
-#define SEEMINACALC
-#include "cachedb.c"
 
 #pragma float_control(precise, on, push)
 #include "sm.c"
@@ -191,6 +197,11 @@ static bool BeginPlotDefaults(const char* title_id, const char* x_label, const c
 {
     return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
 }
+static bool BeginPlotDefaultsFullWidth(const char* title_id, const char* x_label, const char* y_label)
+{
+    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
+}
+
 
 static ImVec4 GetColormapColor(int index)
 {
@@ -418,6 +429,9 @@ i32 add_target_files()
     buf_reserve(ni, 40000);
     pop_allocator();
 
+    f32 target_m = TargetFiles[0].target;
+    f32 target_s = 0.0f;
+
     for (isize i = 0; i < array_length(TargetFiles); i++) {
         push_allocator(scratch);
         TargetFile *target = &TargetFiles[i];
@@ -451,6 +465,7 @@ i32 add_target_files()
             .diff = diff,
             .chartkey = copy_string(ck),
             .id = copy_string(id),
+            .target.index = (i32)i,
             .target.want_msd = target->target,
             .target.rate = target->rate,
             .target.skillset = target->skillset,
@@ -466,10 +481,23 @@ i32 add_target_files()
 
         calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
 
+        if (i > 0) {
+            f32 old_m = target_m;
+            f32 old_s = target_s;
+            target_m = old_m + (target->target - old_m) / (i + 1);
+            target_s = old_s + (target->target - old_m)*(target->target - target_m);
+        }
+
         printf("Added %s\n", id.buf);
     }
 
+    f32 target_var = target_s / (array_length(TargetFiles) - 1);
+    state.target.msd_mean = target_m;
+    state.target.msd_sd = sqrtf(target_var);
+
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
+
+    state.loss_window = true;
 
     return 0;
 }
@@ -999,8 +1027,38 @@ void frame(void)
         }
     }
 
-    if (buf_len(state.files) == 0) {
+    // copy n' pasted from parameter graph above
+    if (state.loss_window) {
+        igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
+        igSetNextWindowSize(V2(centre_width, ds.y), ImGuiWindowFlags_NoResize);
+        if (igBegin("Loss", &state.loss_window, 0)) {
+            num_open_windows++;
+            for (isize fungi = buf_len(state.target.graphs) - 1; fungi >= 0; fungi--) {
+                FnGraph *fng = &state.graphs[state.target.graphs[fungi]];
+                if (fng->param == changed.param && (changed.type == ParamSlider_LowerBoundChanged || changed.type == ParamSlider_UpperBoundChanged)) {
+                    calculate_parameter_loss_graph_force(&state.low_prio_work, state.files, fng, state.generation);
+                }
 
+                i32 mp = fng->param;
+                ParamInfo *p = &state.info.params[mp];
+                u8 full_name[64] = {0};
+                snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
+                igPushIDStr(full_name);
+                ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+                if (BeginPlotDefaultsFullWidth("##Loss", full_name, "Loss")) {
+                    calculate_parameter_loss_graph(&state.low_prio_work, state.files, fng, state.generation);
+                    for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                        skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
+                    }
+                    ipEndPlot();
+                }
+                igPopID();
+            }
+        }
+        igEnd();
+    }
+
+    if (buf_len(state.files) == 0) {
         igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f - 40.f), 0, V2(0.5f, 1.0f));
         igBegin("MinaButan", 0, ImGuiWindowFlags_NoDecoration);
         if (igButton("Add Mina's CalcTestList.xml", V2Zero)) {
@@ -1098,6 +1156,7 @@ void frame(void)
                     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                         buf_push(sfi->graphs, make_parameter_graph(changed.param));
                     }
+                    buf_push(state.target.graphs, make_parameter_graph(changed.param));
                 } else {
                     for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
                         if (state.parameter_graph_order[i] == changed.param) {
@@ -1113,6 +1172,15 @@ void frame(void)
                                 buf_remove_sorted_index(sfi->graphs, i);
                                 break;
                             }
+                        }
+                    }
+
+                    for (isize fungi = 0; fungi < buf_len(state.target.graphs); fungi++) {
+                        FnGraph *fng = &state.graphs[state.target.graphs[fungi]];
+                        if (fng->param == changed.param) {
+                            free_graph(state.target.graphs[fungi]);
+                            buf_remove_sorted_index(state.target.graphs, fungi);
+                            break;
                         }
                     }
                 }

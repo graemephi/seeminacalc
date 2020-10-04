@@ -40,12 +40,12 @@ T clamp(T t, T a, T b)
 #include "common.h"
 #include "cminacalc.h"
 
-static f32 absolute_value(f32 a)
+static float absolute_value(float a)
 {
     return (a >= 0) ? a : -a;
 }
 
-static f32 clamp_low(f32 a, f32 t)
+static float clamp_low(float a, float t)
 {
     return (a > t) ? a : t;
 }
@@ -102,8 +102,8 @@ void free_note_data(NoteData *note_data)
     delete note_data;
 }
 
-static const f32 BigNArbitrary = 100.5438f;
-static f32 make_test_value(f32 default_value)
+static const float BigNArbitrary = 100.5438f;
+static float make_test_value(float default_value)
 {
     if (default_value == 0.0f) {
         return BigNArbitrary;
@@ -144,11 +144,11 @@ CalcInfo calc_info()
         &shalhoub._tt2._params,
     };
 
-    i32 last_param_start_index = 0;
-    i32 num_params = 0;
+    int last_param_start_index = 0;
+    int num_params = 0;
     for (isize i = 0; i < NumMods; i++) {
         mod_info[i].name = ModNames[i];
-        mod_info[i].num_params = (i32)params[i]->size();
+        mod_info[i].num_params = (int)params[i]->size();
         mod_info[i].index = num_params;
         last_param_start_index = num_params;
         num_params += mod_info[i].num_params;
@@ -157,13 +157,13 @@ CalcInfo calc_info()
     ParamInfo *param_info = (ParamInfo *)calloc(num_params, sizeof(ParamInfo));
     ParamInfo *param_info_cursor = param_info;
 
-    std::vector<f32 *> param_pointers;
+    std::vector<float *> param_pointers;
     param_pointers.reserve(num_params);
 
     for (isize i = 0; i < NumMods; i++) {
         for (const auto& p : *params[i]) {
             param_info_cursor->name = p.first.c_str();
-            param_info_cursor->mod = (i32)i;
+            param_info_cursor->mod = (int)i;
             param_info_cursor->default_value = *p.second;
             param_info_cursor++;
 
@@ -185,11 +185,11 @@ CalcInfo calc_info()
             param_info[i].min = 0;
             param_info[i].max = max_moving_window_size - 1;
         } else {
-            f32 test_value = make_test_value(param_info[i].default_value);
+            float test_value = make_test_value(param_info[i].default_value);
             if (test_value != *param_pointers[i]) {
                 param_info[i].max = *param_pointers[i];
             } else {
-                f32 a = absolute_value(param_info[i].default_value);
+                float a = absolute_value(param_info[i].default_value);
                 if (a < 0.5f) {
                     param_info[i].max = 1.0f;
                 } else {
@@ -209,12 +209,12 @@ CalcInfo calc_info()
 
     for (isize i = 0; i < num_params; i++) {
         if (param_info[i].integer == false) {
-            f32 test_value = -1.0f * make_test_value(param_info[i].default_value);
+            float test_value = -1.0f * make_test_value(param_info[i].default_value);
             if (test_value != *param_pointers[i]) {
                 param_info[i].min = *param_pointers[i];
             } else {
                 // Try to guess parameters that make sense to go below zero
-                f32 a = absolute_value(param_info[i].default_value);
+                float a = absolute_value(param_info[i].default_value);
                 if (a < 0.5f) {
                     param_info[i].min = -1.0f;
                 } else {
@@ -228,9 +228,9 @@ CalcInfo calc_info()
     param_info[0].max = 3.0;
 
     ParamSet defaults = {};
-    defaults.params = (f32 *)calloc(num_params, sizeof(f32));
-    defaults.min = (f32 *)calloc(num_params, sizeof(f32));
-    defaults.max = (f32 *)calloc(num_params, sizeof(f32));
+    defaults.params = (float *)calloc(num_params, sizeof(float));
+    defaults.min = (float *)calloc(num_params, sizeof(float));
+    defaults.max = (float *)calloc(num_params, sizeof(float));
     defaults.num_params = num_params;
     for (size_t i = 0; i < num_params; i++) {
         defaults.params[i] = param_info[i].default_value;
@@ -248,11 +248,25 @@ CalcInfo calc_info()
     return result;
 }
 
+auto
+CMinaCalc_MinaSDCalc(const std::vector<NoteInfo>& note_info,
+		   const float musicrate,
+		   const float goal,
+		   Calc* calc) -> std::vector<float>
+{
+	if (note_info.size() <= 1) {
+		return dimples_the_all_zero_output;
+	}
+	calc->ssr = (goal != 0.93f);
+	calc->debugmode = false;
+    return calc->CalcMain(note_info, musicrate, min(goal, ssr_goal_cap));
+}
+
 SeeCalc calc_init(CalcInfo *info)
 {
     SeeCalc result = {};
     result.handle = new Calc();
-    result.handle->mod_params = (f32 *)calloc(info->num_params, sizeof(f32));
+    result.handle->mod_params = (float *)calloc(info->num_params, sizeof(float));
     for (size_t i = 0; i < info->num_params; i++) {
         result.handle->mod_params[i] = info->params[i].default_value;
     }
@@ -263,19 +277,31 @@ SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, fl
 {
     SkillsetRatings result = {};
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
-    vector<float> ratings = MinaSDCalc(note_data->ref, clamp_low(1e-5f, params->params[0]), goal, calc->handle);
+    vector<float> ratings = CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, params->params[0]), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
     }
     return result;
 }
 
-SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, i32 param, f32 value)
+SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, int param, float value)
 {
     SkillsetRatings result = {};
     memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
     calc->handle->mod_params[param] = value;
-    vector<float> ratings = MinaSDCalc(note_data->ref, clamp_low(1e-5f, param == 0 ? value : params->params[0]), goal, calc->handle);
+    vector<float> ratings = CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, param == 0 ? value : params->params[0]), goal, calc->handle);
+    for (int i = 0; i < NumSkillsets; i++) {
+        result.E[i] = ratings[i];
+    }
+    return result;
+}
+
+SkillsetRatings calc_go_with_rate_and_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, float rate, int param, float value)
+{
+    SkillsetRatings result = {};
+    memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
+    calc->handle->mod_params[param] = value;
+    vector<float> ratings = CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, rate), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
     }
@@ -284,7 +310,7 @@ SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *no
 
 void nddump(NoteData *nd, NoteData *nd2)
 {
-    for (i32 i = 0; i < nd->ref.size(); i++) {
+    for (int i = 0; i < nd->ref.size(); i++) {
         float f = nd->ref.at(i).rowTime - nd2->ref.at(i).rowTime;
         if (fabs(f) > 1e-6) {
             printf("f %d %.7f %.7f %.7f\n", i, f,  nd->ref.at(i).rowTime, nd2->ref.at(i).rowTime);
