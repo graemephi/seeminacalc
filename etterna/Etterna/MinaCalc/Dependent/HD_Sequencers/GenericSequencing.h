@@ -15,8 +15,8 @@
  * other option is "cc_ms", for cross column ms */
 
 // bpm flux float precision etc
-constexpr float anchor_spacing_buffer_ms = 10.F;
-constexpr float anchor_speed_increase_cutoff_factor = 2.34F;
+thread_local float anchor_spacing_buffer_ms = 10.F;
+thread_local float anchor_speed_increase_cutoff_factor = 2.34F;
 static const int len_cap = 5;
 
 enum anch_status

@@ -52,6 +52,11 @@ static float clamp_low(float a, float t)
 
 const char *ModNames[] = {
     "Rate",
+    "MinaCalc",
+    "PatternModHelpers",
+    "SequencingHelpers",
+    "WideRangeJumptrill",
+    "GenericSequencing",
     "StreamMod",
     "JSMod",
     "HSMod",
@@ -85,7 +90,8 @@ struct NoteData
 };
 
 static float RateParam = 1.0f;
-static const std::vector<std::pair<std::string,float*>> RateMod{{ "rate", (float *)&RateParam }};
+static const ParamJunk RateMod{{ "rate", (float *)&RateParam }};
+
 
 NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 {
@@ -122,6 +128,11 @@ CalcInfo calc_info()
 
     const std::vector<std::pair<std::string,float*>> *params[NumMods] = {
         &RateMod,
+        &MinaCalc,
+        &PatternModHelpers,
+        &SequencingHelpers,
+        &WideRangeJumptrillMod,
+        &GenericSequencing,
         &shalhoub._s._params,
         &shalhoub._js._params,
         &shalhoub._hs._params,
@@ -217,8 +228,10 @@ CalcInfo calc_info()
                 float a = absolute_value(param_info[i].default_value);
                 if (a < 0.5f) {
                     param_info[i].min = -1.0f;
-                } else {
+                } else if (a <= 2.f) {
                     param_info[i].min = 0.0f;
+                } else {
+                    param_info[i].min = 0.1f;
                 }
             }
         }
