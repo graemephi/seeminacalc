@@ -868,6 +868,7 @@ void frame(void)
 
             // The actual tabs
             if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
+                tooltip("These will basically always change the MSD of the active file's selected skillsets");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
@@ -880,8 +881,9 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            } tooltip("These will basically always change the MSD of the active file's selected skillsets");
+            }
             if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
+                tooltip("More, plus some params that need more shoving");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
@@ -894,8 +896,9 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            } tooltip("More, plus some params that need more shoving");
+            }
             if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
+                tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
@@ -906,8 +909,9 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            } tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
+            }
             if (igBeginTabItem("Dead", 0, ImGuiTabItemFlags_None)) {
+                tooltip("These don't do anything to the active file's selected skillsets");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
                     if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
                         for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
@@ -920,7 +924,7 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            } tooltip("These don't do anything to the active file's selected skillsets");
+            }
         }
         igEndTabBar();
     }
