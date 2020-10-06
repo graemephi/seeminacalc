@@ -116,11 +116,11 @@ struct CJMod
 		// this other places ?
 		if (mitvi.basically_vibro) {
 			if (mitvi.num_var == 1) {
-				pmod *= 0.5F * vibro_flag;
+				pmod *= P(0.5F) * vibro_flag;
 			} else if (mitvi.num_var == 2) {
-				pmod *= 0.9F * vibro_flag;
+				pmod *= P(0.9F) * vibro_flag;
 			} else if (mitvi.num_var == 3) {
-				pmod *= 0.95F * vibro_flag;
+				pmod *= P(0.95F) * vibro_flag;
 			}
 		}
 

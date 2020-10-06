@@ -53,11 +53,11 @@ struct FlamJamMod
 		//}
 
 		// water down single flams
-		pmod = 1.F;
+		pmod = P(1.F);
 		for (auto& mp : fj.mod_parts) {
 			pmod += mp;
 		}
-		pmod /= 5.F;
+		pmod /= P(5.F);
 		pmod = std::clamp(base + pmod, min_mod, max_mod);
 
 		// reset flags n stuff

@@ -144,9 +144,9 @@ struct Anchor_Sequencing
 			return _len_cap_ms;
 		}
 
-		static const auto avg_ms_mult = 1.075F;
-		static const auto anchor_time_buffer_ms = 25.F;
-		static const auto min_ms = 82.5F;
+		const auto avg_ms_mult = P(1.075F);
+		const auto anchor_time_buffer_ms = P(25.F);
+		const auto min_ms = P(82.5F);
 
 		// get total ms
 		const auto total_ms = ms_from(_last, _start);
@@ -167,8 +167,9 @@ struct Anchor_Sequencing
 
 		// BAD TEMP HACK LUL
 		if (_len == 2) {
-			ms *= 1.1F;
-			ms = ms < 155.F ? 155.F : ms;
+			ms *= P(1.1F);
+			float cap = P(155.F);
+			ms = ms < cap ? cap : ms;
 		}
 
 		ms = ms < min_ms ? min_ms : ms;

@@ -88,7 +88,7 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		// overall and stam will be left as 0.f by this loop
 		for (auto i = 0; i < NUM_Skillset; ++i) {
 			mcbloop[i] =
-			  Chisel(0.1F, 10.24F, score_goal, static_cast<Skillset>(i), false);
+			  Chisel(P(0.1F), P(10.24F), score_goal, static_cast<Skillset>(i), false);
 		}
 
 		// stam is based on which calc produced the highest output without it
@@ -104,9 +104,9 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		 * average and results in exactly the same value for overall for ~99% of
 		 * files */
 		for (auto i = 0; i < NUM_Skillset; ++i) {
-			if (mcbloop[i] > base * 0.9f) {
-				mcbloop[i] = Chisel(mcbloop[i] * 0.9F,
-									0.32F,
+			if (mcbloop[i] > base * P(0.9f)) {
+				mcbloop[i] = Chisel(mcbloop[i] * P(0.9F),
+									P(0.32F),
 									score_goal,
 									static_cast<Skillset>(i),
 									true);
@@ -137,7 +137,7 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		auto poodle_in_a_porta_potty = mcbloop[highest_base_skillset];
 
 		if (highest_stam_adjusted_skillset == Skill_JackSpeed) {
-			poodle_in_a_porta_potty *= 0.8F;
+			poodle_in_a_porta_potty *= P(0.8F);
 		}
 
 		/* the bigger this number the more stamina has to influence a file
@@ -149,10 +149,10 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		 * and something that benefits 15% will max out the possible stam
 		 * rating, which is (currently) a 1.07 multiplier to the base maybe
 		 * using a multiplier and not a difference would be better? */
-		static const auto stam_curve_shift = 0.015F;
+		static const auto stam_curve_shift = P(0.015F);
 		// ends up being a multiplier between ~0.8 and ~1
 		auto mcfroggerbopper =
-		  pow((poodle_in_a_porta_potty / base) - stam_curve_shift, 2.5F);
+		  pow((poodle_in_a_porta_potty / base) - stam_curve_shift, P(2.5F));
 
 		/* we wanted to shift the curve down a lot before pow'ing but it was too
 		 * much to balance out, so we need to give some back, this is roughly
@@ -160,7 +160,7 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		 * don't want to push up the high end stuff anymore so just add to let
 		 * stuff down the curve catch up a little remember we're operating on a
 		 * multiplier */
-		mcfroggerbopper = std::clamp(mcfroggerbopper, 0.8F, 1.08F);
+		mcfroggerbopper = std::clamp(mcfroggerbopper, P(0.8F), P(1.08F));
 		mcbloop[Skill_Stamina] = poodle_in_a_porta_potty * mcfroggerbopper *
 								 basescalers[Skill_Stamina];
 
@@ -236,21 +236,21 @@ StamAdjust(const float x,
 	 * stamina rating with so todo on that */
 
 	// Stamina Model params
-	static const auto stam_ceil = 1.075234F; // stamina multiplier max
-	static const auto stam_mag = 243.F;		 // multiplier generation scalar
+	auto stam_ceil = P(1.075234F); // stamina multiplier max
+	auto stam_mag = P(243.F);		 // multiplier generation scalar
 	// how fast the floor rises (it's lava)
-	static const auto stam_fscale = 500.F;
+	auto stam_fscale = P(500.F);
 	// proportion of player difficulty at which stamina tax begins
-	static const auto stam_prop = 0.69424F;
+	auto stam_prop = P(0.69424F);
 
 	// stamina multiplier min (increases as chart advances)
-	auto stam_floor = 0.95F;
-	auto mod = 0.95F; // multiplier
+	auto stam_floor = P(0.95F);
+	auto mod = P(0.95F); // multiplier
 
 	float avs1;
 	auto avs2 = 0.F;
 	float local_ceil;
-	const auto super_stam_ceil = 1.11F;
+	auto super_stam_ceil = P(1.11F);
 
 	// use this to calculate the mod growth
 	const std::vector<float>* base_diff =
@@ -280,9 +280,10 @@ StamAdjust(const float x,
 		for (auto i = 0; i < calc.numitv; i++) {
 			avs1 = avs2;
 			avs2 = base_diff->at(i);
-			mod += ((((avs1 + avs2) / 2.F) / (stam_prop * x)) - 1.F) / stam_mag;
-			if (mod > 0.95F) {
-				stam_floor += (mod - 0.95F) / stam_fscale;
+			mod += ((((avs1 + avs2) / P(2.F)) / (stam_prop * x)) - P(1.F)) / stam_mag;
+			float cap = P(0.95f);
+			if (mod > cap) {
+				stam_floor += (mod - cap) / stam_fscale;
 			}
 			local_ceil = stam_ceil * stam_floor;
 
@@ -298,15 +299,15 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
   -> std::vector<std::pair<float, float>>
 {
 	// Jack stamina Model params (see above)
-	static const auto stam_ceil = 1.05234F;
-	static const auto stam_mag = 23.F;
-	static const auto stam_fscale = 2150.F;
-	static const auto stam_prop = 0.49424F;
-	auto stam_floor = 0.95F;
-	auto mod = 0.95F;
+	auto stam_ceil = P(1.05234F);
+	auto stam_mag = P(23.F);
+	auto stam_fscale = P(2150.F);
+	auto stam_prop = P(0.49424F);
+	auto stam_floor = P(0.95F);
+	auto mod = P(0.95F);
 
 	auto avs2 = 0.F;
-	const auto super_stam_ceil = 1.09F;
+	auto super_stam_ceil = P(1.09F);
 
 	const auto& diff = calc.jack_diff.at(hi);
 	std::vector<std::pair<float, float>> doot(diff.size());
@@ -316,9 +317,10 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
 	for (size_t i = 0; i < diff.size(); i++) {
 		const auto avs1 = avs2;
 		avs2 = diff.at(i).second;
-		mod += ((((avs1 + avs2) / 2.F) / (stam_prop * x)) - 1.F) / stam_mag;
-		if (mod > 0.95F) {
-			stam_floor += (mod - 0.95F) / stam_fscale;
+		mod += ((((avs1 + avs2) / P(2.F)) / (stam_prop * x)) - P(1.F)) / stam_mag;
+		float cap = P(0.95f);
+		if (mod > cap) {
+			stam_floor += (mod - cap) / stam_fscale;
 		}
 		const auto local_ceil = stam_ceil * stam_floor;
 
@@ -338,7 +340,7 @@ thread_local float magic_num = 16.F;
 [[nodiscard]] inline auto
 hit_the_road(const float& x, const float& y) -> float
 {
-	return std::max(static_cast<float>(magic_num * erf(0.04F * (y - x))), 0.F);
+	return std::max(static_cast<float>(magic_num * erf(P(0.04F) * (y - x))), P(0.F));
 }
 
 /* ok this is a little jank, we are calculating jack loss looping over the
@@ -361,7 +363,7 @@ jackloss(const float& x, Calc& calc, const int& hi, const bool stam) -> float
 	auto total = 0.F;
 
 	for (const auto& y : v) {
-		if (x < y.second && y.second > 0.F) {
+		if (x < y.second && y.second > P(0.F)) {
 			const auto zzerp = hit_the_road(x, y.second);
 			total += zzerp;
 		}
@@ -410,9 +412,9 @@ CalcInternal(float& gotpoints,
 	// final difficulty values to use
 	const std::vector<float>* v =
 	  &(stam ? calc.stam_adj_diff : calc.base_adj_diff.at(hi).at(ss));
-	auto powindromemordniwop = 1.7F;
+	auto powindromemordniwop = P(1.7F);
 	if (ss == Skill_Chordjack) {
-		powindromemordniwop = 1.7F;
+		powindromemordniwop = P(1.7F);
 	}
 
 	// i don't like the copypasta either but the boolchecks where
@@ -459,29 +461,29 @@ thread_local float stream_pbm = 1.01F;
 thread_local float bad_newbie_skillsets_pbm = 1.05F;
 
 using ParamJunk = std::vector<std::pair<std::string,float*>>;
-thread_local ParamJunk MinaCalc{
-    { "magic_num", &magic_num },
-    { "tech_pbm", &tech_pbm },
-    { "jack_pbm", &jack_pbm },
-    { "stream_pbm", &stream_pbm },
-    { "bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
+thread_local ParamJunk BaseScalers {
+	// Overall not included
+    { "Stream", (float *)(&basescalers[1]) },
+    { "Jumpstream", (float *)&basescalers[2] },
+    { "Handstream", (float *)&basescalers[3] },
+    { "Stamina", (float *)&basescalers[4] },
+    { "Jackspeed", (float *)&basescalers[5] },
+    { "Chordjacks", (float *)&basescalers[6] },
+    { "Technical", (float *)&basescalers[7] },
 };
 
-thread_local ParamJunk PatternModHelpers{
-    { "neutral", &neutral },
-};
-
-thread_local ParamJunk SequencingHelpers{
-    { "finalscaler", &finalscaler },
-};
-
-thread_local ParamJunk WideRangeJumptrillMod{
-    { "wrjt_cv_factor", &wrjt_cv_factor },
-};
-
-thread_local ParamJunk GenericSequencing{
-    { "anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
-    { "anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
+thread_local ParamJunk ManualConstants {
+    { "MinaCalc.magic_num", &magic_num },
+    { "MinaCalc.tech_pbm", &tech_pbm },
+    { "MinaCalc.jack_pbm", &jack_pbm },
+    { "MinaCalc.stream_pbm", &stream_pbm },
+    { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
+    { "PatternModHelpers.neutral", &neutral },
+    { "SequencingHelpers.finalscaler", &finalscaler },
+    { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
+    { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
+    { "GenericSequencing.anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
+    { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
 };
 
 auto
@@ -500,11 +502,6 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	// Stupud hack
 	float *mod_cursor = mod_params + 1;
 
-	for (const auto &p : MinaCalc) *p.second = *mod_cursor++;
-	for (const auto &p : PatternModHelpers) *p.second = *mod_cursor++;
-	for (const auto &p : SequencingHelpers) *p.second = *mod_cursor++;
-	for (const auto &p : WideRangeJumptrillMod) *p.second = *mod_cursor++;
-	for (const auto &p : GenericSequencing) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._s._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._js._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._hs._params) *p.second = *mod_cursor++;
@@ -525,6 +522,9 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
     for (const auto &p : ulbu_that_which_consumes_all._fj._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._tt._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu_that_which_consumes_all._tt2._params) *p.second = *mod_cursor++;
+	for (const auto &p : BaseScalers) *p.second = *mod_cursor++;
+	for (const auto &p : ManualConstants) *p.second = *mod_cursor++;
+	for (const auto &p : MinaCalcConstants) *p.second = *mod_cursor++;
 
 	// if debug, force params to load
 	if (debugmode)
@@ -536,7 +536,7 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 		InitAdjDiff(*this, hi);
 
 		// post pattern mod smoothing for cj
-		Smooth(base_adj_diff.at(hi).at(Skill_Chordjack), 1.F, numitv);
+		Smooth(base_adj_diff.at(hi).at(Skill_Chordjack), P(1.F), numitv);
 	}
 
 	// debug info loop
@@ -591,7 +591,7 @@ Calc::Chisel(const float player_skill,
 	}
 
 	const auto reqpoints = MaxPoints * score_goal;
-	const auto max_slap_dash_jack_cap_hack_tech_hat = MaxPoints * 0.1F;
+	const auto max_slap_dash_jack_cap_hack_tech_hat = MaxPoints * P(0.1F);
 
 	auto calc_gotpoints = [&](float curr_player_skill) -> float {
 		auto gotpoints = 0.F;
@@ -631,8 +631,8 @@ Calc::Chisel(const float player_skill,
 				if (ss == Skill_Technical) {
 					gotpoints -= fastsqrt(min(
 					  max_slap_dash_jack_cap_hack_tech_hat,
-					  jackloss(curr_player_skill * 0.75F, *this, hi, stamina) *
-						0.85F));
+					  jackloss(curr_player_skill * P(0.75F), *this, hi, stamina) *
+						P(0.85F)));
 				}
 			}
 		}
@@ -652,7 +652,7 @@ Calc::Chisel(const float player_skill,
 		gotpoints = calc_gotpoints(curr_player_skill);
 	} while (gotpoints < reqpoints);
 	curr_player_skill -= curr_resolution; // We're too high. Undo our last move.
-	curr_resolution /= 2;
+	curr_resolution /= P(2.F);
 
 	for (auto iter = 1; iter <= 7; iter++) { // Refine
 		if (curr_player_skill > max_rating) {
@@ -664,7 +664,7 @@ Calc::Chisel(const float player_skill,
 			curr_player_skill -=
 			  curr_resolution; // We're too high. Undo our last move.
 		}
-		curr_resolution /= 2.F;
+		curr_resolution /= P(2.F);
 	}
 
 	/* these are the values for msd/stam adjusted msd/pointloss the
@@ -708,7 +708,7 @@ Calc::Chisel(const float player_skill,
 		}
 	}
 
-	return curr_player_skill + 2.F * curr_resolution;
+	return curr_player_skill + P(2.F) * curr_resolution;
 }
 
 /* The new way we wil attempt to differentiate skillsets rather than using
@@ -863,14 +863,14 @@ Calc::InitAdjDiff(Calc& calc, const int& hi)
 				 * stuff, but it might be one reason why js is more problematic
 				 * than hs? */
 				case Skill_Jumpstream: {
-					*adj_diff /= max<float>(calc.doot.at(hi).at(HS).at(i), 1.F);
+					*adj_diff /= max<float>(calc.doot.at(hi).at(HS).at(i), P(1.F));
 					*adj_diff /=
-					  fastsqrt(calc.doot.at(hi).at(OHJumpMod).at(i) * 0.95F);
+					  fastsqrt(calc.doot.at(hi).at(OHJumpMod).at(i) * P(0.95F));
 
 					*adj_diff *=
-					  min(1.F,
+					  min(P(1.F),
 						  fastsqrt(calc.doot.at(hi).at(WideRangeRoll).at(i) +
-								   0.1F));
+								   P(0.1F)));
 
 					auto a = *adj_diff;
 					auto b = calc.soap.at(hi).at(NPSBase).at(i) *
@@ -893,8 +893,8 @@ Calc::InitAdjDiff(Calc& calc, const int& hi)
 					*adj_diff =
 					  calc.soap.at(hi).at(TechBase).at(i) * tp_mods.at(ss) *
 					  basescalers.at(ss) /
-					  max<float>(fastpow(calc.doot.at(hi).at(CJ).at(i), 2.F),
-								 1.F) /
+					  max<float>(fastpow(calc.doot.at(hi).at(CJ).at(i), P(2.F)),
+								 P(1.F)) /
 					  fastsqrt(calc.doot.at(hi).at(OHJumpMod).at(i));
 					break;
 				default:

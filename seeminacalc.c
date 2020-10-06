@@ -34,6 +34,8 @@
 #include "cminacalc.h"
 #include "sm.h"
 
+#include "calcconstants.h"
+
 #ifdef __EMSCRIPTEN__
 static Buffer font_data = {0};
 
@@ -926,6 +928,8 @@ void frame(void)
 
     if (changed_param.type == ParamSlider_ValueChanged) {
         state.generation++;
+        buf_clear(state.high_prio_work);
+        buf_clear(state.low_prio_work);
     }
 
     // MSD graph windows
@@ -1115,6 +1119,8 @@ void frame(void)
         igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%.2fms", time); igEndGroup();
 
         igEnd();
+
+        DUMP_CONSTANT_INFO;
     }
 
     sg_begin_default_pass(&state.pass_action, width, height);

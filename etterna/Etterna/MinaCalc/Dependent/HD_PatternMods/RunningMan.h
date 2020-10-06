@@ -171,10 +171,10 @@ struct RunningManMod
 		 * as well- this is called immediately after advance_sequencing, so
 		 * we've already determined which sequence to use as rm */
 
-		float oht_p = 1.5F - (highest_rm._rm.get_offhand_tap_prop() *
+		float oht_p = P(1.5F) - (highest_rm._rm.get_offhand_tap_prop() *
 							  offhand_tap_prop_scaler);
 
-		oht_p = std::clamp(oht_p, 0.75F, 1.0F);
+		oht_p = std::clamp(oht_p, P(0.75F), P(1.0F));
 		return highest_rm.get_difficulty() * oht_p;
 	}
 

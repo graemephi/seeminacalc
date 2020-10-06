@@ -149,7 +149,7 @@ struct WideRangeJumptrillMod
 		}
 
 		pmod = itvhi.get_taps_windowf(window) /
-			   _mw_jt.get_total_for_windowf(window) * 0.75F;
+			   _mw_jt.get_total_for_windowf(window) * P(0.75F);
 
 		pmod = std::clamp(pmod, min_mod, max_mod);
 	}

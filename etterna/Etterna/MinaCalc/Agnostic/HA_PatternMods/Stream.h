@@ -67,7 +67,6 @@ struct StreamMod
 		  static_cast<float>(static_cast<float>(itvi.total_taps) -
 							 prop_buffer) *
 		  prop_scaler;
-
 		// allow for a mini/triple jack in streams.. but not more than that
 		jack_component = std::clamp(
 		  jack_pool - mitvi.actual_jacks, jack_comp_min, jack_comp_max);
@@ -76,11 +75,11 @@ struct StreamMod
 
 		if (mitvi.basically_vibro) {
 			if (mitvi.num_var == 1) {
-				pmod *= 0.5F * vibro_flag;
+				pmod *= P(0.5F) * vibro_flag;
 			} else if (mitvi.num_var == 2) {
-				pmod *= 0.9F * vibro_flag;
+				pmod *= P(0.9F) * vibro_flag;
 			} else if (mitvi.num_var == 3) {
-				pmod *= 0.95F * vibro_flag;
+				pmod *= P(0.95F) * vibro_flag;
 			}
 		}
 

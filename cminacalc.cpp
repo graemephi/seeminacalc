@@ -32,10 +32,11 @@ T clamp(T t, T a, T b)
 }
 #endif
 
+#include "calcconstants.h"
+
 // Note on updating the calc: not quite drag-and-drop. grep for "Stupud hack"
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/MinaCalc.cpp"
-
 
 #include "common.h"
 #include "cminacalc.h"
@@ -52,11 +53,6 @@ static float clamp_low(float a, float t)
 
 const char *ModNames[] = {
     "Rate",
-    "MinaCalc",
-    "PatternModHelpers",
-    "SequencingHelpers",
-    "WideRangeJumptrill",
-    "GenericSequencing",
     "StreamMod",
     "JSMod",
     "HSMod",
@@ -77,6 +73,9 @@ const char *ModNames[] = {
     "FlamJamMod",
     "TheThingLookerFinderThing",
     "TheThingLookerFinderThing2",
+    "BaseScalers",
+    "Globals",
+    "InlineConstants",
 };
 
 enum
@@ -128,11 +127,6 @@ CalcInfo calc_info()
 
     const std::vector<std::pair<std::string,float*>> *params[NumMods] = {
         &RateMod,
-        &MinaCalc,
-        &PatternModHelpers,
-        &SequencingHelpers,
-        &WideRangeJumptrillMod,
-        &GenericSequencing,
         &shalhoub._s._params,
         &shalhoub._js._params,
         &shalhoub._hs._params,
@@ -153,15 +147,16 @@ CalcInfo calc_info()
         &shalhoub._fj._params,
         &shalhoub._tt._params,
         &shalhoub._tt2._params,
+        &BaseScalers,
+        &ManualConstants,
+        &MinaCalcConstants,
     };
 
-    int last_param_start_index = 0;
     int num_params = 0;
     for (isize i = 0; i < NumMods; i++) {
         mod_info[i].name = ModNames[i];
         mod_info[i].num_params = (int)params[i]->size();
         mod_info[i].index = num_params;
-        last_param_start_index = num_params;
         num_params += mod_info[i].num_params;
     }
 
@@ -171,11 +166,16 @@ CalcInfo calc_info()
     std::vector<float *> param_pointers;
     param_pointers.reserve(num_params);
 
+    b32 is_constant = false;
     for (isize i = 0; i < NumMods; i++) {
+        if (params[i] == &BaseScalers) {
+            is_constant = true;
+        }
         for (const auto& p : *params[i]) {
             param_info_cursor->name = p.first.c_str();
             param_info_cursor->mod = (int)i;
             param_info_cursor->default_value = *p.second;
+            param_info_cursor->constant = is_constant;
             param_info_cursor++;
 
             param_pointers.push_back(p.second);
@@ -226,7 +226,7 @@ CalcInfo calc_info()
             } else {
                 // Try to guess parameters that make sense to go below zero
                 float a = absolute_value(param_info[i].default_value);
-                if (a < 0.5f) {
+                if (a < 0.5f && param_info[i].constant == false) {
                     param_info[i].min = -1.0f;
                 } else if (a <= 2.f) {
                     param_info[i].min = 0.0f;

@@ -104,7 +104,7 @@ struct VOHTrillMod
 			hello_my_name_is_goat =
 			  (static_cast<float>(v) / itv_taps) - suppression;
 		}
-		return std::clamp(hello_my_name_is_goat, 0.1F, 1.F);
+		return std::clamp(hello_my_name_is_goat, P(0.1F), P(1.F));
 	}
 
 	void complete_seq()
@@ -125,7 +125,7 @@ struct VOHTrillMod
 
 	auto oht_timing_check(const CalcMovingWindow<float>& ms_any) -> bool
 	{
-		moving_cv = (moving_cv + ms_any.get_cv_of_window(cc_window)) / 2.F;
+		moving_cv = (moving_cv + ms_any.get_cv_of_window(cc_window)) / P(2.F);
 		return moving_cv < cv_threshhold;
 	}
 

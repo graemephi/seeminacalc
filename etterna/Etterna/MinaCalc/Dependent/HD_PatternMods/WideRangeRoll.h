@@ -114,7 +114,7 @@ struct WideRangeRollMod
 		hi_im_a_float = cv(seq_ms);
 
 		// ok we're pretty sure it's a roll don't bother with the test
-		if (hi_im_a_float < 0.12F) {
+		if (hi_im_a_float < P(0.12F)) {
 			moving_cv = (hi_im_a_float + moving_cv + hi_im_a_float) / 3.F;
 			return true;
 		}
@@ -137,7 +137,7 @@ struct WideRangeRollMod
 		hi_im_a_float = cv(idk_ms);
 
 		// ok we're pretty sure it's a roll don't bother with the test
-		if (hi_im_a_float < 0.12F) {
+		if (hi_im_a_float < P(0.12F)) {
 			moving_cv = (hi_im_a_float + moving_cv + hi_im_a_float) / 3.F;
 			return true;
 		}
@@ -148,18 +148,18 @@ struct WideRangeRollMod
 		return moving_cv < cv_threshold / scaler;
 	}
 
-	void handle_ccacc_timing_check() { zoop_the_woop(1, 2.5F, 1.25F); }
+	void handle_ccacc_timing_check() { zoop_the_woop(1, P(2.5F), P(1.25F)); }
 
 	void handle_roll_timing_check()
 	{
 		if (seq_ms[1] > seq_ms[0]) {
-			zoop_the_woop(1, 2.5F);
+			zoop_the_woop(1, P(2.5F));
 		} else {
-			seq_ms[0] /= 2.5F;
-			seq_ms[2] /= 2.5F;
-			last_passed_check = do_timing_thing(1.F);
-			seq_ms[0] *= 2.5F;
-			seq_ms[2] *= 2.5F;
+			seq_ms[0] /= P(2.5F);
+			seq_ms[2] /= P(2.5F);
+			last_passed_check = do_timing_thing(P(1.F));
+			seq_ms[0] *= P(2.5F);
+			seq_ms[2] *= P(2.5F);
 		}
 	}
 
@@ -176,26 +176,26 @@ struct WideRangeRollMod
 		// run 2 tests so we can keep a stricter cutoff
 		// need to put cv in array thingy mcboop
 		// check 1
-		idk_ms[1] /= 2.5F;
-		idk_ms[2] /= 2.5F;
+		idk_ms[1] /= P(2.5F);
+		idk_ms[2] /= P(2.5F);
 
-		do_other_timing_thing(1.25F);
+		do_other_timing_thing(P(1.25F));
 
-		idk_ms[1] *= 2.5F;
-		idk_ms[2] *= 2.5F;
+		idk_ms[1] *= P(2.5F);
+		idk_ms[2] *= P(2.5F);
 
 		if (last_passed_check) {
 			return;
 		}
 
 		// test again
-		idk_ms[1] /= 3.F;
-		idk_ms[2] /= 3.F;
+		idk_ms[1] /= P(3.F);
+		idk_ms[2] /= P(3.F);
 
-		do_other_timing_thing(1.25F);
+		do_other_timing_thing(P(1.25F));
 
-		idk_ms[1] *= 3.F;
-		idk_ms[2] *= 3.F;
+		idk_ms[1] *= P(3.F);
+		idk_ms[2] *= P(3.F);
 	}
 
 	void complete_seq()

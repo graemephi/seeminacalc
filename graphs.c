@@ -816,10 +816,7 @@ void finish_work()
                     buf_pushn(fng->deltas, NumTargetFiles * NumGraphSamples);
                 }
 
-                f32 a = (done.ssr.E[sfi->target.skillset] - sfi->target.want_msd);
-                f32 t = 1.0f;
-                f32 penalty = -(1.0f / t) * logf(-a + 6.f);
-                f32 delta = a / state.target.msd_sd + penalty;
+                f32 delta = (done.ssr.E[sfi->target.skillset] - sfi->target.want_msd) / state.target.msd_sd;
 
                 fng->deltas[done.work.x_index * NumTargetFiles + sfi->target.index] = (OptimizationDelta) {
                     .delta_squared = delta*delta,

@@ -112,7 +112,7 @@ struct OHTrillMod
 			hello_my_name_is_goat =
 			  (static_cast<float>(v) / itv_taps) - suppression;
 		}
-		return std::clamp(hello_my_name_is_goat, 0.1F, 1.F);
+		return std::clamp(hello_my_name_is_goat, P(0.1F), P(1.F));
 	}
 
 	void complete_seq()

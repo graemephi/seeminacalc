@@ -1,4 +1,5 @@
-// Utility program. Usage:
+// Utility program. This takes the big list of chartkeys somewhere below and dumps the note data into a .h file as static byte arrays.
+// Usage:
 //   Build with
 //       make cachedb
 //
@@ -7,7 +8,6 @@
 //
 // It will overwrite cachedb.gen.c. `make all` will build cachedb but _not_ run it; cachedb.gen.c is checked into the repo.
 
-#if !defined(SEEMINACALC)
 #ifdef __clang__
 // for libs only
 #pragma clang diagnostic push
@@ -365,5 +365,3 @@ int main(int argc, char **argv)
 
     write_file("cachedb.gen.c", gen);
 }
-
-#endif // !defined(SEEMINACALC)

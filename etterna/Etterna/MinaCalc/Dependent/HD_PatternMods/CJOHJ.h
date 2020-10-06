@@ -78,7 +78,7 @@ struct CJOHJumpMod
 	void set_max_seq_comp()
 	{
 		max_seq_component = max_seq_pool - (base_seq_prop * max_seq_scaler);
-		max_seq_component = max_seq_component < 0.1F ? 0.1F : max_seq_component;
+		max_seq_component = std::max(max_seq_component, P(0.1F));
 		max_seq_component = fastsqrt(max_seq_component);
 	}
 
@@ -86,7 +86,7 @@ struct CJOHJumpMod
 	void set_prop_comp()
 	{
 		prop_component = prop_pool - (base_jump_prop * prop_scaler);
-		prop_component = prop_component < 0.1F ? 0.1F : prop_component;
+		prop_component = std::max(prop_component, P(0.1F));
 		prop_component = fastsqrt(prop_component);
 	}
 
@@ -149,15 +149,15 @@ struct CJOHJumpMod
 		floatymcfloatface = static_cast<float>(max_ohjump_seq_taps);
 		base_seq_prop = floatymcfloatface / mitvhi._itvhi.get_taps_nowf();
 		set_max_seq_comp();
-		max_seq_component = std::clamp(max_seq_component, 0.1F, max_mod);
+		max_seq_component = std::clamp(max_seq_component, P(0.1F), max_mod);
 
 		base_jump_prop =
 		  itvhi.get_col_taps_nowf(col_ohjump) / itvhi.get_taps_nowf();
 		set_prop_comp();
-		prop_component = std::clamp(prop_component, 0.1F, max_mod);
+		prop_component = std::clamp(prop_component, P(0.1F), max_mod);
 
 		pmod = weighted_average(
-		  max_seq_component, prop_component, max_seq_weight, 1.F);
+		  max_seq_component, prop_component, max_seq_weight, P(1.F));
 		pmod = std::clamp(pmod, min_mod, max_mod);
 	}
 

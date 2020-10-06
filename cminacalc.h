@@ -71,6 +71,7 @@ typedef struct ParamInfo
     float min;
     float max;
     bool integer;
+    bool constant;
 } ParamInfo;
 
 typedef struct SeeCalc

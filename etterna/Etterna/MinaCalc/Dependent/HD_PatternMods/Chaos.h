@@ -50,7 +50,7 @@ struct ChaosMod
 		const float b = ms_any.get_last();
 
 		if (a == 0.F || b == 0.F || a == b) {
-			_u(1.F);
+			_u(P(1.F));
 			_wot(_u.get_mean_of_window(window));
 			return;
 		}
@@ -60,12 +60,12 @@ struct ChaosMod
 		float flop = prop - static_cast<float>(mop);
 
 		if (flop == 0.F) {
-			flop = 1.F;
-		} else if (flop >= 0.5F) {
-			flop = abs(flop - 1.F) + 1.F;
+			flop = P(1.F);
+		} else if (flop >= P(0.5F)) {
+			flop = abs(flop - P(1.F)) + P(1.F);
 
-		} else if (flop < 0.5F) {
-			flop += 1.F;
+		} else if (flop < P(0.5F)) {
+			flop += P(1.F);
 		}
 
 		_u(flop);

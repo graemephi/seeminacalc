@@ -119,7 +119,7 @@ struct JSMod
 		  std::clamp(total_prop * jumptrill_prop * jack_prop, min_mod, max_mod);
 
 		if (mitvi.dunk_it) {
-			pmod *= 0.99F;
+			pmod *= P(0.99F);
 		}
 
 		// set last mod, we're using it to create a decaying mod that won't
