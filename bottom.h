@@ -54,6 +54,11 @@ static isize maxs(isize a, isize b)
     return (a >= b) ? a : b;
 }
 
+static isize clamps(isize a, isize b, isize t)
+{
+    return maxs(a, mins(b, t));
+}
+
 static b32 is_power_of_two_or_zero(i32 x)
 {
     return (x & (x - 1)) == 0;
@@ -71,7 +76,7 @@ static f32 clamp_high(f32 a, f32 b)
 
 static f32 clamp(f32 a, f32 b, f32 t)
 {
-    return clamp_low(a, clamp_high(b , t));
+    return clamp_low(a, clamp_high(b, t));
 }
 
 static f32 lerp(f32 a, f32 b, f32 t)
@@ -96,6 +101,21 @@ static f32 safe_div(f32 a, f32 b)
     }
 
     return a / b;
+}
+
+static f32 square(f32 a)
+{
+    return a*a;
+}
+
+static f32 absolute_value(f32 v)
+{
+    return (v < 0) ? -v : v;
+}
+
+static b32 is_finite(f32 v)
+{
+    return absolute_value(v) <= FLT_MAX;
 }
 
 typedef struct Stack
@@ -339,7 +359,8 @@ isize buf_index_of_(Buf *hdr, isize index)
     return -1;
 }
 
-void buf_set_len(void *buf, isize len)
+#define buf_set_len(buf, len) (buf_reserve(buf, len), buf_set_len_(buf, len))
+void buf_set_len_(void *buf, isize len)
 {
     Buf *hdr = buf_hdr(buf);
     if (hdr) {
@@ -428,6 +449,25 @@ u64 rng(void)
     x ^= x << 25;
     x ^= x >> 27;
     return x * 0x2545F4914F6CDD1DULL;
+}
+
+// I USe this in the optizimation code so i figure it may as well be unbiased! alright! ok!
+u64 rngu(u64 upper)
+{
+    if (upper == 0) {
+        return 0;
+    }
+    u64 mask = upper | (upper >> 1);
+    mask |= (mask >> 2);
+    mask |= (mask >> 4);
+    mask |= (mask >> 8);
+    mask |= (mask >> 16);
+    mask |= (mask >> 32);
+    u64 result = 0;
+    do {
+        result = rng() & mask;
+    } while (result >= upper);
+    return result;
 }
 
 f32 rngf(void)

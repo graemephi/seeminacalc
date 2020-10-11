@@ -37,6 +37,7 @@ typedef double f64;
 #pragma warning(disable : 4221) // nonstandard extension used: cannot be initialized using address of automatic variable
 #pragma warning(disable : 4057) // 'initializing': 'char *' differs in indirection to slightly different base types from 'u8 *'
 #pragma warning(disable : 4709) // comma operator within array index expression
+#pragma warning(disable : 4127) // conditional expression is constant
 #endif
 
 #ifdef __clang__

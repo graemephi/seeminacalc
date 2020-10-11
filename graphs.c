@@ -462,13 +462,21 @@ void calculate_parameter_loss_graph_force(CalcWork *work[], SimFileInfo sfis[], 
     }
 }
 
-void calculate_parameter_loss_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
+void calculate_parameter_loss_with_parameter_override(CalcWork *work[], SimFileInfo *sfi, i32 param, f32 value, u32 generation)
 {
-    assert(fng->is_param == true);
-    if (fng->pending_generation < generation) {
-        fng->pending_generation = generation;
-        calculate_parameter_loss_graph_force(work, sfi, fng, generation);
-    }
+    assert(sfi->target.want_msd);
+    buf_push(*work, (CalcWork) {
+        .sfi = sfi,
+        .type = Work_ParameterLoss,
+        .parameter_loss.param = param,
+        .parameter_loss.value = value,
+        .generation = generation,
+    });
+}
+
+void calculate_parameter_loss(CalcWork *work[], SimFileInfo *sfi, u32 generation)
+{
+    calculate_parameter_loss_with_parameter_override(work, sfi, 0, 0, generation);
 }
 
 void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
@@ -687,11 +695,6 @@ i32 calc_thread(void *userdata)
                     now = stm_now();
                 } break;
                 case Work_ParameterLoss: {
-                    if (work.parameter.lower_bound != ps->min[work.parameter.param]
-                     || work.parameter.upper_bound != ps->max[work.parameter.param]) {
-                         ct->debug_counters.skipped++;
-                        continue;
-                    }
                     then = stm_now();
                     ssr = calc_go_with_rate_and_param(&calc, ps, work.sfi->notes, 0.93f, work.sfi->target.rate, work.parameter_loss.param, work.parameter_loss.value);
                     now = stm_now();
@@ -775,7 +778,6 @@ void finish_work()
     pop_allocator();
 
     b32 targets_updated = false;
-    b32 deltas_updated = false;
 
     DoneWork done = {0};
     while (get_done_work(&done)) {
@@ -794,36 +796,17 @@ void finish_work()
                 }
 
                 if (fng == 0) {
-                    // fng has been removed since calc calculation completed
+                    // fng removed between now and work submission
                     continue;
                 }
             } break;
             case Work_ParameterLoss: {
-                for (isize i = 0; i < buf_len(sfi->graphs); i++) {
-                    if (state.graphs[state.target.graphs[i]].param == done.work.parameter.param) {
-                        fng = &state.graphs[state.target.graphs[i]];
-                        break;
-                    }
+                assert(state.target.msd_sd > 0.0f);
+                opt_push_evaluation(&state.opt, (OptimizationRequest) { (i32)buf_index_of(state.files, sfi), done.work.parameter_loss.param - 1, done.work.parameter_loss.value }, (done.ssr.E[sfi->target.skillset] - sfi->target.want_msd) / state.target.msd_sd);
+                if (done.work.parameter_loss.param == 0) {
+                    goto Work_Target;
                 }
-
-                if (fng == 0) {
-                    // fng has been removed since calc calculation completed
-                    continue;
-                }
-
-                if (buf_len(fng->deltas) != (NumTargetFiles * NumGraphSamples)) {
-                    assert(buf_len(fng->deltas) == 0);
-                    buf_pushn(fng->deltas, NumTargetFiles * NumGraphSamples);
-                }
-
-                f32 delta = (done.ssr.E[sfi->target.skillset] - sfi->target.want_msd) / state.target.msd_sd;
-
-                fng->deltas[done.work.x_index * NumTargetFiles + sfi->target.index] = (OptimizationDelta) {
-                    .delta_squared = delta*delta,
-                    .skillset = sfi->target.skillset,
-                };
-
-                deltas_updated = true;
+                continue;
             } break;
             case Work_Effects: {
                 sfi->num_effects_computed += done.work.effects.end - done.work.effects.start;
@@ -855,10 +838,10 @@ void finish_work()
                 }
                 continue;
             } break;
-            case Work_Target: {
+            case Work_Target: Work_Target: {
                 targets_updated = true;
                 sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
-                sfi->target.delta = sfi->target.got_msd - sfi->target.want_msd;
+                sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
                 continue;
             } break;
             default: assert_unreachable();
@@ -884,10 +867,6 @@ void finish_work()
             fng->xs[done.work.x_index] = done.work.parameter.value;
         }
 
-        if (done.work.type == Work_ParameterLoss) {
-            fng->xs[done.work.x_index] = done.work.parameter_loss.value;
-        }
-
         for (isize ss = 0; ss < NumSkillsets; ss++) {
             fng->incoming_ys[ss][done.work.x_index] = done.ssr.E[ss];
         }
@@ -911,25 +890,6 @@ void finish_work()
         }
         if (fungi == buf_len(updated_fngs)) {
             buf_push(updated_fngs, fng);
-        }
-    }
-
-    if (deltas_updated) {
-        for (isize fungi = 0; fungi < buf_len(updated_fngs); fungi++) {
-            FnGraph *fng = updated_fngs[fungi];
-            if (fng->deltas) {
-                for (isize i = 0; i < NumGraphSamples; i++) {
-                    SkillsetRatings sq_sum = {0};
-                    for (isize j = 0; j < NumTargetFiles; j++) {
-                        isize delta_index = i * NumTargetFiles + j;
-                        sq_sum.E[0] += fng->deltas[delta_index].delta_squared;
-                        sq_sum.E[fng->deltas[delta_index].skillset] += fng->deltas[delta_index].delta_squared;
-                    }
-                    for (isize ss = 0; ss < NumSkillsets; ss++) {
-                        fng->incoming_ys[ss][i] = sq_sum.E[ss];
-                    }
-                }
-            }
         }
     }
 
@@ -1015,6 +975,8 @@ void finish_work()
 
     if (targets_updated) {
         f32 delta_sum[NumSkillsets] = {0};
+        f32 max_error = 0.0f;
+        f32 min_error = 40.0f;
         i32 targets[NumSkillsets] = {0};
         for (isize i = 0; i < buf_len(state.files); i++) {
             if (state.files[i].target.got_msd != 0.0f) {
@@ -1022,14 +984,18 @@ void finish_work()
                 // for the error over all skillsets
                 assert(state.files[i].target.skillset != 0);
                 assert(state.files[i].target.skillset < NumSkillsets);
-                delta_sum[0] += state.files[i].target.delta;
+                delta_sum[0] += fabsf(state.files[i].target.delta);
                 targets[0]++;
-                delta_sum[state.files[i].target.skillset] += state.files[i].target.delta;
+                delta_sum[state.files[i].target.skillset] += fabsf(state.files[i].target.delta);
                 targets[state.files[i].target.skillset]++;
+                max_error = max(max_error, state.files[i].target.delta);
+                min_error = min(min_error, state.files[i].target.delta);
             }
         }
         for (isize i = 0; i < NumSkillsets; i++) {
-            state.average_target_delta.E[i] = delta_sum[i] / (f32)targets[i];
+            state.target.average_delta.E[i] = delta_sum[i] / (f32)targets[i];
+            state.target.min_delta = min_error;
+            state.target.max_delta = max_error;
         }
     }
 }

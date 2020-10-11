@@ -34,6 +34,8 @@
 #include "cminacalc.h"
 #include "sm.h"
 
+#include "optimize.c"
+
 #include "calcconstants.h"
 
 #ifdef __EMSCRIPTEN__
@@ -154,18 +156,22 @@ typedef struct State
     SimFileInfo *files;
     SimFileInfo *active;
 
-    SkillsetRatings average_target_delta;
-
     ParamSet ps;
     bool *parameter_graphs_enabled;
     i32 *parameter_graph_order;
     FnGraph *graphs;
     i32 *free_graphs;
 
+    OptimizationContext opt;
+    FnGraph *optimization_graph;
+
     struct {
-        i32 *graphs;
         f32 msd_mean;
         f32 msd_sd;
+
+        SkillsetRatings average_delta;
+        f32 min_delta;
+        f32 max_delta;
     } target;
 
     u32 skillset_colors[NumSkillsets];
@@ -331,6 +337,27 @@ i32 make_parameter_graph(i32 param)
         for (i32 x = 0; x < fng->len; x++) {
             fng->xs[x] = lerp(state.ps.min[param], state.ps.max[param], (f32)x / (f32)(fng->len - 1));
         }
+    }
+    return (i32)buf_index_of(state.graphs, fng);
+}
+
+i32 make_optimization_graph()
+{
+    FnGraph *fng = 0;
+    if (buf_len(state.free_graphs) > 0) {
+        fng = &state.graphs[buf_pop(state.free_graphs)];
+    } else {
+        fng = buf_pushn(state.graphs, 1);
+    }
+    *fng = (FnGraph) {0};
+    fng->active = true;
+    fng->is_param = false;
+    fng->param = -1;
+    fng->len = NumGraphSamples;
+    fng->min = 0.0f;
+    fng->max = 100.0f;
+    for (i32 x = 0; x < fng->len; x++) {
+        fng->xs[x] = (f32)x;
     }
     return (i32)buf_index_of(state.graphs, fng);
 }
@@ -715,6 +742,8 @@ void init(void)
 
 #if !defined(EMSCRIPTEN)
     add_target_files();
+    // -1/+1 because rate is not a real parameter
+    state.opt = optimize((i32)state.ps.num_params - 1, state.ps.params + 1, (i32)buf_len(state.files), 10.f / state.target.msd_sd);
 #endif
 }
 
@@ -743,10 +772,19 @@ void frame(void)
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
         // Header + arrow drop down fake thing
-        if (state.average_target_delta.E[0] != 0.0f) {
+        if (state.target.average_delta.E[0] != 0.0f) {
             for (isize i = 0; i < NumSkillsets; i++) {
-                igTextColored(msd_color(fabsf(state.average_target_delta.E[i]) * 3.0f), "%02.2f", (f64)state.average_target_delta.E[i]);
+                igTextColored(msd_color(fabsf(state.target.average_delta.E[i]) * 3.0f), "%02.2f", (f64)state.target.average_delta.E[i]);
                 tooltip("CalcTestList: %s delta", SkillsetNames[i]);
+                if (i == 0) {
+                    igSameLine(0, 0); igTextUnformatted(" (", 0); igSameLine(0, 0);
+                    igTextColored(msd_color(fabsf(state.target.min_delta) * 3.0f), "%02.2f", (f64)state.target.min_delta);
+                    tooltip("CalcTestList: min delta");
+                    igSameLine(0, 0); igTextUnformatted(", ", 0); igSameLine(0, 0);
+                    igTextColored(msd_color(fabsf(state.target.max_delta) * 3.0f), "%02.2f", (f64)state.target.max_delta);
+                    tooltip("CalcTestList: max delta"); ;
+                    igSameLine(0, 0); igTextUnformatted(")", 0);
+                }
                 igSameLine(0, 12.0f);
             }
         }
@@ -765,7 +803,7 @@ void frame(void)
             FnGraph *g = &state.graphs[sfi->graphs[0]];
             f32 wife93 = sfi->aa_rating;
             f32 wife965 = sfi->max_rating;
-            if (sfi->target.got_msd) {
+            if (sfi->target.want_msd) {
                 igTextColored(msd_color(fabsf(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
                 tooltip("CalcTestList: %.2f %s, want %.2f at %.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
             }
@@ -1035,32 +1073,70 @@ void frame(void)
         }
     }
 
-    // copy n' pasted from parameter graph above
     if (state.loss_window) {
+        OptimizationRequest *reqs = opt_pump(&state.opt);
+
+        if (buf_len(reqs) > 0) {
+            memcpy(state.ps.params + 1, state.opt.x, state.opt.n_params * sizeof(f32));
+            state.generation++;
+            for (isize i = 0; i < buf_len(reqs); i++) {
+                if (reqs[i].param == Param_None) {
+                    calculate_parameter_loss(&state.low_prio_work, &state.files[reqs[i].sample], state.generation);
+                } else {
+                    calculate_parameter_loss_with_parameter_override(&state.low_prio_work, &state.files[reqs[i].sample], reqs[i].param + 1, reqs[i].value, state.generation);
+                }
+            }
+        }
+
+        static u64 t = 0;
+        if (stm_sec(stm_since(t)) > 1.0) {
+            t = stm_now();
+
+            for (isize i = 0; i < buf_len(state.files); i++) {
+                calculate_skillsets(&state.high_prio_work, &state.files[i], false, state.generation);
+            }
+        }
+
+        if (!state.optimization_graph) {
+            state.optimization_graph = &state.graphs[make_optimization_graph()];
+        }
+
+        i32 min_idx = 0;
+        i32 max_idx = 0;
+        for (i32 i = 1; i < buf_len(state.files); i++) {
+            if (state.files[i].target.delta > state.files[max_idx].target.delta) {
+                max_idx = i;
+            }
+            if (state.files[i].target.delta < state.files[min_idx].target.delta) {
+                min_idx = i;
+            }
+        }
+
+        opt_focus(&state.opt, min_idx);
+        opt_focus(&state.opt, max_idx);
+
+        state.optimization_graph->ys[0][state.generation % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
+        state.optimization_graph->ys[1][state.generation % NumGraphSamples] = state.opt.loss.at_x;
+
         igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
         igSetNextWindowSize(V2(centre_width, ds.y), ImGuiWindowFlags_NoResize);
         if (igBegin("Loss", &state.loss_window, 0)) {
             num_open_windows++;
-            for (isize fungi = buf_len(state.target.graphs) - 1; fungi >= 0; fungi--) {
-                FnGraph *fng = &state.graphs[state.target.graphs[fungi]];
-                if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
-                    calculate_parameter_loss_graph_force(&state.low_prio_work, state.files, fng, state.generation);
-                }
-
-                i32 mp = fng->param;
-                ParamInfo *p = &state.info.params[mp];
-                u8 full_name[64] = {0};
-                snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
-                igPushIDStr(full_name);
-                ipSetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
-                if (BeginPlotDefaultsFullWidth("##Loss", full_name, "Loss")) {
-                    calculate_parameter_loss_graph(&state.low_prio_work, state.files, fng, state.generation);
-                    for (i32 ss = 0; ss < NumSkillsets; ss++) {
-                        skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
-                    }
-                    ipEndPlot();
-                }
-                igPopID();
+            f32 err_lim = 2.0f;
+            f32 loss_lim = 0.0f;
+            for (isize i = 0; i < NumGraphSamples; i++) {
+                err_lim = max(err_lim, state.optimization_graph->ys[0][i]);
+                loss_lim = max(loss_lim, state.optimization_graph->ys[1][i]);
+            }
+            ipSetNextPlotLimits(0, NumGraphSamples, 0, err_lim, ImGuiCond_Always);
+            if (BeginPlotDefaultsFullWidth("##Average Error", "Iteration", "Average Error")) {
+                skillset_line_plot(0, false, state.optimization_graph, state.optimization_graph->ys[0]);
+                ipEndPlot();
+            }
+            ipSetNextPlotLimits(0, NumGraphSamples, 0, loss_lim, ImGuiCond_Always);
+            if (BeginPlotDefaultsFullWidth("##Loss", "Iteration", "Loss")) {
+                skillset_line_plot(0, false, state.optimization_graph, state.optimization_graph->ys[1]);
+                ipEndPlot();
             }
         }
         igEnd();
@@ -1166,7 +1242,6 @@ void frame(void)
                     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                         buf_push(sfi->graphs, make_parameter_graph(changed_param.param));
                     }
-                    buf_push(state.target.graphs, make_parameter_graph(changed_param.param));
                 } else {
                     for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
                         if (state.parameter_graph_order[i] == changed_param.param) {
@@ -1182,15 +1257,6 @@ void frame(void)
                                 buf_remove_sorted_index(sfi->graphs, i);
                                 break;
                             }
-                        }
-                    }
-
-                    for (isize fungi = 0; fungi < buf_len(state.target.graphs); fungi++) {
-                        FnGraph *fng = &state.graphs[state.target.graphs[fungi]];
-                        if (fng->param == changed_param.param) {
-                            free_graph(state.target.graphs[fungi]);
-                            buf_remove_sorted_index(state.target.graphs, fungi);
-                            break;
                         }
                     }
                 }
