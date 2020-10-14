@@ -138,6 +138,8 @@ typedef struct SimFileInfo
 static SimFileInfo null_sfi_ = {0};
 static SimFileInfo *const null_sfi = &null_sfi_;
 
+typedef struct { f32 low; f32 high; } Bound;
+
 typedef struct FnGraph FnGraph;
 typedef struct CalcThread CalcThread;
 typedef struct CalcWork CalcWork;
@@ -164,6 +166,17 @@ typedef struct State
 
     OptimizationContext opt;
     FnGraph *optimization_graph;
+    struct {
+        f32 goals[3];
+        f32 goals_adjustment[3];
+        f32 weights[3];
+        f32 barrier_weights[3];
+        Bound *bounds;
+        struct {
+            i32 *to_opt;
+            i32 *to_ps;
+        } map;
+    } opt_cfg;
 
     struct {
         f32 msd_mean;
@@ -173,6 +186,7 @@ typedef struct State
         f32 min_delta;
         f32 max_delta;
     } target;
+
 
     u32 skillset_colors[NumSkillsets];
     u32 skillset_colors_selectable[NumSkillsets];
@@ -289,7 +303,7 @@ ParamSet copy_param_set(ParamSet *ps)
     return result;
 }
 
-i32 make_skillsets_graph()
+i32 make_skillsets_graph(void)
 {
     FnGraph *fng = 0;
     if (buf_len(state.free_graphs) > 0) {
@@ -341,7 +355,7 @@ i32 make_parameter_graph(i32 param)
     return (i32)buf_index_of(state.graphs, fng);
 }
 
-i32 make_optimization_graph()
+i32 make_optimization_graph(void)
 {
     FnGraph *fng = 0;
     if (buf_len(state.free_graphs) > 0) {
@@ -446,7 +460,7 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
 }
 
 // copy n paste
-i32 add_target_files()
+i32 add_target_files(void)
 {
     if (buf_len(state.files) + array_length(TargetFiles) == buf_cap(state.files)) {
         printf("please.. no more files");
@@ -642,6 +656,97 @@ static void skillset_line_plot(i32 ss, b32 highlight, FnGraph *fng, f32 *ys)
     }
 }
 
+isize param_opt_index_by_name(CalcInfo *info, i32 *map, String mod, String param)
+{
+    isize idx = -1;
+    isize first_param_of_mod = 0;
+    isize m = 0;
+    for (; m < info->num_mods; m++) {
+        if (string_equals_cstr(mod, info->mods[m].name)) {
+            first_param_of_mod = info->mods[m].index;
+            break;
+        }
+    }
+    for (isize p = first_param_of_mod; p < info->num_params; p++) {
+        if (string_equals_cstr(param, info->params[p].name)) {
+            assert(info->params[p].mod == m);
+            idx = p;
+            break;
+        }
+    }
+    assert(idx > 0);
+    return map[idx];
+}
+
+void setup_optimizer(void)
+{
+    f32 *initial_x = 0;
+    push_allocator(scratch);
+    buf_pushn(initial_x, state.ps.num_params);
+    pop_allocator();
+
+    buf_pushn(state.opt_cfg.map.to_ps, state.ps.num_params + 1);
+    // This sets to_ps[-1] = to_ps[Param_None] = 0
+    state.opt_cfg.map.to_ps = state.opt_cfg.map.to_ps + 1;
+    buf_pushn(state.opt_cfg.map.to_opt, state.ps.num_params);
+    i32 n_params = 0;
+    // The param at 0, rate, is not a real parameter
+    state.opt_cfg.map.to_opt[0] = Param_None;
+    for (i32 i = 1; i < state.ps.num_params; i++) {
+        if (state.info.params[i].integer == false) {
+            state.opt_cfg.map.to_ps[n_params] = i;
+            state.opt_cfg.map.to_opt[i] = n_params;
+            initial_x[n_params] = state.info.params[i].default_value;
+            n_params++;
+        }
+    }
+    // * 3 to add samples at 91% and 96.5%, reweighted at opt_push_evaluation-time
+    i32 n_samples = (i32)buf_len(state.files) * array_length(state.opt_cfg.goals);
+    state.opt = optimize(n_params, initial_x, n_samples);
+    // synthesize some extra samples cause we need more
+    state.opt_cfg.goals[0] = 0.93f;
+    state.opt_cfg.goals[1] = 0.965f;
+    state.opt_cfg.goals[2] = 0.91f;
+    state.opt_cfg.goals_adjustment[0] = 0.0f;
+    state.opt_cfg.goals_adjustment[1] = 1.5f;
+    state.opt_cfg.goals_adjustment[2] = -1.0f;
+    state.opt_cfg.weights[0] = 1.0f;
+    state.opt_cfg.weights[1] = 0.9f;
+    state.opt_cfg.weights[2] = 0.7f;
+    state.opt_cfg.barrier_weights[0] = 4.0f;
+    state.opt_cfg.barrier_weights[1] = 2.2f;
+    state.opt_cfg.barrier_weights[2] = 2.0f;
+    // some parameters can blow up the calc
+    buf_pushn(state.opt_cfg.bounds, n_params);
+    for (isize i = 0; i < n_params; i++) {
+        state.opt_cfg.bounds[i].low = -INFINITY;
+        state.opt_cfg.bounds[i].high = INFINITY;
+    }
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("StreamMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("StreamMod"), S("jack_comp_min"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("StreamMod"), S("jack_comp_max"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("JSMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("HSMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("CJMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("CJMod"), S("total_prop_scaler"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("RunningManMod"), S("offhand_tap_prop_min"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("WideRangeRollMod"), S("max_mod"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.tech_pbm"))].low = 1.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.jack_pbm"))].low = 1.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.stream_pbm"))].low = 1.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.bad_newbie_skillsets_pbm"))].low = 1.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("OHJ.h(78)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("OHJ.h(86)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(163)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(163, 2)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(593)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(593)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(864)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(866)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(869)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(871)"))].low = 0.0f;
+}
+
 void init(void)
 {
     isize bignumber = 100*1024*1024;
@@ -742,8 +847,7 @@ void init(void)
 
 #if !defined(EMSCRIPTEN)
     add_target_files();
-    // -1/+1 because rate is not a real parameter
-    state.opt = optimize((i32)state.ps.num_params - 1, state.ps.params + 1, (i32)buf_len(state.files), 10.f / state.target.msd_sd);
+    setup_optimizer();
 #endif
 }
 
@@ -1073,57 +1177,88 @@ void frame(void)
         }
     }
 
+    // Optimization window
     if (state.loss_window) {
-        OptimizationRequest *reqs = opt_pump(&state.opt);
-
-        if (buf_len(reqs) > 0) {
-            memcpy(state.ps.params + 1, state.opt.x, state.opt.n_params * sizeof(f32));
-            state.generation++;
-            for (isize i = 0; i < buf_len(reqs); i++) {
-                if (reqs[i].param == Param_None) {
-                    calculate_parameter_loss(&state.low_prio_work, &state.files[reqs[i].sample], state.generation);
-                } else {
-                    calculate_parameter_loss_with_parameter_override(&state.low_prio_work, &state.files[reqs[i].sample], reqs[i].param + 1, reqs[i].value, state.generation);
-                }
-            }
-        }
-
-        static u64 t = 0;
-        if (stm_sec(stm_since(t)) > 1.0) {
-            t = stm_now();
-
-            for (isize i = 0; i < buf_len(state.files); i++) {
-                calculate_skillsets(&state.high_prio_work, &state.files[i], false, state.generation);
-            }
-        }
-
         if (!state.optimization_graph) {
             state.optimization_graph = &state.graphs[make_optimization_graph()];
         }
 
-        i32 min_idx = 0;
-        i32 max_idx = 0;
-        for (i32 i = 1; i < buf_len(state.files); i++) {
-            if (state.files[i].target.delta > state.files[max_idx].target.delta) {
-                max_idx = i;
+        static u32 last_generation = 0;
+        if (last_generation != state.generation) {
+            opt_discard(&state.opt);
+            // memcpy(state.opt.x, state.ps.params + 1, state.opt.n_params * sizeof(f32));
+            last_generation = state.generation;
+        } else {
+            OptimizationRequest req = opt_pump(&state.opt);
+
+            if (req.n_samples > 0) {
+                for (isize i = 0; i < state.opt.n_params; i++) {
+                    // Apply bounds. This is a kind of a hack so it lives out here and not in the optimizer :)
+                    state.opt.x[i] = clamp(state.opt_cfg.bounds[i].low, state.opt_cfg.bounds[i].high, state.opt.x[i]);
+                    // Copy x into the calc parameters
+                    state.ps.params[state.opt_cfg.map.to_ps[i]] = state.opt.x[i];
+                }
+                state.generation++;
+                last_generation = state.generation;
+                for (isize i = 0; i < req.n_samples; i++) {
+                    i32 sample = state.opt.active.samples[i];
+                    i32 file_index = sample % buf_len(state.files);
+                    isize sample_type = file_index / buf_len(state.files);
+                    assert(file_index >= 0);
+                    assert(sample_type < array_length(state.opt_cfg.goals));
+                    f32 goal = state.opt_cfg.goals[sample_type];
+                    f32 jachnical = (state.files[file_index].target.skillset == 5 || state.files[file_index].target.skillset == 7) ? 2.0f : 1.0f;
+                    f32 msd = state.files[file_index].target.want_msd + jachnical*state.opt_cfg.goals_adjustment[sample_type];
+
+                    ParameterLossWork pmw_x = { .sample = sample, .goal = goal, .msd = msd };
+                    calculate_parameter_loss(&state.low_prio_work, &state.files[file_index], pmw_x, state.generation);
+                    for (isize j = 0; j < req.n_parameters; j++) {
+                        i32 param = state.opt.active.parameters[j];
+                        ParameterLossWork pmw_xh = {
+                            .sample = sample,
+                            .param = state.opt_cfg.map.to_ps[param],
+                            .value = state.opt.x[param] + req.h,
+                            .goal = goal,
+                            .msd = msd
+                        };
+                        calculate_parameter_loss(&state.low_prio_work, &state.files[file_index], pmw_xh, state.generation);
+                    }
+                }
             }
-            if (state.files[i].target.delta < state.files[min_idx].target.delta) {
-                min_idx = i;
+
+            static u64 t = 0;
+            if (stm_sec(stm_since(t)) > 1.0) {
+                t = stm_now();
+
+                for (isize i = 0; i < buf_len(state.files); i++) {
+                    calculate_skillsets(&state.high_prio_work, &state.files[i], false, state.generation);
+                }
             }
+
+            i32 min_idx = 0;
+            i32 max_idx = 0;
+            for (i32 i = 1; i < buf_len(state.files); i++) {
+                if (state.files[i].target.delta > state.files[max_idx].target.delta) {
+                    max_idx = i;
+                }
+                if (state.files[i].target.delta < state.files[min_idx].target.delta) {
+                    min_idx = i;
+                }
+            }
+
+            opt_focus(&state.opt, min_idx);
+            opt_focus(&state.opt, max_idx);
+
+            state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
+            state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss.at_x;
         }
-
-        opt_focus(&state.opt, min_idx);
-        opt_focus(&state.opt, max_idx);
-
-        state.optimization_graph->ys[0][state.generation % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
-        state.optimization_graph->ys[1][state.generation % NumGraphSamples] = state.opt.loss.at_x;
 
         igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
         igSetNextWindowSize(V2(centre_width, ds.y), ImGuiWindowFlags_NoResize);
         if (igBegin("Loss", &state.loss_window, 0)) {
             num_open_windows++;
             f32 err_lim = 2.0f;
-            f32 loss_lim = 0.0f;
+            f32 loss_lim = FLT_MIN;
             for (isize i = 0; i < NumGraphSamples; i++) {
                 err_lim = max(err_lim, state.optimization_graph->ys[0][i]);
                 loss_lim = max(loss_lim, state.optimization_graph->ys[1][i]);
@@ -1139,9 +1274,18 @@ void frame(void)
                 ipEndPlot();
             }
         }
+
+        igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 4.0f);
+        igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 4.0f);
+        igSliderFloat("MDecay", &MDecay, 0.1f, 1.0f - 1e-3f, "%g", 0.5f);
+        igSliderFloat("VDecay", &VDecay, 0.1f, 1.0f - 1e-5f, "%g", 0.5f);
+        igSliderInt("SampleBatchSize", &SampleBatchSize, 1, state.opt.n_samples, "%d");
+        igSliderInt("ParameterBatchSize", &ParameterBatchSize, 0, state.opt.n_params, "%d");
+
         igEnd();
     }
 
+    // Start up text window
     if (buf_len(state.files) == 0) {
         igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f - 40.f), 0, V2(0.5f, 1.0f));
         igBegin("MinaButan", 0, ImGuiWindowFlags_NoDecoration);
@@ -1165,6 +1309,7 @@ void frame(void)
 #endif
     }
 
+    // Debug window
     if (igIsKeyPressed('`', false)) {
         state.debug_window = !state.debug_window;
     }

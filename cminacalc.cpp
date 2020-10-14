@@ -195,6 +195,8 @@ CalcInfo calc_info()
             param_info[i].integer = true;
             param_info[i].min = 0;
             param_info[i].max = max_moving_window_size - 1;
+        } else if (strcmp((char *)param_info[i].name, "prop_buffer") == 0) {
+            param_info[i].max = nextafter(2.0f, 0.0f);
         } else {
             float test_value = make_test_value(param_info[i].default_value);
             if (test_value != *param_pointers[i]) {
@@ -263,13 +265,14 @@ CalcInfo calc_info()
 
 auto
 CMinaCalc_MinaSDCalc(const std::vector<NoteInfo>& note_info,
-		   const float musicrate,
-		   const float goal,
+		   float musicrate,
+		   float goal,
 		   Calc* calc) -> std::vector<float>
 {
 	if (note_info.size() <= 1) {
 		return dimples_the_all_zero_output;
 	}
+    goal = std::clamp(goal, 0.8f, 0.965f);
 	calc->ssr = (goal != 0.93f);
 	calc->debugmode = false;
     return calc->CalcMain(note_info, musicrate, min(goal, ssr_goal_cap));

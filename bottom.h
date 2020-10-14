@@ -74,6 +74,11 @@ static f32 clamp_high(f32 a, f32 b)
     return (a <= b) ? a : b;
 }
 
+static f64 clamp_highd(f64 a, f64 b)
+{
+    return (a <= b) ? a : b;
+}
+
 static f32 clamp(f32 a, f32 b, f32 t)
 {
     return clamp_low(a, clamp_high(b, t));
@@ -410,6 +415,11 @@ b32 strings_are_equal(String a, String b)
     }
 
     return false;
+}
+
+b32 string_equals_cstr(String a, const char *b)
+{
+    return strncmp(a.buf, b, a.len) == 0;
 }
 
 String copy_string(String s)

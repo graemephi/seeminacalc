@@ -155,7 +155,7 @@ struct Anchor_Sequencing
 		const auto len = static_cast<float>(_len - 1);
 
 		// get average ms for the jack sequence
-		const auto avg_ms = total_ms / len;
+		const auto avg_ms = len == 0 ? INFINITY : total_ms / len;
 
 		/* adjust total ms by adding flat and scaled buffers, this depresses
 		 * shorter jacks more */

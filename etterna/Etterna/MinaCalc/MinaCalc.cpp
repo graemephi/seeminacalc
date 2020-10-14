@@ -149,7 +149,7 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		 * and something that benefits 15% will max out the possible stam
 		 * rating, which is (currently) a 1.07 multiplier to the base maybe
 		 * using a multiplier and not a difference would be better? */
-		static const auto stam_curve_shift = P(0.015F);
+		auto stam_curve_shift = P(0.015F);
 		// ends up being a multiplier between ~0.8 and ~1
 		auto mcfroggerbopper =
 		  pow((poodle_in_a_porta_potty / base) - stam_curve_shift, P(2.5F));
@@ -280,10 +280,10 @@ StamAdjust(const float x,
 		for (auto i = 0; i < calc.numitv; i++) {
 			avs1 = avs2;
 			avs2 = base_diff->at(i);
-			mod += ((((avs1 + avs2) / P(2.F)) / (stam_prop * x)) - P(1.F)) / stam_mag;
-			float cap = P(0.95f);
-			if (mod > cap) {
-				stam_floor += (mod - cap) / stam_fscale;
+			mod += ((((avs1 + avs2) / 2.F) / (stam_prop * x)) - P(1.F)) / stam_mag;
+			float OPT_cap = P(0.95f);
+			if (mod > OPT_cap) {
+				stam_floor += (mod - OPT_cap) / stam_fscale;
 			}
 			local_ceil = stam_ceil * stam_floor;
 
@@ -317,10 +317,10 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
 	for (size_t i = 0; i < diff.size(); i++) {
 		const auto avs1 = avs2;
 		avs2 = diff.at(i).second;
-		mod += ((((avs1 + avs2) / P(2.F)) / (stam_prop * x)) - P(1.F)) / stam_mag;
-		float cap = P(0.95f);
-		if (mod > cap) {
-			stam_floor += (mod - cap) / stam_fscale;
+		mod += ((((avs1 + avs2) / 2.F) / (stam_prop * x)) - P(1.F)) / stam_mag;
+		float OPT_cap = P(0.95f);
+		if (mod > OPT_cap) {
+			stam_floor += (mod - OPT_cap) / stam_fscale;
 		}
 		const auto local_ceil = stam_ceil * stam_floor;
 
@@ -478,7 +478,6 @@ thread_local ParamJunk ManualConstants {
     { "MinaCalc.jack_pbm", &jack_pbm },
     { "MinaCalc.stream_pbm", &stream_pbm },
     { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
-    { "PatternModHelpers.neutral", &neutral },
     { "SequencingHelpers.finalscaler", &finalscaler },
     { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
     { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
@@ -652,8 +651,7 @@ Calc::Chisel(const float player_skill,
 		gotpoints = calc_gotpoints(curr_player_skill);
 	} while (gotpoints < reqpoints);
 	curr_player_skill -= curr_resolution; // We're too high. Undo our last move.
-	curr_resolution /= P(2.F);
-
+	curr_resolution /= 2.F;
 	for (auto iter = 1; iter <= 7; iter++) { // Refine
 		if (curr_player_skill > max_rating) {
 			return min_rating;
@@ -664,7 +662,7 @@ Calc::Chisel(const float player_skill,
 			curr_player_skill -=
 			  curr_resolution; // We're too high. Undo our last move.
 		}
-		curr_resolution /= P(2.F);
+		curr_resolution /= 2.F;
 	}
 
 	/* these are the values for msd/stam adjusted msd/pointloss the
@@ -708,7 +706,7 @@ Calc::Chisel(const float player_skill,
 		}
 	}
 
-	return curr_player_skill + P(2.F) * curr_resolution;
+	return curr_player_skill + 2.F * curr_resolution;
 }
 
 /* The new way we wil attempt to differentiate skillsets rather than using

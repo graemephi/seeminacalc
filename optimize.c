@@ -1,9 +1,9 @@
-static const f32 H = 0.0001f;
-static const f32 StepSize = 0.001f;
-static const f32 MDecay = 0.9f;
-static const f32 VDecay = 0.999f;
-static const i32 SampleBatchSize = 16;
-static const i32 ParameterBatchSize = 64;
+static f32 H = 0.0001f;
+static f32 StepSize = 0.001f;
+static f32 MDecay = 0.9f;
+static f32 VDecay = 0.999f;
+static i32 SampleBatchSize = 16;
+static i32 ParameterBatchSize = 8;
 
 enum {
     Param_None = -1
@@ -34,57 +34,74 @@ void shuffle(i32 arr[], i32 head[])
 }
 
 typedef struct {
-    i32 sample;
-    i32 param;
-    f32 value;
+    i32 n_samples;
+    i32 n_parameters;
+    f32 h;
 } OptimizationRequest;
 
 typedef struct {
+    // Current parameter vector
     f32 *x;
+
+    // ADAM state vectors
     f32 *v;
+    f32 *v_correction;
     f32 *m;
+    f32 *m_correction;
+
+    // Estimate of the loss at x, x + h. Zeroed by opt_pump.
     struct {
         f32 at_x;
-        f32 prev;
         f32 *at_xh;
     } loss;
+
+    // Samples and parameters being trained by the last batch of requests
     struct {
         i32 *samples;
         i32 *parameters;
     } active;
+
+    // Request counters
     struct {
-        i32 submitted;
-        i32 completed;
+        u32 submitted;
+        u32 completed;
     } requests;
-    struct {
-        i32 sample;
-        i32 parameter;
-    } batch_size;
-    struct {
-        f32 position;
-        f32 strength;
-        f32 forgiveness;
-    } barrier;
+
+    // Samples to look at in the next iteration; otherwise random
     i32 *focus;
+
     i32 n_params;
     i32 n_samples;
     i32 iter;
 } OptimizationContext;
 
-OptimizationContext optimize(i32 n_params, f32 *initial_x, i32 n_samples, f32 initial_barrier)
+f32 barrier(f32 x, f32 a)
+{
+    if (x < 1.0f) {
+        return x*x;
+    } else {
+        return (2.0f / a) * powf(x, a) + 1.0f - (a / 2.0f);
+    }
+}
+
+f32 loss(f32 delta, f32 barrier_strength)
+{
+    f32 err = (-delta < 1.0f) ? delta*delta : 2.0f*fabsf(delta) - 1.0f;
+    f32 positive_penalty = (barrier_strength <= 0.0f) ? 0.0f : barrier(delta, barrier_strength);
+    return err * positive_penalty;
+}
+
+OptimizationContext optimize(i32 n_params, f32 *initial_x, i32 n_samples)
 {
     OptimizationContext result = {
         .n_params = n_params,
         .n_samples = n_samples,
-        .batch_size.sample = (i32)clamps(0, n_samples, SampleBatchSize),
-        .batch_size.parameter = (i32)clamps(0, n_params, ParameterBatchSize),
-        .barrier.position = is_finite(initial_barrier) ? initial_barrier : 100.0f,
-        .barrier.strength = 1.0f,
-        .barrier.forgiveness = 0.05f
     };
     buf_pushn(result.x, n_params);
     buf_pushn(result.v, n_params);
+    buf_pushn(result.v_correction, n_params);
     buf_pushn(result.m, n_params);
+    buf_pushn(result.m_correction, n_params);
     buf_pushn(result.active.samples, n_samples);
     buf_pushn(result.active.parameters, n_params);
     for (isize i = 0; i < n_params; i++) {
@@ -99,26 +116,25 @@ OptimizationContext optimize(i32 n_params, f32 *initial_x, i32 n_samples, f32 in
     return result;
 }
 
-f32 log_barrier(f32 x, f32 a, f32 t)
+void opt_discard(OptimizationContext *opt)
 {
-    return -(1.0f/a)*(logf(1.0f - a*(x - t)) - logf(1 + a*t));
+    opt->loss.at_x = 0.0f;
+    for (isize i = 0; i < buf_len(opt->x); i++) {
+        opt->loss.at_xh[i] = 0.0f;
+    }
+    opt->requests.submitted = 0;
+    opt->requests.completed = 0;
+    opt->iter = opt->iter > 0 ? opt->iter - 1 : 0;
 }
 
-f32 loss(f32 delta, f32 barrier_strength, f32 barrier_position)
-{
-    f32 squared_error = delta*delta;
-    f32 positive_penalty = delta < 0.0f ? 0.0f : log_barrier(delta, barrier_strength, barrier_position);
-    return squared_error + positive_penalty;
-}
-
-void opt_push_evaluation(OptimizationContext *opt, OptimizationRequest req, f32 sample_delta)
+void opt_push_evaluation(OptimizationContext *opt, i32 param, f32 sample_delta, f32 weight, f32 barrier_weight)
 {
     assert(sample_delta == sample_delta);
-    if (req.param == Param_None) {
-        opt->loss.at_x += loss(sample_delta, opt->barrier.strength, opt->barrier.position + opt->barrier.forgiveness);
+    if (param == Param_None) {
+        opt->loss.at_x += weight * loss(sample_delta, barrier_weight);
     } else {
-        assert(req.param >= 0 && req.param < opt->n_params);
-        opt->loss.at_xh[req.param] += loss(sample_delta, opt->barrier.strength, opt->barrier.position + opt->barrier.forgiveness);
+        assert(param >= 0 && param < opt->n_params);
+        opt->loss.at_xh[param] += weight * loss(sample_delta, barrier_weight);
     }
 
     opt->requests.completed++;
@@ -135,10 +151,9 @@ void opt_focus(OptimizationContext *opt, i32 sample)
     buf_push(opt->focus, sample);
 }
 
-OptimizationRequest *opt_pump(OptimizationContext *opt)
+OptimizationRequest opt_pump(OptimizationContext *opt)
 {
-    push_allocator(scratch);
-    OptimizationRequest *result = 0;
+    OptimizationRequest result = {0};
     if (opt->requests.submitted == opt->requests.completed) {
         if (opt->requests.submitted > 0) {
             for (isize i = 0; i < buf_len(opt->x); i++) {
@@ -146,8 +161,10 @@ OptimizationRequest *opt_pump(OptimizationContext *opt)
                 f32 g = (opt->loss.at_xh[i] == 0.0f) ? 0.0f : (opt->loss.at_xh[i] - opt->loss.at_x) / H;
                 opt->m[i] = lerp(g, opt->m[i], MDecay);
                 opt->v[i] = lerp(g*g, opt->v[i], VDecay);
-                f32 m = opt->m[i] / (1.0f - powf(MDecay, (f32)opt->iter));
-                f32 v = opt->v[i] / (1.0f - powf(VDecay, (f32)opt->iter));
+                opt->m_correction[i] += 1.0f;
+                opt->v_correction[i] += 1.0f;
+                f32 m = opt->m[i] / (1.0f - powf(MDecay, opt->m_correction[i]));
+                f32 v = opt->v[i] / (1.0f - powf(VDecay, opt->v_correction[i]));
                 opt->x[i] = opt->x[i] - StepSize * m / (sqrtf(v) + 1e-8f);
                 opt->loss.at_xh[i] = 0.0f;
             }
@@ -155,33 +172,20 @@ OptimizationRequest *opt_pump(OptimizationContext *opt)
 
         opt->loss.at_x = 0.0f;
         opt->iter++;
-        opt->barrier.position *= 0.999f;
-        if (opt->barrier.strength < 10.0f) {
-            opt->barrier.strength *= 1.001f;
-        }
 
         shuffle(opt->active.samples, opt->focus);
         shuffle(opt->active.parameters, 0);
 
-        for (isize i = 0; i < opt->batch_size.sample; i++) {
-            i32 s = opt->active.samples[i];
-            buf_push(result, (OptimizationRequest) {
-                .sample = s,
-                .param = Param_None,
-            });
-            for (i32 j = 0; j < opt->batch_size.parameter; j++) {
-                i32 p = opt->active.parameters[j];
-                buf_push(result, (OptimizationRequest) {
-                    .sample = s,
-                    .param = p,
-                    .value = opt->x[p] + H
-                });
-            }
-        }
+        i32 sample_batch_size = (i32)clamps(0, opt->n_samples, SampleBatchSize);
+        i32 parameter_batch_size = (i32)clamps(0, opt->n_params, ParameterBatchSize);
+        result = (OptimizationRequest) {
+            .n_samples = sample_batch_size,
+            .n_parameters = parameter_batch_size,
+            .h = H
+        };
 
-        opt->requests.submitted += (i32)buf_len(result);
+        opt->requests.submitted += sample_batch_size + sample_batch_size * parameter_batch_size;
     }
-    pop_allocator();
     buf_clear(opt->focus);
     return result;
 }

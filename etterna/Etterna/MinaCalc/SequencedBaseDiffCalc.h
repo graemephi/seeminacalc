@@ -71,7 +71,7 @@ struct techyo
 		}
 
 		obliosis = std::clamp(obliosis, P(1.F), P(10.F));
-		auto pewp = fastsqrt(div_high_by_low(scoliosis, poliosis) - P(1.F));
+		auto pewp = fastsqrt(div_high_by_low(scoliosis, poliosis) - 1.F);
 
 		pewp /= obliosis;
 		const auto vertebrae = std::clamp(

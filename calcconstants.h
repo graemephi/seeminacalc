@@ -1,7 +1,7 @@
 // Inline floating point values in the calc source have been marked up like
 // P(0.0f). If DUMP_CONSTANTS is 1, then P expands to store the location and
 // value of the float. The first time you bring up the debug menu (`),
-// these stored values get dumped as a static array, `minacalc_constant`, in
+// these stored values get dumped as a static array (`minacalc_constant`) in
 // calcconstants.gen.h, along with some other information so the GUI can make
 // sense of it.
 //
@@ -13,7 +13,8 @@
 #ifndef __cplusplus
 extern struct {
     unsigned char *file;
-    unsigned char *line;
+    int file_id;
+    int line;
     float value;
 } constant_info[1024];
 
@@ -63,16 +64,16 @@ static void dump_constant_info_to_file(void)
 
     buf_printf(gen, "thread_local std::vector<std::pair<std::string, float*>> MinaCalcConstants {\n");
     u8 *mod = 0;
-    u8 *last_file = 0;
+    int last_file = 0;
     for (isize i = 0; i < last_constant; i++) {
         if (constant_info[i].file) {
-            if (last_file != constant_info[i].file) {
+            if (last_file != constant_info[i].file_id) {
                 mod = filename(constant_info[i].file);
                 // leak mod
             }
 
             isize k = i;
-            while (constant_info[i].file == constant_info[k].file && constant_info[i].line == constant_info[k].line) {
+            while (constant_info[i].file_id == constant_info[k].file_id && constant_info[i].line == constant_info[k].line) {
                 k--;
             }
             k++;
@@ -83,7 +84,7 @@ static void dump_constant_info_to_file(void)
                 buf_printf(gen, "    { \"%s(%d, %zd)\", &minacalc_constant[%zd] },\n", mod, constant_info[i].line, n, i);
             }
 
-            last_file = constant_info[i].file;
+            last_file = constant_info[i].file_id;
         }
     }
     buf_printf(gen, "};\n\n");
@@ -102,7 +103,8 @@ static void dump_constant_info_to_file(void)
 #ifdef __cplusplus
 extern "C" struct {
     unsigned char *file;
-    unsigned char *line;
+    int file_id;
+    int line;
     float value;
 } constant_info[1024] = {0};
 
@@ -111,9 +113,15 @@ static void add_constant_info(int id,  char const *file, int line, float value)
 {
     assert(id < sizeof(constant_info)/sizeof(constant_info[0]));
     if (constant_info[id].file == 0) {
+        int file_id = 9377747;
+        for (int i = 0, len = strlen(file); i < len; i++) {
+            file_id ^= file[i];
+            file_id *= 1595813;
+        }
         constant_info[id] = {
             (unsigned char *)file,
-            (unsigned char *)line,
+            file_id,
+            line,
             value
         };
     }

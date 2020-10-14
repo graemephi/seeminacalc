@@ -228,6 +228,15 @@ typedef struct CalcThread
     } debug_counters;
 } CalcThread;
 
+typedef struct ParameterLossWork
+{
+    i32 sample;
+    i32 param;
+    f32 value;
+    f32 goal;
+    f32 msd;
+} ParameterLossWork;
+
 typedef struct CalcWork
 {
     SimFileInfo *sfi;
@@ -245,18 +254,13 @@ typedef struct CalcWork
             i32 param_of_fng;
         } parameter;
         struct {
-            f32 lower_bound;
-            f32 upper_bound;
-            i32 param;
-            f32 value;
-        } parameter_loss;
-        struct {
             i32 start;
             i32 end;
         } effects;
         struct {
             b32 initialisation;
         } skillsets;
+        ParameterLossWork parameter_loss;
     };
     u32 generation;
 } CalcWork;
@@ -294,7 +298,7 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
     // weak. they react to big changes at 93%, and small changes at 93%
     {
         assert(info->params[p].max >= info->params[p].min);
-        f32 value = value = info->params[p].max;
+        f32 value = info->params[p].max;
 
         ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, value);
 
@@ -437,46 +441,20 @@ void calculate_parameter_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng,
     }
 }
 
-void calculate_parameter_loss_graph_force(CalcWork *work[], SimFileInfo sfis[], FnGraph *fng, u32 generation)
-{
-    assert(fng->is_param == true);
-    if (state.info.params[fng->param].integer == false) {
-        for (isize sample = 0; sample < fng->len; sample++) {
-            for (SimFileInfo *sfi = sfis; sfi != buf_end(sfis); sfi++) {
-                if (sfi->target.want_msd) {
-                    buf_push(*work, (CalcWork) {
-                        .sfi = sfi,
-                        .type = Work_ParameterLoss,
-                        .x_index = (i32)sample,
-                        .parameter_loss.lower_bound = state.ps.min[fng->param],
-                        .parameter_loss.upper_bound = state.ps.max[fng->param],
-                        .parameter_loss.param = fng->param,
-                        .parameter_loss.value = lerp(state.ps.min[fng->param], state.ps.max[fng->param], (f32)sample / ((f32)fng->len - 1.0f)),
-                        .generation = generation,
-                    });
-                }
-            }
-        }
-    } else {
-        // nop
-    }
-}
-
-void calculate_parameter_loss_with_parameter_override(CalcWork *work[], SimFileInfo *sfi, i32 param, f32 value, u32 generation)
+void calculate_parameter_loss_with_parameter_override(CalcWork *work[], SimFileInfo *sfi, ParameterLossWork pmw, u32 generation)
 {
     assert(sfi->target.want_msd);
     buf_push(*work, (CalcWork) {
         .sfi = sfi,
         .type = Work_ParameterLoss,
-        .parameter_loss.param = param,
-        .parameter_loss.value = value,
+        .parameter_loss = pmw,
         .generation = generation,
     });
 }
 
-void calculate_parameter_loss(CalcWork *work[], SimFileInfo *sfi, u32 generation)
+void calculate_parameter_loss(CalcWork *work[], SimFileInfo *sfi, ParameterLossWork pmw, u32 generation)
 {
-    calculate_parameter_loss_with_parameter_override(work, sfi, 0, 0, generation);
+    calculate_parameter_loss_with_parameter_override(work, sfi, pmw, generation);
 }
 
 void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
@@ -696,7 +674,7 @@ i32 calc_thread(void *userdata)
                 } break;
                 case Work_ParameterLoss: {
                     then = stm_now();
-                    ssr = calc_go_with_rate_and_param(&calc, ps, work.sfi->notes, 0.93f, work.sfi->target.rate, work.parameter_loss.param, work.parameter_loss.value);
+                    ssr = calc_go_with_rate_and_param(&calc, ps, work.sfi->notes, work.parameter_loss.goal, work.sfi->target.rate, work.parameter_loss.param, work.parameter_loss.value);
                     now = stm_now();
                 } break;
                 case Work_Wife: {
@@ -801,9 +779,22 @@ void finish_work()
                 }
             } break;
             case Work_ParameterLoss: {
+                if (done.work.generation != state.generation) {
+                    continue;
+                }
                 assert(state.target.msd_sd > 0.0f);
-                opt_push_evaluation(&state.opt, (OptimizationRequest) { (i32)buf_index_of(state.files, sfi), done.work.parameter_loss.param - 1, done.work.parameter_loss.value }, (done.ssr.E[sfi->target.skillset] - sfi->target.want_msd) / state.target.msd_sd);
-                if (done.work.parameter_loss.param == 0) {
+                isize k = done.work.parameter_loss.sample / buf_len(state.files);
+                assert(k < array_length(state.opt_cfg.goals));
+                f32 misclass = 0.0f;
+                for (isize i = 0; i < NumSkillsets; i++) {
+                    misclass += (sfi->target.skillset == i) ? 0.0f : clamp_low(0, done.ssr.E[i] - done.ssr.E[sfi->target.skillset] + done.work.parameter_loss.msd*0.1f);
+                }
+                misclass /= state.target.msd_mean;
+                f32 delta_real = (done.ssr.E[sfi->target.skillset] - done.work.parameter_loss.msd) / state.target.msd_mean;
+                f32 delta_overall = (done.ssr.overall - done.work.parameter_loss.msd) / state.target.msd_mean;
+                f32 delta = (done.work.parameter_loss.msd / state.target.msd_mean) * (1.0f + misclass * misclass * 0.5f) * lerp(delta_real, delta_overall, 0.25f);
+                opt_push_evaluation(&state.opt, state.opt_cfg.map.to_opt[done.work.parameter_loss.param], delta, state.opt_cfg.weights[k], state.opt_cfg.barrier_weights[k]);
+                if (done.work.parameter_loss.param == 0 && k == 0) {
                     goto Work_Target;
                 }
                 continue;

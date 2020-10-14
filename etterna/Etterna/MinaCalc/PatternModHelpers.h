@@ -8,7 +8,7 @@
 
 /* generic pattern mod functions and defs to help either agnostic or dependent
  * mods do their stuff */
-thread_local float neutral = 1.F;
+constexpr float neutral = 1.F;
 
 // Relies on endiannes (significantly inaccurate)
 inline auto
