@@ -270,11 +270,20 @@ static f32 rating_floor(f32 v)
     return (f32)((i32)(v * 100.0f)) / 100.f;
 }
 
-void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_data, i32 param, SkillsetRatings *default_ratings, EffectMasks *out)
+void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, ParamSet *ps, NoteData *note_data, i32 param, EffectMasks *out)
 {
     i32 p = param;
 
+    if (out->weak[p]) {
+        // Optimisation for the optimizer. This means we only set effects, never unset them
+        return;
+    }
+
     SkillsetRatings ratings = {0};
+    SkillsetRatings default_ratings = calc_go(calc, ps, note_data, 0.93f);
+    for (i32 ss = 0; ss < NumSkillsets; ss++) {
+        default_ratings.E[ss] = rating_floor(default_ratings.E[ss]);
+    }
 
     // stronk. they react to small changes at 93%
     {
@@ -287,11 +296,11 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
             value = info->params[p].default_value * 1.05f;
         }
 
-        ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, value);
+        ratings = calc_go_with_param(calc, ps, note_data, 0.93f, param, value);
 
-        for (int r = 0; r < NumSkillsets; r++) {
-            b32 changed = rating_floor(ratings.E[r]) != default_ratings->E[r];
-            out->strong[p] |= (changed << r);
+        for (i32 ss = 0; ss < NumSkillsets; ss++) {
+            b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
+            out->strong[p] |= (changed << ss);
         }
     }
 
@@ -300,19 +309,19 @@ void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, NoteData *note_da
         assert(info->params[p].max >= info->params[p].min);
         f32 value = info->params[p].max;
 
-        ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, value);
+        ratings = calc_go_with_param(calc, ps, note_data, 0.93f, param, value);
 
         out->weak[p] = out->strong[p];
-        for (i32 r = 0; r < NumSkillsets; r++) {
-            b32 changed = rating_floor(ratings.E[r]) != default_ratings->E[r];
-            out->weak[p] |= (changed << r);
+        for (i32 ss = 0; ss < NumSkillsets; ss++) {
+            b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
+            out->weak[p] |= (changed << ss);
         }
 
         if (out->weak[p] == 0) {
-            ratings = calc_go_with_param(calc, &info->defaults, note_data, 0.93f, param, info->params[p].min);
-            for (i32 r = 0; r < NumSkillsets; r++) {
-                b32 changed = rating_floor(ratings.E[r]) != default_ratings->E[r];
-                out->weak[p] |= (changed << r);
+            ratings = calc_go_with_param(calc, ps, note_data, 0.93f, param, info->params[p].min);
+            for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
+                out->weak[p] |= (changed << ss);
             }
         }
     }
@@ -685,7 +694,7 @@ i32 calc_thread(void *userdata)
                 case Work_Effects: {
                     for (i32 i = work.effects.start; i < work.effects.end; i++) {
                         // nb. modifies sfi->effects from this thread; it is otherwise read-only
-                        calculate_effect_for_param(ct->info, &calc, work.sfi->notes, i, &work.sfi->default_ratings, &work.sfi->effects);
+                        calculate_effect_for_param(ct->info, &calc, ps, work.sfi->notes, i, &work.sfi->effects);
                     }
                 } break;
                 case Work_Skillsets: {
@@ -782,19 +791,10 @@ void finish_work()
                 if (done.work.generation != state.generation) {
                     continue;
                 }
-                assert(state.target.msd_sd > 0.0f);
-                isize k = done.work.parameter_loss.sample / buf_len(state.files);
-                assert(k < array_length(state.opt_cfg.goals));
-                f32 misclass = 0.0f;
-                for (isize i = 0; i < NumSkillsets; i++) {
-                    misclass += (sfi->target.skillset == i) ? 0.0f : clamp_low(0, done.ssr.E[i] - done.ssr.E[sfi->target.skillset] + done.work.parameter_loss.msd*0.1f);
-                }
-                misclass /= state.target.msd_mean;
-                f32 delta_real = (done.ssr.E[sfi->target.skillset] - done.work.parameter_loss.msd) / state.target.msd_mean;
-                f32 delta_overall = (done.ssr.overall - done.work.parameter_loss.msd) / state.target.msd_mean;
-                f32 delta = (done.work.parameter_loss.msd / state.target.msd_mean) * (1.0f + misclass * misclass * 0.5f) * lerp(delta_real, delta_overall, 0.25f);
-                opt_push_evaluation(&state.opt, state.opt_cfg.map.to_opt[done.work.parameter_loss.param], delta, state.opt_cfg.weights[k], state.opt_cfg.barrier_weights[k]);
-                if (done.work.parameter_loss.param == 0 && k == 0) {
+                void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr);
+                optimizer_skulduggery(sfi, done.work.parameter_loss, done.ssr);
+                if (done.work.parameter_loss.param == 0 && done.work.parameter_loss.sample < buf_len(state.files)) {
+                    // elaborate non-consecutive fall through
                     goto Work_Target;
                 }
                 continue;

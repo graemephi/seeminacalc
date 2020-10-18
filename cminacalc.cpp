@@ -221,7 +221,12 @@ CalcInfo calc_info()
     shalhoub.setup_dependent_mods();
 
     for (isize i = 0; i < num_params; i++) {
-        if (param_info[i].integer == false) {
+        if (param_info[i].constant &&
+            (  (strcmp((char *)param_info[i].name, "MinaCalc.cpp(91, 2)") == 0)
+            || (strcmp((char *)param_info[i].name, "MinaCalc.cpp(109)") == 0))) {
+            // Hack to fix bad bad no good infinite loop causer
+            param_info[i].min = 0.1f;
+        } else if (param_info[i].integer == false) {
             float test_value = -1.0f * make_test_value(param_info[i].default_value);
             if (test_value != *param_pointers[i]) {
                 param_info[i].min = *param_pointers[i];

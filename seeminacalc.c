@@ -165,12 +165,12 @@ typedef struct State
     i32 *free_graphs;
 
     OptimizationContext opt;
+    OptimizationEvaluation *opt_evaluations;
+    i32 opt_pending_evals;
     FnGraph *optimization_graph;
     struct {
-        f32 goals[3];
-        f32 goals_adjustment[3];
-        f32 weights[3];
-        f32 barrier_weights[3];
+        f32 barriers[NumSkillsets];
+        f32 *normalization_factor;
         Bound *bounds;
         struct {
             i32 *to_opt;
@@ -680,11 +680,17 @@ isize param_opt_index_by_name(CalcInfo *info, i32 *map, String mod, String param
 
 void setup_optimizer(void)
 {
+    f32 *normalization_factors = 0;
+    #if 0
     f32 *initial_x = 0;
     push_allocator(scratch);
     buf_pushn(initial_x, state.ps.num_params);
     pop_allocator();
+    #else
+    #include "x3.txt"
+    #endif
 
+    buf_pushn(normalization_factors, state.ps.num_params);
     buf_pushn(state.opt_cfg.map.to_ps, state.ps.num_params + 1);
     // This sets to_ps[-1] = to_ps[Param_None] = 0
     state.opt_cfg.map.to_ps = state.opt_cfg.map.to_ps + 1;
@@ -696,26 +702,23 @@ void setup_optimizer(void)
         if (state.info.params[i].integer == false) {
             state.opt_cfg.map.to_ps[n_params] = i;
             state.opt_cfg.map.to_opt[i] = n_params;
-            initial_x[n_params] = state.info.params[i].default_value;
+            // initial_x[n_params] = state.info.params[i].default_value > 0 ? 1.0f : -1.0f;
+            normalization_factors[n_params] = fabsf(state.info.params[i].default_value);
             n_params++;
         }
     }
-    // * 3 to add samples at 91% and 96.5%, reweighted at opt_push_evaluation-time
-    i32 n_samples = (i32)buf_len(state.files) * array_length(state.opt_cfg.goals);
+    i32 n_samples = (i32)buf_len(state.files);
     state.opt = optimize(n_params, initial_x, n_samples);
-    // synthesize some extra samples cause we need more
-    state.opt_cfg.goals[0] = 0.93f;
-    state.opt_cfg.goals[1] = 0.965f;
-    state.opt_cfg.goals[2] = 0.91f;
-    state.opt_cfg.goals_adjustment[0] = 0.0f;
-    state.opt_cfg.goals_adjustment[1] = 1.5f;
-    state.opt_cfg.goals_adjustment[2] = -1.0f;
-    state.opt_cfg.weights[0] = 1.0f;
-    state.opt_cfg.weights[1] = 0.9f;
-    state.opt_cfg.weights[2] = 0.7f;
-    state.opt_cfg.barrier_weights[0] = 4.0f;
-    state.opt_cfg.barrier_weights[1] = 2.2f;
-    state.opt_cfg.barrier_weights[2] = 2.0f;
+    // since we use divided difference to get the derivative we scale all parameters before feeding them to the optimizer
+    state.opt_cfg.normalization_factor = normalization_factors;
+    state.opt_cfg.barriers[0] = 2.0f;
+    state.opt_cfg.barriers[1] = 2.0f;
+    state.opt_cfg.barriers[2] = 2.0f;
+    state.opt_cfg.barriers[3] = 2.0f;
+    state.opt_cfg.barriers[4] = 2.0f;
+    state.opt_cfg.barriers[5] = 5.0f;
+    state.opt_cfg.barriers[6] = 2.0f;
+    state.opt_cfg.barriers[7] = 2.5f;
     // some parameters can blow up the calc
     buf_pushn(state.opt_cfg.bounds, n_params);
     for (isize i = 0; i < n_params; i++) {
@@ -735,8 +738,11 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.jack_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.stream_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("Globals"), S("MinaCalc.bad_newbie_skillsets_pbm"))].low = 1.0f;
+#if DUMP_CONSTANTS == 0 // almost always
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("OHJ.h(78)"))].low = 0.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("OHJ.h(86)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(91, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(109)"))].low = 0.1f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(163)"))].low = 0.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(163, 2)"))].low = 0.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(593)"))].low = 0.0f;
@@ -745,6 +751,30 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(866)"))].low = 0.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(869)"))].low = 0.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(871)"))].low = 0.0f;
+#endif
+    for (isize i = 0; i < n_params; i++) {
+        state.opt_cfg.bounds[i].low /= normalization_factors[i];
+        state.opt_cfg.bounds[i].high /= normalization_factors[i];
+    }
+}
+
+static f32 SkillsetOverallBalance = 0.35f;
+void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr)
+{
+    assert(state.target.msd_sd > 0.0f);
+    f32 delta_real = ssr.E[sfi->target.skillset] - work.msd;
+    f32 delta_overall = ssr.overall - work.msd;
+    f32 misclass = expf(ssr.overall / ssr.E[sfi->target.skillset]) / 2.71828182846f;
+    f32 magnify_large_targets = work.msd / state.target.msd_mean;
+    f32 delta = misclass * magnify_large_targets * lerp(delta_real, delta_overall, SkillsetOverallBalance);
+    buf_push(state.opt_evaluations, (OptimizationEvaluation) {
+        .sample = work.sample,
+        .param = state.opt_cfg.map.to_opt[work.param],
+        .delta = delta,
+        .barrier = state.opt_cfg.barriers[sfi->target.skillset]
+    });
+    state.opt_pending_evals--;
+    assert(state.opt_pending_evals >= 0);
 }
 
 void init(void)
@@ -1185,46 +1215,67 @@ void frame(void)
 
         static u32 last_generation = 0;
         if (last_generation != state.generation) {
-            opt_discard(&state.opt);
+            assert(!"Lazy");
             // memcpy(state.opt.x, state.ps.params + 1, state.opt.n_params * sizeof(f32));
             last_generation = state.generation;
-        } else {
-            OptimizationRequest req = opt_pump(&state.opt);
+        } else if (state.opt_pending_evals == 0) {
+            state.generation++;
+            last_generation = state.generation;
 
-            if (req.n_samples > 0) {
-                for (isize i = 0; i < state.opt.n_params; i++) {
-                    // Apply bounds. This is a kind of a hack so it lives out here and not in the optimizer :)
-                    state.opt.x[i] = clamp(state.opt_cfg.bounds[i].low, state.opt_cfg.bounds[i].high, state.opt.x[i]);
-                    // Copy x into the calc parameters
-                    state.ps.params[state.opt_cfg.map.to_ps[i]] = state.opt.x[i];
-                }
-                state.generation++;
-                last_generation = state.generation;
-                for (isize i = 0; i < req.n_samples; i++) {
-                    i32 sample = state.opt.active.samples[i];
-                    i32 file_index = sample % buf_len(state.files);
-                    isize sample_type = file_index / buf_len(state.files);
-                    assert(file_index >= 0);
-                    assert(sample_type < array_length(state.opt_cfg.goals));
-                    f32 goal = state.opt_cfg.goals[sample_type];
-                    f32 jachnical = (state.files[file_index].target.skillset == 5 || state.files[file_index].target.skillset == 7) ? 2.0f : 1.0f;
-                    f32 msd = state.files[file_index].target.want_msd + jachnical*state.opt_cfg.goals_adjustment[sample_type];
+            OptimizationRequest req = opt_pump(&state.opt, state.opt_evaluations);
+            assert(req.n_samples > 0);
+            buf_clear(state.opt_evaluations);
 
-                    ParameterLossWork pmw_x = { .sample = sample, .goal = goal, .msd = msd };
-                    calculate_parameter_loss(&state.low_prio_work, &state.files[file_index], pmw_x, state.generation);
-                    for (isize j = 0; j < req.n_parameters; j++) {
-                        i32 param = state.opt.active.parameters[j];
-                        ParameterLossWork pmw_xh = {
+            for (isize i = 0; i < state.opt.n_params; i++) {
+                // Apply bounds. This is a kind of a hack so it lives out here and not in the optimizer :)
+                state.opt.x[i] = clamp(state.opt_cfg.bounds[i].low, state.opt_cfg.bounds[i].high, state.opt.x[i]);
+                // Copy x into the calc parameters
+                state.ps.params[state.opt_cfg.map.to_ps[i]] = state.opt.x[i] * state.opt_cfg.normalization_factor[i];
+            }
+
+            i32 submitted = 0;
+            for (isize i = 0; i < req.n_samples; i++) {
+                i32 sample = state.opt.active.samples[i];
+                i32 file_index = sample % buf_len(state.files);
+                assert(file_index >= 0);
+                SimFileInfo *sfi = &state.files[file_index];
+
+                f32 goal = 0.93f;
+                f32 msd = sfi->target.want_msd * (39.0f / 40.0f);
+
+                ParameterLossWork plw_x = { .sample = sample, .goal = goal, .msd = msd };
+                calculate_parameter_loss(&state.low_prio_work, sfi, plw_x, state.generation);
+                submitted++;
+
+                i32 params_submitted = 0;
+                for (isize j = 0; j < state.opt.n_params; j++) {
+                    i32 param = state.opt.active.parameters[j];
+                    i32 p = state.opt_cfg.map.to_ps[param];
+                    if (sfi->num_effects_computed == 0 || sfi->effects.weak[p]) {
+                        calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
                             .sample = sample,
-                            .param = state.opt_cfg.map.to_ps[param],
-                            .value = state.opt.x[param] + req.h,
+                            .param = p,
+                            .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factor[param],
                             .goal = goal,
                             .msd = msd
-                        };
-                        calculate_parameter_loss(&state.low_prio_work, &state.files[file_index], pmw_xh, state.generation);
+                        }, state.generation);
+                        params_submitted++;
+                    }
+
+                    if (params_submitted == req.n_parameters) {
+                        break;
                     }
                 }
+
+                submitted += params_submitted;
+
+                if (buf_len(state.high_prio_work) == 0 && ((sfi->num_effects_computed == 0) || ((state.generation - sfi->effects_generation) > 300))) {
+                    sfi->num_effects_computed = 0;
+                    calculate_effects(&state.high_prio_work, &state.info, sfi, state.generation);
+                }
             }
+
+            state.opt_pending_evals = submitted;
 
             static u64 t = 0;
             if (stm_sec(stm_since(t)) > 1.0) {
@@ -1246,11 +1297,11 @@ void frame(void)
                 }
             }
 
-            opt_focus(&state.opt, min_idx);
             opt_focus(&state.opt, max_idx);
+            opt_focus(&state.opt, min_idx);
 
             state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
-            state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss.at_x;
+            state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
         }
 
         igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
@@ -1275,12 +1326,20 @@ void frame(void)
             }
         }
 
-        igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 4.0f);
-        igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 4.0f);
-        igSliderFloat("MDecay", &MDecay, 0.1f, 1.0f - 1e-3f, "%g", 0.5f);
-        igSliderFloat("VDecay", &VDecay, 0.1f, 1.0f - 1e-5f, "%g", 0.5f);
+        igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
+        igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
+        igSliderFloat("MDecay", &MDecay, 0.666f, 1.0f - 1e-3f, "%g", 0.5f);
+        igSliderFloat("VDecay", &VDecay, 0.666f, 1.0f - 1e-5f, "%g", 0.5f);
         igSliderInt("SampleBatchSize", &SampleBatchSize, 1, state.opt.n_samples, "%d");
-        igSliderInt("ParameterBatchSize", &ParameterBatchSize, 0, state.opt.n_params, "%d");
+        igSliderInt("ParameterBatchSize", &ParameterBatchSize, 1, state.opt.n_params, "%d");
+        igSliderFloat("Stream Overrated Penalty", &state.opt_cfg.barriers[1], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("JS Overrated Penalty", &state.opt_cfg.barriers[2], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("HS Overrated Penalty", &state.opt_cfg.barriers[3], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("Stamina Overrated Penalty", &state.opt_cfg.barriers[4], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("Jackspeed Overrated Penalty", &state.opt_cfg.barriers[5], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("Chordjacks Overrated Penalty", &state.opt_cfg.barriers[6], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("Technical Overrated Penalty", &state.opt_cfg.barriers[7], 2.0f, 8.0f, "%f", 1.0f);
+        igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
 
         igEnd();
     }

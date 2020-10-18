@@ -38,6 +38,7 @@ typedef double f64;
 #pragma warning(disable : 4057) // 'initializing': 'char *' differs in indirection to slightly different base types from 'u8 *'
 #pragma warning(disable : 4709) // comma operator within array index expression
 #pragma warning(disable : 4127) // conditional expression is constant
+#pragma warning(disable : 4210) // nonstandard extension used: function given file scope
 #endif
 
 #ifdef __clang__
