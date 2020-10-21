@@ -155,12 +155,11 @@ struct WideRangeRollMod
 		if (seq_ms[1] > seq_ms[0]) {
 			zoop_the_woop(1, P(2.5F));
 		} else {
-			float OPT_factor = P(2.5F);
-			seq_ms[0] /= OPT_factor;
-			seq_ms[2] /= OPT_factor;
+			seq_ms[0] /= P(2.5F);
+			seq_ms[2] /= PREV(2.5F);
 			last_passed_check = do_timing_thing(P(1.F));
-			seq_ms[0] *= OPT_factor;
-			seq_ms[2] *= OPT_factor;
+			seq_ms[0] *= PREV(2.5F);
+			seq_ms[2] *= PREV(2.5F);
 		}
 	}
 
@@ -177,28 +176,26 @@ struct WideRangeRollMod
 		// run 2 tests so we can keep a stricter cutoff
 		// need to put cv in array thingy mcboop
 		// check 1
-		float OPT_factor1 = P(2.5F);
-		idk_ms[1] /= OPT_factor1;
-		idk_ms[2] /= OPT_factor1;
+		idk_ms[1] /= P(2.5F);
+		idk_ms[2] /= PREV(2.5F);
 
 		do_other_timing_thing(P(1.25F));
 
-		idk_ms[1] *= OPT_factor1;
-		idk_ms[2] *= OPT_factor1;
+		idk_ms[1] *= PREV(2.5F);
+		idk_ms[2] *= PREV(2.5F);
 
 		if (last_passed_check) {
 			return;
 		}
 
 		// test again
-		float OPT_factor2 = P(3.F);
-		idk_ms[1] /= OPT_factor2;
-		idk_ms[2] /= OPT_factor2;
+		idk_ms[1] /= P(3.F);
+		idk_ms[2] /= PREV(3.F);
 
 		do_other_timing_thing(P(1.25F));
 
-		idk_ms[1] *= OPT_factor2;
-		idk_ms[2] *= OPT_factor2;
+		idk_ms[1] *= PREV(3.F);
+		idk_ms[2] *= PREV(3.F);
 	}
 
 	void complete_seq()

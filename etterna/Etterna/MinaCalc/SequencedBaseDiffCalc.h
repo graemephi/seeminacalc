@@ -75,7 +75,7 @@ struct techyo
 
 		pewp /= obliosis;
 		const auto vertebrae = std::clamp(
-		  ((pineapple + porcupine + sequins) / 3.F) + pewp, oioi, P(1.F) + oioi);
+		  ((pineapple + porcupine + sequins) / N(3.F)) + pewp, oioi, P(1.F) + oioi);
 
 		teehee(c / vertebrae);
 

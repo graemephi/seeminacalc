@@ -51,6 +51,11 @@ static float clamp_low(float a, float t)
     return (a > t) ? a : t;
 }
 
+static b32 str_eq(char const *a, char const *b)
+{
+    return strcmp(a, b) == 0;
+}
+
 const char *ModNames[] = {
     "Rate",
     "StreamMod",
@@ -76,6 +81,48 @@ const char *ModNames[] = {
     "BaseScalers",
     "Globals",
     "InlineConstants",
+};
+
+const char *ModFiles[] = {
+    0,
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHJ.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h",
+    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h",
+    0,
+    0,
+    0,
+};
+
+const char *BaseScalersFile = "etterna/Etterna/MinaCalc/UlbuAcolytes.h";
+
+const char *GlobalFiles[] = {
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
+    "etterna/Etterna/MinaCalc/SequencingHelpers.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/RMSequencing.h",
 };
 
 enum
@@ -169,6 +216,7 @@ CalcInfo calc_info()
     b32 is_constant = false;
     for (isize i = 0; i < NumMods; i++) {
         if (params[i] == &BaseScalers) {
+            // Every param after this iteration is a literal constant in the code somewhere
             is_constant = true;
         }
         for (const auto& p : *params[i]) {
@@ -176,6 +224,7 @@ CalcInfo calc_info()
             param_info_cursor->mod = (int)i;
             param_info_cursor->default_value = *p.second;
             param_info_cursor->constant = is_constant;
+            param_info_cursor->optimizable = true;
             param_info_cursor++;
 
             param_pointers.push_back(p.second);
@@ -191,11 +240,12 @@ CalcInfo calc_info()
     shalhoub.setup_dependent_mods();
 
     for (isize i = 0; i < num_params; i++) {
-        if (strcmp((char *)param_info[i].name, "window_param") == 0) {
+        if (str_eq((char *)param_info[i].name, "window_param")) {
             param_info[i].integer = true;
+            param_info[i].optimizable = false;
             param_info[i].min = 0;
             param_info[i].max = max_moving_window_size - 1;
-        } else if (strcmp((char *)param_info[i].name, "prop_buffer") == 0) {
+        } else if (str_eq((char *)param_info[i].name, "prop_buffer")) {
             param_info[i].max = nextafter(2.0f, 0.0f);
         } else {
             float test_value = make_test_value(param_info[i].default_value);
@@ -222,8 +272,8 @@ CalcInfo calc_info()
 
     for (isize i = 0; i < num_params; i++) {
         if (param_info[i].constant &&
-            (  (strcmp((char *)param_info[i].name, "MinaCalc.cpp(91, 2)") == 0)
-            || (strcmp((char *)param_info[i].name, "MinaCalc.cpp(109)") == 0))) {
+            (  (str_eq((char *)param_info[i].name, "MinaCalc.cpp(91, 2)"))
+            || (str_eq((char *)param_info[i].name, "MinaCalc.cpp(109)")))) {
             // Hack to fix bad bad no good infinite loop causer
             param_info[i].min = 0.1f;
         } else if (param_info[i].integer == false) {
@@ -265,7 +315,57 @@ CalcInfo calc_info()
     result.mods = mod_info;
     result.params = param_info;
     result.defaults = defaults;
+
+    assert(str_eq(mod_info[NumMods - 1].name, "InlineConstants"));
+    ModInfo *inlines_mod = &mod_info[NumMods - 1];
+    for (size_t i = 0; i < inlines_mod->num_params; i++) {
+        size_t p = inlines_mod->index + i;
+        InlineConstantInfo *icf =  info_for_inline_constant(&result, p);
+        param_info[p].optimizable = icf->optimizable;
+        if (icf->optimizable == false) {
+            param_info[p].fake = true;
+        }
+
+        assert_implies(param_info[p].fake, param_info[p].optimizable == false);
+        assert_implies(param_info[p].integer, param_info[p].optimizable == false);
+        assert_implies(param_info[p].optimizable, !param_info[p].fake && !param_info[p].integer);
+    }
+
     return result;
+}
+
+const char *file_for_param(CalcInfo *info, size_t param_index)
+{
+    const char *result = 0;
+
+    assert(param_index >= 0 && param_index < info->num_params);
+    ParamInfo *p = &info->params[param_index];
+    if (ModFiles[p->mod]) {
+        result = ModFiles[p->mod];
+    } else {
+        ModInfo *m = &info->mods[p->mod];
+        if (str_eq(m->name, "Globals")) {
+            ModInfo *m = &info->mods[p->mod];
+            size_t idx = param_index - m->index;
+            assert(idx < array_length(GlobalFiles));
+            result = GlobalFiles[idx];
+        } else if (str_eq(m->name, "BaseScalers")) {
+            return BaseScalersFile;
+        } else {
+            assert(str_eq(m->name, "InlineConstants"));
+        }
+    }
+
+    return result;
+}
+
+InlineConstantInfo *info_for_inline_constant(CalcInfo *info, size_t param_index)
+{
+    assert(param_index >= 0 && param_index < info->num_params);
+    ParamInfo *p = &info->params[param_index];
+    ModInfo *m = &info->mods[p->mod];
+    assert(str_eq(m->name, "InlineConstants"));
+    return &where_u_at[param_index - m->index];
 }
 
 auto

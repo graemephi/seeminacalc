@@ -39,6 +39,7 @@ typedef double f64;
 #pragma warning(disable : 4709) // comma operator within array index expression
 #pragma warning(disable : 4127) // conditional expression is constant
 #pragma warning(disable : 4210) // nonstandard extension used: function given file scope
+#pragma warning(disable : 4996) // _CRT_SECURE_NO_WARNINGS
 #endif
 
 #ifdef __clang__

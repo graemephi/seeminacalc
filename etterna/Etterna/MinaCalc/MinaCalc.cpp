@@ -14,6 +14,41 @@ using std::max;
 using std::min;
 using std::pow;
 
+/* pbm = point buffer multiplier, or basically starting with a max points some
+ * degree above the actual max points as a cheap hack to water down some of the
+ * absurd scaling hs/js/cj had. Note: do not set these values below 1 */
+thread_local float tech_pbm = 1.F;
+thread_local float jack_pbm = 1.0175F;
+thread_local float stream_pbm = 1.01F;
+thread_local float bad_newbie_skillsets_pbm = 1.05F;
+
+thread_local float magic_num = 16.F;
+
+using ParamJunk = std::vector<std::pair<std::string,float*>>;
+thread_local ParamJunk BaseScalers {
+	// Overall not included
+    { "Stream", (float *)(&basescalers[1]) },
+    { "Jumpstream", (float *)&basescalers[2] },
+    { "Handstream", (float *)&basescalers[3] },
+    { "Stamina", (float *)&basescalers[4] },
+    { "Jackspeed", (float *)&basescalers[5] },
+    { "Chordjacks", (float *)&basescalers[6] },
+    { "Technical", (float *)&basescalers[7] },
+};
+
+thread_local ParamJunk ManualConstants {
+    { "MinaCalc.magic_num", &magic_num },
+    { "MinaCalc.tech_pbm", &tech_pbm },
+    { "MinaCalc.jack_pbm", &jack_pbm },
+    { "MinaCalc.stream_pbm", &stream_pbm },
+    { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
+    { "SequencingHelpers.finalscaler", &finalscaler },
+    { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
+    { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
+    { "GenericSequencing.anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
+    { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
+};
+
 static const std::array<std::pair<unsigned, std::string_view>, 16>
   note_mapping = { { { 0U, "----" },
 					 { 1U, "x---" },
@@ -280,10 +315,9 @@ StamAdjust(const float x,
 		for (auto i = 0; i < calc.numitv; i++) {
 			avs1 = avs2;
 			avs2 = base_diff->at(i);
-			mod += ((((avs1 + avs2) / 2.F) / (stam_prop * x)) - P(1.F)) / stam_mag;
-			float OPT_cap = P(0.95f);
-			if (mod > OPT_cap) {
-				stam_floor += (mod - OPT_cap) / stam_fscale;
+			mod += ((((avs1 + avs2) / N(2.F)) / (stam_prop * x)) - P(1.F)) / stam_mag;
+			if (mod > P(0.95F)) {
+				stam_floor += (mod - PREV(0.95F)) / stam_fscale;
 			}
 			local_ceil = stam_ceil * stam_floor;
 
@@ -317,10 +351,9 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
 	for (size_t i = 0; i < diff.size(); i++) {
 		const auto avs1 = avs2;
 		avs2 = diff.at(i).second;
-		mod += ((((avs1 + avs2) / 2.F) / (stam_prop * x)) - P(1.F)) / stam_mag;
-		float OPT_cap = P(0.95f);
-		if (mod > OPT_cap) {
-			stam_floor += (mod - OPT_cap) / stam_fscale;
+		mod += ((((avs1 + avs2) / N(2.F)) / (stam_prop * x)) - P(1.F)) / stam_mag;
+		if (mod > P(0.95F)) {
+			stam_floor += (mod - PREV(0.95F)) / stam_fscale;
 		}
 		const auto local_ceil = stam_ceil * stam_floor;
 
@@ -335,7 +368,7 @@ JackStamAdjust(const float x, Calc& calc, const int hi)
 	return doot;
 }
 
-thread_local float magic_num = 16.F;
+//
 
 [[nodiscard]] inline auto
 hit_the_road(const float& x, const float& y) -> float
@@ -452,39 +485,6 @@ CalcInternal(float& gotpoints,
 	}
 }
 
-/* pbm = point buffer multiplier, or basically starting with a max points some
- * degree above the actual max points as a cheap hack to water down some of the
- * absurd scaling hs/js/cj had. Note: do not set these values below 1 */
-thread_local float tech_pbm = 1.F;
-thread_local float jack_pbm = 1.0175F;
-thread_local float stream_pbm = 1.01F;
-thread_local float bad_newbie_skillsets_pbm = 1.05F;
-
-using ParamJunk = std::vector<std::pair<std::string,float*>>;
-thread_local ParamJunk BaseScalers {
-	// Overall not included
-    { "Stream", (float *)(&basescalers[1]) },
-    { "Jumpstream", (float *)&basescalers[2] },
-    { "Handstream", (float *)&basescalers[3] },
-    { "Stamina", (float *)&basescalers[4] },
-    { "Jackspeed", (float *)&basescalers[5] },
-    { "Chordjacks", (float *)&basescalers[6] },
-    { "Technical", (float *)&basescalers[7] },
-};
-
-thread_local ParamJunk ManualConstants {
-    { "MinaCalc.magic_num", &magic_num },
-    { "MinaCalc.tech_pbm", &tech_pbm },
-    { "MinaCalc.jack_pbm", &jack_pbm },
-    { "MinaCalc.stream_pbm", &stream_pbm },
-    { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
-    { "SequencingHelpers.finalscaler", &finalscaler },
-    { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
-    { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
-    { "GenericSequencing.anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
-    { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
-};
-
 auto
 Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 					  const float music_rate,
@@ -575,6 +575,14 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	return false;
 }
 
+//
+//
+//
+//
+//
+//
+//
+
 // each skillset should just be a separate calc function [todo]
 auto
 Calc::Chisel(const float player_skill,
@@ -652,6 +660,7 @@ Calc::Chisel(const float player_skill,
 	} while (gotpoints < reqpoints);
 	curr_player_skill -= curr_resolution; // We're too high. Undo our last move.
 	curr_resolution /= 2.F;
+
 	for (auto iter = 1; iter <= 7; iter++) { // Refine
 		if (curr_player_skill > max_rating) {
 			return min_rating;

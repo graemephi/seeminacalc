@@ -562,6 +562,9 @@ typedef struct ParamSliderChange
 
 static void param_slider_widget(i32 param_idx, b32 show_parameter_names, ParamSliderChange *out)
 {
+    if (state.info.params[param_idx].fake) {
+        return;
+    }
     assert(out);
     i32 type = ParamSlider_Nothing;
     f32 value = 0.0f;
@@ -699,7 +702,7 @@ void setup_optimizer(void)
     // The param at 0, rate, is not a real parameter
     state.opt_cfg.map.to_opt[0] = Param_None;
     for (i32 i = 1; i < state.ps.num_params; i++) {
-        if (state.info.params[i].integer == false) {
+        if (state.info.params[i].optimizable) {
             state.opt_cfg.map.to_ps[n_params] = i;
             state.opt_cfg.map.to_opt[i] = n_params;
             // initial_x[n_params] = state.info.params[i].default_value > 0 ? 1.0f : -1.0f;
@@ -745,12 +748,11 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(109)"))].low = 0.1f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(163)"))].low = 0.0f;
     state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(163, 2)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(593)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(593)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(864)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(866)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(869)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(871)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(538)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(810)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(812)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(815)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_opt_index_by_name(&state.info, state.opt_cfg.map.to_opt, S("InlineConstants"), S("MinaCalc.cpp(817)"))].low = 0.0f;
 #endif
     for (isize i = 0; i < n_params; i++) {
         state.opt_cfg.bounds[i].low /= normalization_factors[i];
@@ -916,7 +918,7 @@ void frame(void)
                     tooltip("CalcTestList: min delta");
                     igSameLine(0, 0); igTextUnformatted(", ", 0); igSameLine(0, 0);
                     igTextColored(msd_color(fabsf(state.target.max_delta) * 3.0f), "%02.2f", (f64)state.target.max_delta);
-                    tooltip("CalcTestList: max delta"); ;
+                    tooltip("CalcTestList: max delta");
                     igSameLine(0, 0); igTextUnformatted(")", 0);
                 }
                 igSameLine(0, 12.0f);
@@ -1213,10 +1215,11 @@ void frame(void)
             state.optimization_graph = &state.graphs[make_optimization_graph()];
         }
 
-        static u32 last_generation = 0;
+        static u32 last_generation = 1;
         if (last_generation != state.generation) {
-            assert(!"Lazy");
-            // memcpy(state.opt.x, state.ps.params + 1, state.opt.n_params * sizeof(f32));
+            for (isize i = 0; i < state.opt.n_params; i++) {
+                state.opt.x[i] = state.ps.params[state.opt_cfg.map.to_ps[i]] / state.opt_cfg.normalization_factor[i];
+            }
             last_generation = state.generation;
         } else if (state.opt_pending_evals == 0) {
             state.generation++;
@@ -1340,6 +1343,10 @@ void frame(void)
         igSliderFloat("Chordjacks Overrated Penalty", &state.opt_cfg.barriers[6], 2.0f, 8.0f, "%f", 1.0f);
         igSliderFloat("Technical Overrated Penalty", &state.opt_cfg.barriers[7], 2.0f, 8.0f, "%f", 1.0f);
         igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
+
+        if (igButton("Save", V2Zero)) {
+            rewrite_parameters(&state.info, &state.ps);
+        }
 
         igEnd();
     }

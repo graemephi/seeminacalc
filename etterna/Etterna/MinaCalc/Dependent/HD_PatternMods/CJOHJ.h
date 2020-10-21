@@ -78,7 +78,7 @@ struct CJOHJumpMod
 	void set_max_seq_comp()
 	{
 		max_seq_component = max_seq_pool - (base_seq_prop * max_seq_scaler);
-		max_seq_component = std::max(max_seq_component, P(0.1F));
+		max_seq_component = max_seq_component < P(0.1F) ? PREV(0.1F) : max_seq_component;
 		max_seq_component = fastsqrt(max_seq_component);
 	}
 
@@ -86,7 +86,7 @@ struct CJOHJumpMod
 	void set_prop_comp()
 	{
 		prop_component = prop_pool - (base_jump_prop * prop_scaler);
-		prop_component = std::max(prop_component, P(0.1F));
+		prop_component = prop_component < P(0.1F) ? PREV(0.1F) : prop_component;
 		prop_component = fastsqrt(prop_component);
 	}
 

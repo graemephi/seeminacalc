@@ -405,6 +405,7 @@ typedef struct String
     isize len;
 } String;
 #define S(imm) ((String) { .buf = imm, .len = sizeof(imm) - 1 })
+#define SB(b) ((String) { .buf = b, .len = buf_len(b) })
 // msvc in its infinite wisdom needs this for static init
 #define SS(imm) { .buf = imm, .len = sizeof(imm) - 1 }
 
@@ -489,12 +490,7 @@ f32 rngf(void)
 // This is for development stuff and so doesn't need to handle errors properly!!
 Buffer read_file(const char *path)
 {
-#ifdef _MSC_VER
-    FILE *f;
-    fopen_s(&f, path, "rb");
-#else
     FILE *f = fopen(path, "rb");
-#endif
     assert(f);
 
     fseek(f, 0, SEEK_END);
@@ -518,12 +514,7 @@ Buffer read_file(const char *path)
 
 void write_file(const char *path, u8 *buf)
 {
-#ifdef _MSC_VER
-    FILE *f;
-    fopen_s(&f, path, "wb");
-#else
     FILE *f = fopen(path, "wb");
-#endif
     assert(f);
     fwrite(buf, 1, buf_len(buf), f);
     fclose(f);

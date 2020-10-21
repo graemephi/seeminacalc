@@ -72,6 +72,8 @@ typedef struct ParamInfo
     float max;
     bool integer;
     bool constant;
+    bool optimizable;
+    bool fake;
 } ParamInfo;
 
 typedef struct SeeCalc
@@ -94,6 +96,8 @@ extern "C"
 {
 #endif
 
+typedef struct InlineConstantInfo InlineConstantInfo;
+
 // Turns the SQLite binary blob from the `serializednotedata` column in the `steps`
 // table of the cache db into an opaque handle to C++ whateverisms.
 NoteData *frobble_serialized_note_data(char *note_data, size_t length);
@@ -106,6 +110,8 @@ NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
 void free_note_data(NoteData *note_data);
 
 CalcInfo calc_info(void);
+const char *file_for_param(CalcInfo *info, size_t param_index);
+InlineConstantInfo *info_for_inline_constant(CalcInfo *info, size_t param_index);
 SeeCalc calc_init(CalcInfo *info);
 SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal);
 SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, int param, float value);
