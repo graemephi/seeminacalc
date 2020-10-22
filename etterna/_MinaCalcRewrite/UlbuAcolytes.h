@@ -10,7 +10,7 @@
  * patterns have lower enps than streams, streams default to 1 and chordstreams
  * start lower, stam is a special case and may use normalizers again */
 static const std::array<float, NUM_Skillset> basescalers = {
-	0.F, 0.900338F, 0.88226F, 0.866082F, 0.866137F, 0.9489F, 0.809246F, 0.844435F
+	0.F, 0.956464F, 0.853456F, 0.871518F, 0.970412F, 0.888464F, 0.835432F, 0.827444F
 };
 
 static const std::string calc_params_xml = "Save/calc params.xml";

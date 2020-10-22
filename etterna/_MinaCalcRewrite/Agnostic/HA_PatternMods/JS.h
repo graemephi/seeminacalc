@@ -9,26 +9,26 @@ struct JSMod
 	const int _tap_size = jump;
 
 #pragma region params
-	float min_mod = 0.561762F;
-	float max_mod = 1.12286F;
+	float min_mod = 0.588575F;
+	float max_mod = 1.08829F;
 	float mod_base = -0.F;
-	float prop_buffer = 1.05609F;
+	float prop_buffer = 1.01292F;
 
-	float total_prop_min = 0.574498F;
-	float total_prop_max = 1.04885F;
-	float total_prop_scaler = 2.56965F; // ~19/7
+	float total_prop_min = 0.601647F;
+	float total_prop_max = 1.07748F;
+	float total_prop_scaler = 2.60844F; // ~19/7
 
-	float split_hand_pool = 1.34493F;
-	float split_hand_min = 0.911651F;
-	float split_hand_max = 1.01181F;
-	float split_hand_scaler = 0.918457F;
+	float split_hand_pool = 1.48616F;
+	float split_hand_min = 0.926252F;
+	float split_hand_max = 1.00233F;
+	float split_hand_scaler = 1.04673F;
 
-	float jack_pool = 1.41434F;
-	float jack_min = 0.520774F;
-	float jack_max = 1.01195F;
-	float jack_scaler = 1.02788F;
+	float jack_pool = 1.35007F;
+	float jack_min = 0.506534F;
+	float jack_max = 1.00192F;
+	float jack_scaler = 1.02739F;
 
-	float decay_factor = 0.0495505F;
+	float decay_factor = 0.0498607F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -119,7 +119,7 @@ struct JSMod
 		  std::clamp(total_prop * jumptrill_prop * jack_prop, min_mod, max_mod);
 
 		if (mitvi.dunk_it) {
-			pmod *= 1.00814F;
+			pmod *= 1.0052F;
 		}
 
 		// set last mod, we're using it to create a decaying mod that won't

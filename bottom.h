@@ -269,6 +269,14 @@ void *buf_pushn_(void *buf, isize size, isize count)
     return result;
 }
 
+#define buf_zeros(buf, n) (buf_maybe_fit((buf), (n)), buf_zeros_(buf, buf_elem_size(buf), (n)))
+force_inline
+void buf_zeros_(void *buf, isize size, isize count)
+{
+    buf_clear(buf);
+    buf_pushn_(buf, size, count);
+}
+
 force_inline
 void *buf_make_(void *dest, void *src, size_t size)
 {

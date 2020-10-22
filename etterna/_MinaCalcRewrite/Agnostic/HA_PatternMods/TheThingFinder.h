@@ -11,14 +11,14 @@ struct TheThingLookerFinderThing
 
 #pragma region params
 
-	float min_mod = 0.161582F;
-	float max_mod = 0.936424F;
-	float base = 0.0498202F;
+	float min_mod = 0.160428F;
+	float max_mod = 0.981135F;
+	float base = 0.0525581F;
 
 	// params for tt_sequencing
 	float group_tol = 35.F;
 	float step_tol = 17.5F;
-	float scaler = 0.206946F;
+	float scaler = 0.204079F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -68,14 +68,14 @@ struct TheThingLookerFinderThing2
 
 #pragma region params
 
-	float min_mod = 0.152794F;
-	float max_mod = 1.04148F;
-	float base = 0.0509753F;
+	float min_mod = 0.139281F;
+	float max_mod = 1.04459F;
+	float base = 0.0531631F;
 
 	// params for tt_sequencing
 	float group_tol = 35.F;
 	float step_tol = 17.5F;
-	float scaler = 0.176422F;
+	float scaler = 0.185678F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },

@@ -10,7 +10,7 @@ constexpr float s_init = -5.F;
 constexpr float ms_init = 5000.F;
 
 // global multiplier to standardize baselines
-constexpr float finalscaler = 3.46025F;
+constexpr float finalscaler = 3.67294F;
 
 inline auto
 column_count(const unsigned& notes) -> int

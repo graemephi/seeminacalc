@@ -90,13 +90,13 @@ OptimizationContext optimize(i32 n_params, f32 *initial_x, i32 n_samples)
         .n_params = n_params,
         .n_samples = n_samples,
     };
-    buf_pushn(result.x, n_params);
-    buf_pushn(result.v, n_params);
-    buf_pushn(result.v_correction, n_params);
-    buf_pushn(result.m, n_params);
-    buf_pushn(result.m_correction, n_params);
-    buf_pushn(result.active.samples, n_samples);
-    buf_pushn(result.active.parameters, n_params);
+    buf_zeros(result.x, n_params);
+    buf_zeros(result.v, n_params);
+    buf_zeros(result.v_correction, n_params);
+    buf_zeros(result.m, n_params);
+    buf_zeros(result.m_correction, n_params);
+    buf_zeros(result.active.samples, n_samples);
+    buf_zeros(result.active.parameters, n_params);
     for (isize i = 0; i < n_params; i++) {
         result.x[i] = initial_x[i];
         result.active.parameters[i] = (i32)i;

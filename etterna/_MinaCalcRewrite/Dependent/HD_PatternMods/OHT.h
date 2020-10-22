@@ -18,13 +18,13 @@ struct OHTrillMod
 
 	float window_param = 3.F;
 
-	float min_mod = 0.914842F;
-	float max_mod = 0.997813F;
-	float base = 1.31744F;
-	float suppression = 0.422373F;
+	float min_mod = 0.892528F;
+	float max_mod = 0.957894F;
+	float base = 1.35189F;
+	float suppression = 0.394212F;
 
-	float cv_reset = 0.902471F;
-	float cv_threshhold = 0.499512F;
+	float cv_reset = 1.01997F;
+	float cv_threshhold = 0.47245F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "window_param", &window_param },
@@ -112,7 +112,7 @@ struct OHTrillMod
 			hello_my_name_is_goat =
 			  (static_cast<float>(v) / itv_taps) - suppression;
 		}
-		return std::clamp(hello_my_name_is_goat, 0.102203F, 0.972838F);
+		return std::clamp(hello_my_name_is_goat, 0.100571F, 0.993251F);
 	}
 
 	void complete_seq()

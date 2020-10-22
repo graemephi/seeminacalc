@@ -12,16 +12,16 @@ struct StreamMod
 	const int _tap_size = single;
 
 #pragma region params
-	float min_mod = 0.619706F;
-	float max_mod = 1.00487F;
-	float prop_buffer = 0.935936F;
-	float prop_scaler = 1.46511F;
+	float min_mod = 0.583397F;
+	float max_mod = 1.00951F;
+	float prop_buffer = 0.972549F;
+	float prop_scaler = 1.37165F;
 
-	float jack_pool = 4.10018F;
-	float jack_comp_min = 0.503878F;
-	float jack_comp_max = 1.08347F;
+	float jack_pool = 4.06588F;
+	float jack_comp_min = 0.514192F;
+	float jack_comp_max = 1.08263F;
 
-	float vibro_flag = 0.825316F;
+	float vibro_flag = 1.02972F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -76,9 +76,9 @@ struct StreamMod
 
 		if (mitvi.basically_vibro) {
 			if (mitvi.num_var == 1) {
-				pmod *= 0.402423F * vibro_flag;
+				pmod *= 0.441311F * vibro_flag;
 			} else if (mitvi.num_var == 2) {
-				pmod *= 0.708184F * vibro_flag;
+				pmod *= 0.786186F * vibro_flag;
 			} else if (mitvi.num_var == 3) {
 				pmod *= 0.95F * vibro_flag;
 			}

@@ -2,7 +2,7 @@
 #include "../IntervalHandInfo.h"
 
 // big brain stuff
-constexpr float wrjt_cv_factor = 3.37637F;
+constexpr float wrjt_cv_factor = 3.15654F;
 
 // should update detection so it's more similar to updated wrr
 // probably needs better debugoutput
@@ -15,10 +15,10 @@ struct WideRangeJumptrillMod
 
 	float window_param = 3.F;
 
-	float min_mod = 0.277179F;
-	float max_mod = 1.07859F;
+	float min_mod = 0.24239F;
+	float max_mod = 0.969733F;
 
-	float cv_threshhold = 0.048777F;
+	float cv_threshhold = 0.0490351F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "window_param", &window_param },
@@ -149,7 +149,7 @@ struct WideRangeJumptrillMod
 		}
 
 		pmod = itvhi.get_taps_windowf(window) /
-			   _mw_jt.get_total_for_windowf(window) * 0.790522F;
+			   _mw_jt.get_total_for_windowf(window) * 0.756406F;
 
 		pmod = std::clamp(pmod, min_mod, max_mod);
 	}

@@ -11,14 +11,14 @@ struct WideRangeRollMod
 
 	float window_param = 5.F;
 
-	float min_mod = 0.243598F;
-	float max_mod = 0.979143F;
-	float base = 0.152341F;
-	float scaler = 0.79741F;
+	float min_mod = 0.252273F;
+	float max_mod = 0.984425F;
+	float base = 0.156438F;
+	float scaler = 0.838465F;
 
-	float cv_reset = 0.890488F;
-	float cv_threshold = 0.355395F;
-	float other_cv_threshold = 0.290183F;
+	float cv_reset = 0.955205F;
+	float cv_threshold = 0.358492F;
+	float other_cv_threshold = 0.302047F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "window_param", &window_param },
@@ -114,7 +114,7 @@ struct WideRangeRollMod
 		hi_im_a_float = cv(seq_ms);
 
 		// ok we're pretty sure it's a roll don't bother with the test
-		if (hi_im_a_float < 0.110743F) {
+		if (hi_im_a_float < 0.119842F) {
 			moving_cv = (hi_im_a_float + moving_cv + hi_im_a_float) / 3.F;
 			return true;
 		}
@@ -137,7 +137,7 @@ struct WideRangeRollMod
 		hi_im_a_float = cv(idk_ms);
 
 		// ok we're pretty sure it's a roll don't bother with the test
-		if (hi_im_a_float < 0.1209F) {
+		if (hi_im_a_float < 0.114732F) {
 			moving_cv = (hi_im_a_float + moving_cv + hi_im_a_float) / 3.F;
 			return true;
 		}
@@ -148,18 +148,18 @@ struct WideRangeRollMod
 		return moving_cv < cv_threshold / scaler;
 	}
 
-	void handle_ccacc_timing_check() { zoop_the_woop(1, 2.49121F, 1.22934F); }
+	void handle_ccacc_timing_check() { zoop_the_woop(1, 2.62267F, 1.24124F); }
 
 	void handle_roll_timing_check()
 	{
 		if (seq_ms[1] > seq_ms[0]) {
-			zoop_the_woop(1, 2.43142F);
+			zoop_the_woop(1, 2.56088F);
 		} else {
-			seq_ms[0] /= 2.54114F;
-			seq_ms[2] /= 2.54114F;
-			last_passed_check = do_timing_thing(1.01972F);
-			seq_ms[0] *= 2.54114F;
-			seq_ms[2] *= 2.54114F;
+			seq_ms[0] /= 2.36668F;
+			seq_ms[2] /= 2.36668F;
+			last_passed_check = do_timing_thing(1.03558F);
+			seq_ms[0] *= 2.36668F;
+			seq_ms[2] *= 2.36668F;
 		}
 	}
 
@@ -176,26 +176,26 @@ struct WideRangeRollMod
 		// run 2 tests so we can keep a stricter cutoff
 		// need to put cv in array thingy mcboop
 		// check 1
-		idk_ms[1] /= 2.39351F;
-		idk_ms[2] /= 2.39351F;
+		idk_ms[1] /= 2.38516F;
+		idk_ms[2] /= 2.38516F;
 
-		do_other_timing_thing(1.11831F);
+		do_other_timing_thing(1.20738F);
 
-		idk_ms[1] *= 2.39351F;
-		idk_ms[2] *= 2.39351F;
+		idk_ms[1] *= 2.38516F;
+		idk_ms[2] *= 2.38516F;
 
 		if (last_passed_check) {
 			return;
 		}
 
 		// test again
-		idk_ms[1] /= 3.05029F;
-		idk_ms[2] /= 3.05029F;
+		idk_ms[1] /= 3.03807F;
+		idk_ms[2] /= 3.03807F;
 
-		do_other_timing_thing(1.22957F);
+		do_other_timing_thing(1.26539F);
 
-		idk_ms[1] *= 3.05029F;
-		idk_ms[2] *= 3.05029F;
+		idk_ms[1] *= 3.03807F;
+		idk_ms[2] *= 3.03807F;
 	}
 
 	void complete_seq()

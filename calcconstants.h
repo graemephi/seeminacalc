@@ -247,11 +247,16 @@ void write_calc_source(char const *file, char const *mod_name, u8 *rewrite)
 
 char const *float_suffix(f32 value)
 {
-    if (value == 0.0f || floorf(value) == value) {
-        return ".F";
+    b32 have_dot = false;
+    u8 *ugh = 0;
+    buf_printf(ugh, "%g", value);
+    for (isize i = 0; i < buf_len(ugh); i++) {
+        if (ugh[i] == '.') {
+            have_dot = true;
+        }
     }
-
-    return "F";
+    char const *result = have_dot ? "F" : ".0F";
+    return result;
 }
 
 typedef struct {
@@ -441,13 +446,6 @@ void rewrite_constants(CalcInfo *info, ParamSet *ps, isize mod_index, isize star
 
 void rewrite_parameters(CalcInfo *info, ParamSet *ps)
 {
-
-    static b32 once = false;
-    if (once) {
-        return;
-    }
-    once = true;
-
     for (isize m = 1; m < info->num_mods; m++) {
         ModInfo *mod = &info->mods[m];
         if (info->params[mod->index].constant == false) {

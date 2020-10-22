@@ -8,12 +8,12 @@ struct BalanceMod
 
 #pragma region params
 
-	float min_mod = 0.951774F;
-	float max_mod = 1.02367F;
-	float mod_base = 0.32652F;
-	float buffer = 0.971948F;
-	float scaler = 1.07741F;
-	float other_scaler = 3.87114F;
+	float min_mod = 0.969878F;
+	float max_mod = 1.06834F;
+	float mod_base = 0.326874F;
+	float buffer = 0.980646F;
+	float scaler = 0.996475F;
+	float other_scaler = 4.06794F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },   { "max_mod", &max_mod },
