@@ -906,9 +906,6 @@ void init(void)
     buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
     buf_reserve(state.graphs, 128);
 
-    // #include "x1.txt"
-    // memcpy(state.ps.params, ppp, sizeof(ppp));
-
     // todo: use handles instead
     buf_reserve(state.files, 1024);
 
