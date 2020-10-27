@@ -273,6 +273,20 @@ struct { char *key; u32 skillset; f32 rate; f32 target; } TestFiles[] = {
     { .key = "Xe4e68826a3d00062e163f3a29b42350f86089b26", .skillset = 7, .rate = 1.00f, .target = 25.00f  },
     { .key = "Xecbb9d26ff2e40424d3c09e2bfe405149b954e2b", .skillset = 7, .rate = 1.00f, .target = 22.50f  },
     { .key = "Xfc8c31f8022a6bd24fe186ea381917b697ea14a2", .skillset = 7, .rate = 1.40f, .target = 33.50f  },
+
+    // more. these aren't normative, just sledgehammers to force the optimizer away from certain outliers
+    // busy? or dizzy?
+    { .key = "X659797053f2679f4a8d3caaeb39455abba08cedc", .skillset = 5, .rate = 1.00f, .target = 27.00f  },
+    // maid of fire
+    { .key = "Xb12433fdc71f71392ffb61a9545914e3ca33739c", .skillset = 5, .rate = 1.00f, .target = 23.50f  },
+    // mina nightmare night
+    { .key = "X549a3520add30d4e5fdd4ecc64d11e99529f8564", .skillset = 5, .rate = 1.00f, .target = 24.00f },
+    // brush your teeth
+    { .key = "X2fc490d449b4aaf031b6910346d4f57c3d9202cc", .skillset = 5, .rate = 1.00f, .target = 24.00f },
+    // princess bride
+    { .key = "X02bdb23abcf2ff5b91c4110793b2923de6a75d4a", .skillset = 5, .rate = 1.60f, .target = 26.00f  },
+    // #er
+    { .key = "X585a0b45879134590c62c294ab12f611bcd242b2", .skillset = 5, .rate = 1.0f, .target = 27.0f },
 };
 
 int main(int argc, char **argv)

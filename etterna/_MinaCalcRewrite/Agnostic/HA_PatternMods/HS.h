@@ -11,29 +11,29 @@ struct HSMod
 
 #pragma region params
 
-	float min_mod = 0.619856F;
-	float max_mod = 1.12585F;
-	float mod_base = 0.403007F;
-	float prop_buffer = 0.978612F;
+	float min_mod = 0.6F;
+	float max_mod = 1.1F;
+	float mod_base = 0.4F;
+	float prop_buffer = 1.F;
 
-	float total_prop_min = 0.592366F;
-	float total_prop_max = 1.05693F;
+	float total_prop_min = min_mod;
+	float total_prop_max = max_mod;
 
 	// was ~32/7, is higher now to push up light hs (maybe overkill tho)
-	float total_prop_scaler = 5.5979F;
-	float total_prop_base = 0.372531F;
+	float total_prop_scaler = 5.571F;
+	float total_prop_base = 0.4F;
 
-	float split_hand_pool = 1.64555F;
-	float split_hand_min = 0.929204F;
-	float split_hand_max = 1.02726F;
-	float split_hand_scaler = 0.934706F;
+	float split_hand_pool = 1.6F;
+	float split_hand_min = 0.89F;
+	float split_hand_max = 1.F;
+	float split_hand_scaler = 1.F;
 
-	float jack_pool = 1.38828F;
-	float jack_min = 0.541868F;
-	float jack_max = 1.02646F;
-	float jack_scaler = 0.993603F;
+	float jack_pool = 1.35F;
+	float jack_min = 0.5F;
+	float jack_max = 1.F;
+	float jack_scaler = 1.F;
 
-	float decay_factor = 0.0513515F;
+	float decay_factor = 0.05F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -121,7 +121,7 @@ struct HSMod
 		  std::clamp(total_prop * jumptrill_prop * jack_prop, min_mod, max_mod);
 
 		if (mitvi.dunk_it) {
-			pmod *= 1.02557F;
+			pmod *= 0.99F;
 		}
 
 		// set last mod, we're using it to create a decaying mod that won't

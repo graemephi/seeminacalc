@@ -10,13 +10,13 @@ struct FlamJamMod
 	const std::string name = "FlamJamMod";
 
 #pragma region params
-	float min_mod = 0.47151F;
-	float max_mod = 0.960172F;
-	float scaler = 2.74915F;
-	float base = 0.0949467F;
+	float min_mod = 0.5F;
+	float max_mod = 1.F;
+	float scaler = 2.75F;
+	float base = 0.1F;
 
-	float group_tol = 32.2433F;
-	float step_tol = 17.1501F;
+	float group_tol = 35.F;
+	float step_tol = 17.5F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -53,11 +53,11 @@ struct FlamJamMod
 		//}
 
 		// water down single flams
-		pmod = 0.974736F;
+		pmod = 1.F;
 		for (auto& mp : fj.mod_parts) {
 			pmod += mp;
 		}
-		pmod /= 4.59369F;
+		pmod /= 5.F;
 		pmod = std::clamp(base + pmod, min_mod, max_mod);
 
 		// reset flags n stuff

@@ -11,13 +11,13 @@ struct WideRangeBalanceMod
 
 	float window_param = 2.F;
 
-	float min_mod = 0.97243F;
-	float max_mod = 1.03694F;
-	float base = 0.437382F;
+	float min_mod = 0.94F;
+	float max_mod = 1.05F;
+	float base = 0.425F;
 
-	float buffer = 0.994115F;
-	float scaler = 1.03129F;
-	float other_scaler = 4.00829F;
+	float buffer = 1.F;
+	float scaler = 1.F;
+	float other_scaler = 4.F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "window_param", &window_param },

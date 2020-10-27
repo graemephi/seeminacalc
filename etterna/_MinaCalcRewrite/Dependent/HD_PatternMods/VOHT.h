@@ -15,15 +15,15 @@ struct VOHTrillMod
 
 	float window_param = 2.F;
 
-	float min_mod = 0.26244F;
-	float max_mod = 1.04136F;
-	float base = 1.58717F;
-	float suppression = 0.190367F;
+	float min_mod = 0.25F;
+	float max_mod = 1.F;
+	float base = 1.5F;
+	float suppression = 0.2F;
 
-	float cv_reset = 0.97873F;
-	float cv_threshhold = 0.257581F;
+	float cv_reset = 1.F;
+	float cv_threshhold = 0.25F;
 
-	float min_len = 8.11872F;
+	float min_len = 8.F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "window_param", &window_param },
@@ -104,7 +104,7 @@ struct VOHTrillMod
 			hello_my_name_is_goat =
 			  (static_cast<float>(v) / itv_taps) - suppression;
 		}
-		return std::clamp(hello_my_name_is_goat, 0.0985628F, 0.91513F);
+		return std::clamp(hello_my_name_is_goat, 0.1F, 1.F);
 	}
 
 	void complete_seq()
@@ -125,7 +125,7 @@ struct VOHTrillMod
 
 	auto oht_timing_check(const CalcMovingWindow<float>& ms_any) -> bool
 	{
-		moving_cv = (moving_cv + ms_any.get_cv_of_window(cc_window)) / 1.98161F;
+		moving_cv = (moving_cv + ms_any.get_cv_of_window(cc_window)) / 2.F;
 		return moving_cv < cv_threshhold;
 	}
 

@@ -118,6 +118,9 @@ typedef struct SimFileInfo
         f32 rate;
         i32 skillset;
 
+        f32 msd_bias;
+        f32 weight;
+
         f32 got_msd;
         f32 delta;
     } target;
@@ -172,6 +175,7 @@ typedef struct State
     struct {
         b8 *enabled;
         f32 barriers[NumSkillsets];
+        f32 goals[NumSkillsets];
         f32 *normalization_factors;
         Bound *bounds;
         struct {
@@ -488,12 +492,14 @@ i32 add_target_files(void)
         String author = target->author;
         String diff = SmDifficultyStrings[target->difficulty];
         String id = {0};
-        id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
+        id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s%g.%d",
             title.len, title.buf,
             author.len, author.buf,
             author.len == 0 ? 0 : 2, ", ",
             diff.len, diff.buf,
-            ck.len, ck.buf
+            ck.len, ck.buf,
+            target->rate,
+            target->skillset
         );
         pop_allocator();
 
@@ -517,6 +523,7 @@ i32 add_target_files(void)
             .target.want_msd = target->target,
             .target.rate = target->rate,
             .target.skillset = target->skillset,
+            .target.weight = 1.0f,
             .notes_len = (i32)buf_len(ni),
             .notes = frobble_note_data(ni, buf_len(ni)),
             .selected_skillsets[0] = true,
@@ -713,6 +720,10 @@ i32 pack_opt_parameters(CalcInfo *info, f32 *params, f32 *normalization_factors,
     return packed_i;
 }
 
+static f32 SkillsetOverallBalance = 0.35f;
+static f32 UnLogScale = 1.0f;
+static f32 Scale = 1.0f;
+static f32 Misclass = 1.0f;
 void setup_optimizer(void)
 {
     f32 *normalization_factors = 0;
@@ -720,6 +731,8 @@ void setup_optimizer(void)
     push_allocator(scratch);
     buf_pushn(initial_x, state.ps.num_params);
     pop_allocator();
+
+    NegativeEpsilon = Scale / state.target.msd_sd;
 
     buf_pushn(normalization_factors, state.ps.num_params);
     buf_pushn(state.opt_cfg.enabled, state.ps.num_params);
@@ -730,7 +743,7 @@ void setup_optimizer(void)
     // The param at 0, rate, is not a real parameter
     for (i32 i = 1; i < state.ps.num_params; i++) {
         // source inline constants can be optimized, but opt-in only
-        state.opt_cfg.enabled[i] = state.info.params[i].optimizable && !state.info.params[i].constant;
+        state.opt_cfg.enabled[i] = false &&  state.info.params[i].optimizable && !state.info.params[i].constant;
         // since we use divided difference to get the derivative we scale all parameters before feeding them to the optimizer
         normalization_factors[i] = clamp_low(1.0f, fabsf(state.info.params[i].default_value));
     }
@@ -765,10 +778,6 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(163)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(163, 2)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(538)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(810)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(812)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(815)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(817)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
         state.opt_cfg.bounds[i].low /= normalization_factors[i];
@@ -780,35 +789,50 @@ void setup_optimizer(void)
     state.opt_cfg.barriers[2] = 2.0f;
     state.opt_cfg.barriers[3] = 2.0f;
     state.opt_cfg.barriers[4] = 2.0f;
-    state.opt_cfg.barriers[5] = 2.0f;
+    state.opt_cfg.barriers[5] = 4.0f;
     state.opt_cfg.barriers[6] = 2.0f;
     state.opt_cfg.barriers[7] = 2.0f;
+    state.opt_cfg.goals[0] = 0.93f;
+    state.opt_cfg.goals[1] = 0.93f;
+    state.opt_cfg.goals[2] = 0.93f;
+    state.opt_cfg.goals[3] = 0.93f;
+    state.opt_cfg.goals[4] = 0.93f;
+    state.opt_cfg.goals[5] = 0.95f;
+    state.opt_cfg.goals[6] = 0.93f;
+    state.opt_cfg.goals[7] = 0.93f;
     state.opt_cfg.bias[1].add = 0.0f; state.opt_cfg.bias[1].mul = 1.0f;
     state.opt_cfg.bias[2].add = 0.0f; state.opt_cfg.bias[2].mul = 1.0f;
     state.opt_cfg.bias[3].add = 0.0f; state.opt_cfg.bias[3].mul = 1.0f;
     state.opt_cfg.bias[4].add = 0.0f; state.opt_cfg.bias[4].mul = 1.0f;
-    state.opt_cfg.bias[5].add = 0.0f; state.opt_cfg.bias[5].mul = 1.0f;
+    state.opt_cfg.bias[5].add = 0.0f; state.opt_cfg.bias[5].mul = 31.5f / 31.0f;
     state.opt_cfg.bias[6].add = 0.0f; state.opt_cfg.bias[6].mul = 1.0f;
     state.opt_cfg.bias[7].add = 0.0f; state.opt_cfg.bias[7].mul = 1.0f;
 }
 
-static f32 SkillsetOverallBalance = 0.35f;
 void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr)
 {
     assert(state.target.msd_sd > 0.0f);
     i32 ss = sfi->target.skillset;
-    f32 mean = (state.target.msd_mean + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
-    f32 target = expf(work.msd / mean);
-    f32 skillset = expf(ssr.E[ss] / mean);
-    f32 overall = expf(ssr.overall / mean);
+    f32 mean = state.target.msd_mean;
+    f32 target = (work.msd - mean) / state.target.msd_sd;
+    target = lerp(1.0f + target, expf(1.0f + target) / 2.71828182846f, UnLogScale) - 1.0f;
+    f32 skillset = (ssr.E[ss] - mean) / state.target.msd_sd;
+    skillset = lerp(1.0f + skillset, expf(1.0f + skillset) / 2.71828182846f, UnLogScale) - 1.0f;
+    f32 overall = (ssr.overall - mean) / state.target.msd_sd;
+    overall = lerp(1.0f + overall, expf(1.0f + overall) / 2.71828182846f, UnLogScale) - 1.0f;
     f32 delta_skillset = skillset - target;
     f32 delta_overall = overall - target;
-    f32 misclass = expf(overall / skillset) / 2.71828182846f;
-    f32 magnify_large_targets = work.msd / 30.0f;
-    f32 delta = misclass * magnify_large_targets * lerp(delta_skillset, delta_overall, SkillsetOverallBalance);
+    f32 misclass = Misclass * expf(ssr.overall / ssr.E[ss]) / 2.71828182846f;
+    f32 delta = sfi->target.weight * Scale * misclass * lerp(delta_skillset, delta_overall, SkillsetOverallBalance);
+    i32 opt_param = state.opt_cfg.map.to_opt[work.param];
+    f32 difference = 0.0f;
+    if (work.param != Param_None) {
+        difference = (work.value - state.info.defaults.params[work.param]) / state.opt_cfg.normalization_factors[work.param];
+    }
     buf_push(state.opt_evaluations, (OptimizationEvaluation) {
         .sample = work.sample,
-        .param = state.opt_cfg.map.to_opt[work.param],
+        .param = opt_param,
+        .value_difference_from_initial = difference,
         .delta = delta,
         .barrier = state.opt_cfg.barriers[ss]
     });
@@ -881,6 +905,9 @@ void init(void)
     state.ps = copy_param_set(&state.info.defaults);
     buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
     buf_reserve(state.graphs, 128);
+
+    // #include "x1.txt"
+    // memcpy(state.ps.params, ppp, sizeof(ppp));
 
     // todo: use handles instead
     buf_reserve(state.files, 1024);
@@ -1180,8 +1207,15 @@ void frame(void)
 
                 // File difficulty + chartkey text
                 igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
+                igSameLine(0, 4);
+                igText("(Want %g at %gx)", sfi->target.want_msd, sfi->target.rate);
                 igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
                 igText(sfi->chartkey.buf);
+
+                igSetNextItemWidth(36.0f);
+                igDragFloat("Target MSD Bias", &sfi->target.msd_bias, 0.05f, -sfi->target.want_msd, 40.0f - sfi->target.want_msd, "%g", 1.0f);
+                igSetNextItemWidth(36.0f);
+                igDragFloat("Target Weight", &sfi->target.weight, 0.05f, 0.0f, 10000.0f, "%g", 1.0f);
 
                 // Plots. Weird rendering order: first 0, then backwards from the end
                 FnGraph *fng = &state.graphs[sfi->graphs[0]];
@@ -1265,7 +1299,7 @@ void frame(void)
                 pop_allocator();
 
                 i32 n_params = pack_opt_parameters(&state.info, state.ps.params, state.opt_cfg.normalization_factors, state.opt_cfg.enabled, x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
-                i32 iter = state.opt.iter;
+                i32 iter = state.opt.iter - 1;
                 state.opt = optimize(n_params, x, (i32)buf_len(state.files));
                 state.opt.iter = iter;
 
@@ -1296,13 +1330,9 @@ void frame(void)
                     assert(file_index >= 0);
                     SimFileInfo *sfi = &state.files[file_index];
 
-                    f32 goal = 0.93f;
                     i32 ss = sfi->target.skillset;
-                    f32 msd = (sfi->target.want_msd + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
-
-                    ParameterLossWork plw_x = { .sample = sample, .goal = goal, .msd = msd };
-                    calculate_parameter_loss(&state.low_prio_work, sfi, plw_x, state.generation);
-                    submitted++;
+                    f32 goal = state.opt_cfg.goals[ss];
+                    f32 msd = (sfi->target.want_msd + sfi->target.msd_bias + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
 
                     i32 params_submitted = 0;
                     for (isize j = 0; j < state.opt.n_params; j++) {
@@ -1324,7 +1354,13 @@ void frame(void)
                         }
                     }
 
-                    submitted += params_submitted;
+                    if (params_submitted > 0) {
+                        ParameterLossWork plw_x = { .sample = sample, .goal = goal, .msd = msd };
+                        calculate_parameter_loss(&state.low_prio_work, sfi, plw_x, state.generation);
+                        submitted++;
+
+                        submitted += params_submitted;
+                    }
 
                     if (buf_len(state.high_prio_work) == 0 && sfi->num_effects_computed == 0) {
                         sfi->num_effects_computed = 0;
@@ -1406,31 +1442,32 @@ void frame(void)
         // igSliderFloat("VDecay", &VDecay, 0.0f, 1.0f - 1e-5f, "%g", 0.5f);
         igSliderInt("SampleBatchSize", &SampleBatchSize, 1, state.opt.n_samples, "%d");
         igSliderInt("ParameterBatchSize", &ParameterBatchSize, 1, state.opt.n_params, "%d");
-        igSliderFloat("Stream Overrated Penalty", &state.opt_cfg.barriers[1], 2.0f, 8.0f, "%f", 1.0f);
-        igSliderFloat("JS Overrated Penalty", &state.opt_cfg.barriers[2], 2.0f, 8.0f, "%f", 1.0f);
-        igSliderFloat("HS Overrated Penalty", &state.opt_cfg.barriers[3], 2.0f, 8.0f, "%f", 1.0f);
-        igSliderFloat("Stamina Overrated Penalty", &state.opt_cfg.barriers[4], 2.0f, 8.0f, "%f", 1.0f);
-        igSliderFloat("Jackspeed Overrated Penalty", &state.opt_cfg.barriers[5], 2.0f, 8.0f, "%f", 1.0f);
-        igSliderFloat("Chordjacks Overrated Penalty", &state.opt_cfg.barriers[6], 2.0f, 8.0f, "%f", 1.0f);
-        igSliderFloat("Technical Overrated Penalty", &state.opt_cfg.barriers[7], 2.0f, 8.0f, "%f", 1.0f);
         igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
+        igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
+        igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
+        igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
+        igSliderFloat("Negative Epsilon", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
+        igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
+        igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
         for (isize i = 1; i < NumSkillsets; i++) {
-            push_allocator(scratch);
-            char *add = 0;
-            char *mul = 0;
-            buf_printf(add, "##%s+", SkillsetNames[i]);
-            buf_printf(mul, "##%s*", SkillsetNames[i]);
-            pop_allocator();
+            igPushIDInt((i32)i);
             igText("%s Bias", SkillsetNames[i]);
             igSameLine(0, 4);
             igSetCursorPosX(106.f);
             igTextUnformatted("+", 0);
             igSameLine(0,4);
-            igSetNextItemWidth(igGetWindowContentRegionWidth() / 4.0f);
-            igSliderFloat(add, &state.opt_cfg.bias[i].add, -5.0f, 5.0f, "%f", 1.0f);
+            igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
+            igSliderFloat("*##+", &state.opt_cfg.bias[i].add, -5.0f, 5.0f, "%f", 1.0f);
             igSameLine(0, 4);
-            igSetNextItemWidth(igGetWindowContentRegionWidth() / 4.0f);
-            igSliderFloat(mul, &state.opt_cfg.bias[i].mul, 0.1f, 5.0f, "%f", 1.0f);
+            igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
+            igSliderFloat("^##*", &state.opt_cfg.bias[i].mul, 0.1f, 5.0f, "%f", 1.0f);
+            igSameLine(0, 4);
+            igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
+            igSliderFloat("%##^", &state.opt_cfg.barriers[i], 2.0f, 8.0f, "%f", 1.0f);
+            igSameLine(0, 4);
+            igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
+            igSliderFloat("##%", &state.opt_cfg.goals[i], 0.9f, 0.965f, "%f", 1.0f);
+            igPopID();
         }
 
         igEnd();

@@ -23,7 +23,7 @@ struct nps
 
 			// nps for this interval
 			calc.soap.at(hi).at(NPSBase).at(itv) =
-			  static_cast<float>(notes) * finalscaler * 1.63178F;
+			  static_cast<float>(notes) * finalscaler * 1.6F;
 
 			// set points for this interval
 			calc.itv_points.at(hi).at(itv) = notes * 2;
@@ -55,10 +55,10 @@ struct techyo
 		auto pineapple = seq._mw_any_ms.get_cv_of_window(4);
 		auto porcupine = seq._mw_sc_ms[col_left].get_cv_of_window(4);
 		auto sequins = seq._mw_sc_ms[col_right].get_cv_of_window(4);
-		const auto oioi = 0.517012F;
-		pineapple = std::clamp(pineapple + oioi, oioi, 0.963518F + oioi);
-		porcupine = std::clamp(porcupine + oioi, oioi, 1.03151F + oioi);
-		sequins = std::clamp(sequins + oioi, oioi, 1.00303F + oioi);
+		const auto oioi = 0.5F;
+		pineapple = std::clamp(pineapple + oioi, oioi, 1.F + oioi);
+		porcupine = std::clamp(porcupine + oioi, oioi, 1.F + oioi);
+		sequins = std::clamp(sequins + oioi, oioi, 1.F + oioi);
 
 		const auto scoliosis = seq._mw_sc_ms[col_left].get_now();
 		const auto poliosis = seq._mw_sc_ms[col_right].get_now();
@@ -70,12 +70,12 @@ struct techyo
 			obliosis = scoliosis / poliosis;
 		}
 
-		obliosis = std::clamp(obliosis, 0.958854F, 9.83188F);
+		obliosis = std::clamp(obliosis, 1.F, 10.F);
 		auto pewp = fastsqrt(div_high_by_low(scoliosis, poliosis) - 1.F);
 
 		pewp /= obliosis;
 		const auto vertebrae = std::clamp(
-		  ((pineapple + porcupine + sequins) / 3.F) + pewp, oioi, 0.991921F + oioi);
+		  ((pineapple + porcupine + sequins) / 3.F) + pewp, oioi, 1.F + oioi);
 
 		teehee(c / vertebrae);
 
@@ -104,7 +104,7 @@ struct techyo
 		// we definitely don't want to average here because we don't want tech
 		// to only be files with strong runningman pattern detection, but we
 		// could probably do something more robust at some point
-		return std::max(weighted_average(get_tc_base(calc), nps_base, 4.11232F, 8.84604F),
+		return std::max(weighted_average(get_tc_base(calc), nps_base, 4.F, 9.F),
 						rm_itv_max_diff);
 	}
 

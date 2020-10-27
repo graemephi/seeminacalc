@@ -793,10 +793,6 @@ void finish_work()
                 }
                 void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr);
                 optimizer_skulduggery(sfi, done.work.parameter_loss, done.ssr);
-                if (done.work.parameter_loss.param == 0 && done.work.parameter_loss.sample < buf_len(state.files)) {
-                    // elaborate non-consecutive fall through
-                    goto Work_Target;
-                }
                 continue;
             } break;
             case Work_Effects: {
@@ -829,7 +825,7 @@ void finish_work()
                 }
                 continue;
             } break;
-            case Work_Target: Work_Target: {
+            case Work_Target: {
                 targets_updated = true;
                 sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
                 sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;

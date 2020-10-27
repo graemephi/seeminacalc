@@ -20,41 +20,41 @@ struct RunningManMod
 
 #pragma region params
 
-	float min_mod = 1.01539F;
-	float max_mod = 1.14327F;
-	float base = 0.529395F;
-	float min_anchor_len = 5.09759F;
-	float min_taps_in_rm = 1.0513F;
-	float min_off_taps_same = 1.01777F;
+	float min_mod = 1.F;
+	float max_mod = 1.1F;
+	float base = 0.5F;
+	float min_anchor_len = 5.F;
+	float min_taps_in_rm = 1.F;
+	float min_off_taps_same = 1.F;
 
-	float offhand_tap_prop_scaler = 0.962634F;
-	float offhand_tap_prop_min = -0.F;
-	float offhand_tap_prop_max = 1.06205F;
-	float offhand_tap_prop_base = 1.65754F;
+	float offhand_tap_prop_scaler = 1.F;
+	float offhand_tap_prop_min = 0.F;
+	float offhand_tap_prop_max = 1.F;
+	float offhand_tap_prop_base = 1.7F;
 
-	float off_tap_same_prop_scaler = 1.00462F;
-	float off_tap_same_prop_min = -0.F;
-	float off_tap_same_prop_max = 1.28559F;
-	float off_tap_same_prop_base = 0.768628F;
+	float off_tap_same_prop_scaler = 1.F;
+	float off_tap_same_prop_min = 0.F;
+	float off_tap_same_prop_max = 1.25F;
+	float off_tap_same_prop_base = 0.8F;
 
-	float anchor_len_divisor = 5.13607F;
+	float anchor_len_divisor = 5.F;
 	float anchor_len_comp_min = 0.F;
 	float anchor_len_comp_max = 1.25F;
 
-	float min_jack_taps_for_bonus = 1.03216F;
-	float jack_bonus_base = 0.106061F;
+	float min_jack_taps_for_bonus = 1.F;
+	float jack_bonus_base = 0.1F;
 
-	float min_oht_taps_for_bonus = 1.08399F;
-	float oht_bonus_base = 0.102689F;
+	float min_oht_taps_for_bonus = 1.F;
+	float oht_bonus_base = 0.1F;
 
 	// params for rm_sequencing, these define conditions for resetting
 	// runningmen sequences
-	float max_oht_len = 2.03902F;
-	float max_off_len = 3.23284F;
-	float max_ot_sh_len = 1.96879F;
-	float max_burst_len = 6.41047F;
-	float max_jack_len = 3.15685F;
-	float max_anch_len = 5.12192F;
+	float max_oht_len = 2.F;
+	float max_off_len = 3.F;
+	float max_ot_sh_len = 2.F;
+	float max_burst_len = 6.F;
+	float max_jack_len = 3.F;
+	float max_anch_len = 5.F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 
@@ -171,10 +171,10 @@ struct RunningManMod
 		 * as well- this is called immediately after advance_sequencing, so
 		 * we've already determined which sequence to use as rm */
 
-		float oht_p = 1.4854F - (highest_rm._rm.get_offhand_tap_prop() *
+		float oht_p = 1.5F - (highest_rm._rm.get_offhand_tap_prop() *
 							  offhand_tap_prop_scaler);
 
-		oht_p = std::clamp(oht_p, 0.752191F, 0.922896F);
+		oht_p = std::clamp(oht_p, 0.75F, 1.0F);
 		return highest_rm.get_difficulty() * oht_p;
 	}
 

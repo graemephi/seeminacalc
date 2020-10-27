@@ -4,6 +4,9 @@ static f32 MDecay = 0.9f;
 static f32 VDecay = 0.999f;
 static i32 SampleBatchSize = 16;
 static i32 ParameterBatchSize = 16;
+static f32 NegativeEpsilon = 1.0f;
+static f32 Regularisation = 0.01f;
+static f32 RegularisationAlpha = 0.15f;
 
 enum {
     Param_None = -1
@@ -69,6 +72,7 @@ typedef struct {
 typedef struct {
     i32 sample;
     i32 param;
+    f32 value_difference_from_initial;
     f32 delta;
     f32 barrier;
 } OptimizationEvaluation;
@@ -77,7 +81,11 @@ f32 loss(f32 delta, f32 barrier)
 {
     f32 x = delta;
     f32 a = barrier;
-    if (x < 1.0f) {
+    if (x < -NegativeEpsilon) {
+        return square(x + NegativeEpsilon);
+    } else if (x < 0.0f) {
+        return 0.0f;
+    } else if (x < 1.0f) {
         return x*x;
     } else {
         return (2.0f / a) * (powf(x, a) - 1.0f) + 1.0f;
@@ -124,6 +132,7 @@ void opt_focus(OptimizationContext *opt, i32 sample)
 OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation evals[])
 {
     OptimizationRequest result = {0};
+    f32 n_losses = 0.0f;
     if (buf_len(evals) > 0) {
         opt->loss = 0.0f;
 
@@ -145,8 +154,12 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
         }
         pop_allocator();
 
+        f32 h2 = 2 * H;
+        f32 hsq = square(H);
         for (isize i = 0; i < opt->n_params; i++) {
             if (param_evals[i].samples) {
+                f32 regularisation_l1 = 0;
+                f32 regularisation_l2 = -hsq * buf_len(param_evals[i].samples);
                 f32 loss_x = 0.0f;
                 f32 loss_xh = 0.0f;
                 for (isize j = 0; j < buf_len(param_evals[i].samples); j++) {
@@ -155,11 +168,15 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                     OptimizationEvaluation *x = &evals[sample_evals[xh->sample]];
                     loss_x += loss(x->delta, x->barrier);
                     loss_xh += loss(xh->delta, xh->barrier);
+                    regularisation_l1 += clamp(-H, H, 2 * xh->value_difference_from_initial - H);
+                    regularisation_l2 += h2 * xh->value_difference_from_initial;
                 }
                 assert(loss_xh >= 0.0f);
 
+                f32 penalty = Regularisation * lerp(regularisation_l1, regularisation_l2, RegularisationAlpha);
+
+                f32 g = (penalty + loss_xh - loss_x) / H;
                 // ADAM: A Method For Stochastic Optimization (2015)
-                f32 g = (loss_xh - loss_x) / H;
                 opt->m[i] = lerp(g, opt->m[i], MDecay);
                 opt->v[i] = lerp(g*g, opt->v[i], VDecay);
                 f32 m = opt->m[i] / (1.0f - opt->m_correction[i]);
@@ -168,7 +185,8 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                 opt->v_correction[i] *= VDecay;
                 opt->x[i] = opt->x[i] - StepSize * m / (sqrtf(v) + 1e-8f);
 
-                opt->loss += loss_x / SampleBatchSize;
+                opt->loss += loss_x + penalty;
+                n_losses += 1.0f;
             } else {
                 opt->m[i] = lerp(0, opt->m[i], MDecay);
                 opt->v[i] = lerp(0, opt->v[i], VDecay);
@@ -180,6 +198,8 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
     }
 
     opt->iter++;
+
+    opt->loss /= n_losses;
 
     shuffle(opt->active.samples, opt->focus);
     shuffle(opt->active.parameters, 0);

@@ -12,13 +12,13 @@ struct WideRangeAnchorMod
 
 	float window_param = 2.F;
 
-	float min_mod = 1.01831F;
-	float max_mod = 1.05191F;
-	float base = 1.02757F;
+	float min_mod = 1.F;
+	float max_mod = 1.05F;
+	float base = 1.F;
 
-	float diff_min = 4.12657F;
-	float diff_max = 8.12048F;
-	float scaler = 0.103633F;
+	float diff_min = 4.F;
+	float diff_max = 8.F;
+	float scaler = 0.1F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "window_param", &window_param },

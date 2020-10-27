@@ -11,9 +11,9 @@ struct ChaosMod
 
 #pragma region params
 
-	float min_mod = 0.969442F;
-	float max_mod = 1.01119F;
-	float base = -0.0733337F;
+	float min_mod = 0.95F;
+	float max_mod = 1.045F;
+	float base = -0.075F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -50,7 +50,7 @@ struct ChaosMod
 		const float b = ms_any.get_last();
 
 		if (a == 0.F || b == 0.F || a == b) {
-			_u(1.05226F);
+			_u(1.F);
 			_wot(_u.get_mean_of_window(window));
 			return;
 		}
@@ -60,12 +60,12 @@ struct ChaosMod
 		float flop = prop - static_cast<float>(mop);
 
 		if (flop == 0.F) {
-			flop = 0.992277F;
-		} else if (flop >= 0.492675F) {
-			flop = abs(flop - 1.04504F) + 1.00186F;
+			flop = 1.F;
+		} else if (flop >= 0.5F) {
+			flop = abs(flop - 1.F) + 1.F;
 
-		} else if (flop < 0.513146F) {
-			flop += 0.92384F;
+		} else if (flop < 0.5F) {
+			flop += 1.F;
 		}
 
 		_u(flop);

@@ -9,26 +9,26 @@ struct CJMod
 
 #pragma region params
 
-	float min_mod = 0.617434F;
-	float max_mod = 1.07417F;
-	float mod_base = 0.388099F;
-	float prop_buffer = 0.926409F;
+	float min_mod = 0.6F;
+	float max_mod = 1.1F;
+	float mod_base = 0.4F;
+	float prop_buffer = 1.F;
 
-	float total_prop_min = 0.588766F;
-	float total_prop_max = 1.14566F;
-	float total_prop_scaler = 5.38522F; // ~38/7
+	float total_prop_min = min_mod;
+	float total_prop_max = max_mod;
+	float total_prop_scaler = 5.428F; // ~38/7
 
-	float jack_base = 1.01387F;
-	float jack_min = 0.622874F;
-	float jack_max = 1.00506F;
-	float jack_scaler = 0.914471F;
+	float jack_base = 1.F;
+	float jack_min = 0.625F;
+	float jack_max = 1.F;
+	float jack_scaler = 1.F;
 
-	float not_jack_pool = 1.22142F;
-	float not_jack_min = 0.387811F;
-	float not_jack_max = 1.00423F;
-	float not_jack_scaler = 1.6688F;
+	float not_jack_pool = 1.15F;
+	float not_jack_min = 0.4F;
+	float not_jack_max = 1.F;
+	float not_jack_scaler = 1.75F;
 
-	float vibro_flag = 1.00852F;
+	float vibro_flag = 1.F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -116,9 +116,9 @@ struct CJMod
 		// this other places ?
 		if (mitvi.basically_vibro) {
 			if (mitvi.num_var == 1) {
-				pmod *= 0.505258F * vibro_flag;
+				pmod *= 0.5F * vibro_flag;
 			} else if (mitvi.num_var == 2) {
-				pmod *= 0.857465F * vibro_flag;
+				pmod *= 0.9F * vibro_flag;
 			} else if (mitvi.num_var == 3) {
 				pmod *= 0.95F * vibro_flag;
 			}

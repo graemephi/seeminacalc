@@ -39,7 +39,7 @@ build/debug/cpp.obj: *.h *.cpp Makefile
 build/debug/seeminacalc.exe: *.h *.c build/debug/cpp.obj Makefile
 	$(Compiler) $(Common) $(C) $(Debug) seeminacalc.c build/debug/cpp.obj
 
-build/cachedb/cachedb.exe: cachedb.c build/debug/cpp.obj
+build/cachedb/cachedb.exe: cachedb.c build/debug/cpp.obj Makefile
 	@-mkdir -p build/cachedb
 	$(Compiler) $(Common) $(C) -DDEBUG -Fd"build/cachedb/" -Fo"build/cachedb/" -Fe"build/cachedb/"  cachedb.c build/debug/cpp.obj
 
@@ -77,4 +77,5 @@ ssefeaturetest:
 debug: build/debug/seeminacalc.exe
 release: build/release/seeminacalc.exe
 cachedb: build/cachedb/cachedb.exe
-.PHONY: all clean debug release
+.PHONY: all clean debug release cachedb
+.SUFFIXES:

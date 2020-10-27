@@ -264,8 +264,11 @@ force_inline
 void *buf_pushn_(void *buf, isize size, isize count)
 {
     void *result = (u8 *)buf + buf_len(buf) * size;
-    buf_hdr(buf)->len += count;
-    memset(result, 0, size * count);
+    if (count > 0) {
+        buf_hdr(buf)->len += count;
+        memset(result, 0, size * count);
+        return result;
+    }
     return result;
 }
 

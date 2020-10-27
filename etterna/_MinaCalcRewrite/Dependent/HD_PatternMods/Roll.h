@@ -32,9 +32,9 @@ struct RollMod
 
 	float window_param = 2.F;
 
-	float min_mod = 0.991393F;
-	float max_mod = 1.03879F;
-	float base = 0.816939F;
+	float min_mod = 0.95F;
+	float max_mod = 1.05F;
+	float base = 0.85F;
 
 	float cv_reset = 1.F;
 

@@ -12,15 +12,15 @@ struct CJOHJumpMod
 
 #pragma region params
 
-	float min_mod = 0.617704F;
-	float max_mod = 1.02726F;
+	float min_mod = 0.65F;
+	float max_mod = 1.F;
 
-	float max_seq_weight = 0.595873F;
-	float max_seq_pool = 1.15467F;
-	float max_seq_scaler = 0.822509F;
+	float max_seq_weight = 0.65F;
+	float max_seq_pool = 1.2F;
+	float max_seq_scaler = 0.8F;
 
-	float prop_pool = 1.36732F;
-	float prop_scaler = 0.99639F;
+	float prop_pool = 1.4F;
+	float prop_scaler = 1.F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },
@@ -78,7 +78,7 @@ struct CJOHJumpMod
 	void set_max_seq_comp()
 	{
 		max_seq_component = max_seq_pool - (base_seq_prop * max_seq_scaler);
-		max_seq_component = max_seq_component < 0.0930894F ? 0.0930894F : max_seq_component;
+		max_seq_component = max_seq_component < 0.1F ? 0.1F : max_seq_component;
 		max_seq_component = fastsqrt(max_seq_component);
 	}
 
@@ -86,7 +86,7 @@ struct CJOHJumpMod
 	void set_prop_comp()
 	{
 		prop_component = prop_pool - (base_jump_prop * prop_scaler);
-		prop_component = prop_component < 0.100918F ? 0.100918F : prop_component;
+		prop_component = prop_component < 0.1F ? 0.1F : prop_component;
 		prop_component = fastsqrt(prop_component);
 	}
 

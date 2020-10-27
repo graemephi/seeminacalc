@@ -5,7 +5,7 @@
 // calcconstants.gen.h, along with some other information so the GUI can make
 // sense of it.
 //
-// If DUMP_CONSTANTS is 0, then calcconstants.gen.h is included, and P expands
+// If DUMP_CONSTANTS is 0, then calcconst ants.gen.h is included, and P expands
 // to `minacalc_constant[__COUNTER__]`. So, inline constants can be changed at
 // runtime, and the perf hit is there, but not too bad.
 #define DUMP_CONSTANTS 0
@@ -21,6 +21,7 @@ typedef struct InlineConstantInfo {
     int line;
     int nth;
     int index;
+    float default_value;
     bool optimizable;
 } InlineConstantInfo;
 
@@ -164,7 +165,7 @@ static void dump_constant_info_to_file(void)
         }
         if (constant_info[i].file) {
             u8 *path = relative_path(constant_info[i].file);
-            buf_printf(gen, "    { \"%s\", %d, %d, %d, %d },\n", path, constant_info[i].line, nth_of_line[i], indices[i], constant_info[i].type == Constant_Real);
+            buf_printf(gen, "    { \"%s\", %d, %d, %d, %a, %d },\n", path, constant_info[i].line, nth_of_line[i], indices[i], constant_info[i].value, constant_info[i].type == Constant_Real);
             free(path);
         }
     }
@@ -206,9 +207,9 @@ u8 *replace(char const *buf, String from, String to)
     return result;
 }
 
+static char **rewritten = 0;
 u8 *get_calc_source_path_to_read(char const *file)
 {
-    static char **rewritten = 0;
     b32 use_rewrite = false;
     for (isize i = 0; i < buf_len(rewritten); i++) {
         if (str_eq(rewritten[i], file)) {
@@ -249,13 +250,13 @@ char const *float_suffix(f32 value)
 {
     b32 have_dot = false;
     u8 *ugh = 0;
-    buf_printf(ugh, "%g", value);
+    buf_printf(ugh, "%.7g", value);
     for (isize i = 0; i < buf_len(ugh); i++) {
         if (ugh[i] == '.') {
             have_dot = true;
         }
     }
-    char const *result = have_dot ? "F" : ".0F";
+    char const *result = have_dot ? "F" : ".F";
     return result;
 }
 
@@ -314,7 +315,7 @@ void rewrite_declaration(FileRewriter *fr, char const *name, f32 value)
     end += fr->offset;
 
     buf_clear(fr->buffer);
-    buf_printf(fr->buffer, "%.*sfloat %s = %g%s%s", start, rewrite, name, value, float_suffix(value), rewrite + end);
+    buf_printf(fr->buffer, "%.*sfloat %s = %.8g%s%s", start, rewrite, name, value, float_suffix(value), rewrite + end);
 
     fr->rewrite = fr->buffer;
     fr->buffer = rewrite;
@@ -364,7 +365,7 @@ void rewrite_constant(FileRewriter *fr, isize line, isize floats_to_skip, f32 va
     isize end = start + p.len;
 
     buf_clear(fr->buffer);
-    buf_printf(fr->buffer, "%.*s%g%s%s", start, rewrite, value, float_suffix(value), rewrite + end);
+    buf_printf(fr->buffer, "%.*s%.8g%s%s", start, rewrite, value, float_suffix(value), rewrite + end);
 
     fr->rewrite = fr->buffer;
     fr->buffer = rewrite;
@@ -380,7 +381,9 @@ void rewrite_mod(CalcInfo *info, ModInfo *mod, ParamSet *ps)
         assert(str_eq(file, file_for_param(info, mod->index + p)));
         ParamInfo *param = &info->params[mod->index + p];
         f32 value = ps->params[mod->index + p];
-        rewrite_declaration(&fr, param->name, value);
+        if (value != param->default_value) {
+            rewrite_declaration(&fr, param->name, value);
+        }
     }
 
     write_calc_source(file, mod->name, fr.rewrite);
@@ -397,7 +400,7 @@ void rewrite_basescalers(CalcInfo *info, ModInfo *mod, ParamSet *ps)
     buf_printf(basescalers, "0.F, ");
     isize last = mod->num_params - 1;
     for (isize i = 0; i < mod->num_params; i++) {
-        buf_printf(basescalers, "%g%s%s", ps->params[mod->index + i], float_suffix(ps->params[mod->index + i]), i != last ? ", " : "");
+        buf_printf(basescalers, "%.7g%s%s", ps->params[mod->index + i], float_suffix(ps->params[mod->index + i]), i != last ? ", " : "");
     }
 
     isize start = find_string(source.buf, S("basescalers = {"));
@@ -419,7 +422,9 @@ void rewrite_globals(CalcInfo *info, ParamSet *ps, isize param_index, isize num_
         assert(str_eq(file, file_for_param(info, param_index + p)));
         ParamInfo *param = &info->params[param_index + p];
         f32 value = ps->params[param_index + p];
-        rewrite_declaration(&fr, param->name, value);
+        if (value != param->default_value) {
+           rewrite_declaration(&fr, param->name, value);
+        }
     }
 
     write_calc_source(file, "Globals", fr.rewrite);
@@ -437,7 +442,9 @@ void rewrite_constants(CalcInfo *info, ParamSet *ps, isize mod_index, isize star
         icf = *info_for_inline_constant(info, mod_index + start_param + p);
         assert(str_eq(file, icf.file));
         f32 value = ps->params[mod_index + icf.index];
-        rewrite_constant(&fr, icf.line, icf.nth, value);
+        if (value != icf.default_value) {
+            rewrite_constant(&fr, icf.line, icf.nth, value);
+        }
     }
 
     write_calc_source(file, "InlineConstants", fr.rewrite);
@@ -446,6 +453,12 @@ void rewrite_constants(CalcInfo *info, ParamSet *ps, isize mod_index, isize star
 
 void rewrite_parameters(CalcInfo *info, ParamSet *ps)
 {
+    // stupid hack so each rewriter can behave as if it loads a 441/ file off
+    // disk, but redirects to a newly rewritten file if the file is being
+    // accessed a second time (instead of the original file again). yes this
+    // needs some more structure, but why bother rn
+    buf_clear(rewritten);
+
     for (isize m = 1; m < info->num_mods; m++) {
         ModInfo *mod = &info->mods[m];
         if (info->params[mod->index].constant == false) {
