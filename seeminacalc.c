@@ -505,7 +505,7 @@ i32 add_target_files(void)
 
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             if (strings_are_equal(sfi->id, id)) {
-                return -2;
+                goto skip;
             }
         }
 
@@ -523,7 +523,7 @@ i32 add_target_files(void)
             .target.want_msd = target->target,
             .target.rate = target->rate,
             .target.skillset = target->skillset,
-            .target.weight = 1.0f,
+            .target.weight = target->weight,
             .notes_len = (i32)buf_len(ni),
             .notes = frobble_note_data(ni, buf_len(ni)),
             .selected_skillsets[0] = true,
@@ -543,7 +543,8 @@ i32 add_target_files(void)
             target_s = old_s + (target->target - old_m)*(target->target - target_m);
         }
 
-        printf("Added %s\n", id.buf);
+        printf("%s %s %.2fx: %.2f\n", SkillsetNames[target->skillset], title.buf, target->rate, target->target);
+        skip:;
     }
 
     f32 target_var = target_s / (array_length(TargetFiles) - 1);
@@ -1326,6 +1327,11 @@ void frame(void)
                     i32 file_index = sample % buf_len(state.files);
                     assert(file_index >= 0);
                     SimFileInfo *sfi = &state.files[file_index];
+
+                    if (sfi->target.weight == 0.0f) {
+                        req.n_samples = req.n_samples < buf_len(state.files) ? req.n_samples + 1 : req.n_samples;
+                        continue;
+                    }
 
                     i32 ss = sfi->target.skillset;
                     f32 goal = state.opt_cfg.goals[ss];

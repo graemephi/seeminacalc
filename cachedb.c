@@ -181,7 +181,7 @@ b32 db_iter_next(DBFile *out)
     return sqlite3_stmt_busy(cache_db.all_stmt);
 }
 
-struct { char *key; u32 skillset; f32 rate; f32 target; } TestFiles[] = {
+struct { char *key; u32 skillset; f32 rate; f32 target; b32 dead; } TestFiles[] = {
     { .key = "X0dd1f00da8800ee98a9ac3ebc318d4c24c5bd07d", .skillset = 1, .rate = 1.30f, .target = 34.00f  },
     { .key = "X24085a6e074ca3bd89c91b748d9b42061863e9c1", .skillset = 1, .rate = 1.00f, .target = 25.00f  },
     { .key = "X3b87b6ac44151291b29e3fe2e8b047f6af28000e", .skillset = 1, .rate = 1.00f, .target = 29.00f  },
@@ -207,42 +207,55 @@ struct { char *key; u32 skillset; f32 rate; f32 target; } TestFiles[] = {
     { .key = "X30acaf360a0e56bcc1376d36a98d24090a65074d", .skillset = 4, .rate = 1.00f, .target = 23.50f  },
     { .key = "X75012d7a17a174681beb31ce3858d1c9f726dddb", .skillset = 4, .rate = 1.00f, .target = 30.00f  },
     { .key = "X9cd21dc241d821b69967a0058ccadcedf3cc9545", .skillset = 4, .rate = 1.00f, .target = 30.50f  },
-    { .key = "Xdd74f464e7acbab921b91a2b5100901af24b3054", .skillset = 4, .rate = 1.00f, .target = 25.50f  },
-    { .key = "X02bdb23abcf2ff5b91c4110793b2923de6a75d4a", .skillset = 5, .rate = 2.00f, .target = 36.00f  },
-    { .key = "X04241934a67a881dce270b9a59c12d7d3465707d", .skillset = 5, .rate = 1.80f, .target = 33.50f  },
- // chartkey points at medium diff, which is not a jackspeed file (the hard diff is)
-//  { .key = "X0b9f174c0842900f11f319ef92ebc29a8d136c40", .skillset = 5, .rate = 1.80f, .target = 31.50f  },
-    { .key = "X0bd2cfaff3695b86086cd972d0ff665883808fa0", .skillset = 5, .rate = 1.80f, .target = 31.50f  },
-    { .key = "X228dad35261a8c058c3559e51795e0d57d1e73b4", .skillset = 5, .rate = 1.50f, .target = 32.00f  },
-    { .key = "X3495c047b9e2518e22f2272224a9b46cf5124326", .skillset = 5, .rate = 1.70f, .target = 33.00f  },
-    { .key = "X384726c68bdc0c7267740c9398809b26ef7b253b", .skillset = 5, .rate = 1.70f, .target = 33.50f  },
-    { .key = "X39c8da1316785aa5b41f5fcae3344d09aa32cbba", .skillset = 5, .rate = 1.90f, .target = 34.00f  },
-    { .key = "X42dfdf8d468f14893e4fbbc7c38e1d84ed1f65b5", .skillset = 5, .rate = 1.50f, .target = 33.50f  },
-    { .key = "X46fe26ac44ce680907eef143d4027e43e47a385c", .skillset = 5, .rate = 1.70f, .target = 34.00f  },
-    { .key = "X4d6bd3b7e752429b176f992d5df72e1c8fae1970", .skillset = 5, .rate = 1.00f, .target = 32.50f  },
+    { .key = "X07ee1f3ff7027ca945a44849afc0d6d8c09eda73", .skillset = 5, .rate = 1.40f, .target = 35.50f  },
+    { .key = "X0bd2cfaff3695b86086cd972d0ff665883808fa0", .skillset = 5, .rate = 2.00f, .target = 33.00f  },
+    { .key = "X1aa36f55e727dc03e463c20980400a795845bb66", .skillset = 5, .rate = 1.20f, .target = 35.50f  },
+    { .key = "X2a84d2f704a13003a0b42c95ffea2fe000d5d07c", .skillset = 5, .rate = 1.60f, .target = 34.00f  },
+    { .key = "X33a9827dc27dc5df9a7e91ae93d638dd0fcec022", .skillset = 5, .rate = 1.80f, .target = 32.50f  },
+    { .key = "X3495c047b9e2518e22f2272224a9b46cf5124326", .skillset = 5, .rate = 1.90f, .target = 34.50f  },
+    { .key = "X3f529d3cd460ac7b36547b88772eb24ddd39dc33", .skillset = 5, .rate = 1.00f, .target = 32.50f  },
+    { .key = "X4d6bd3b7e752429b176f992d5df72e1c8fae1970", .skillset = 5, .rate = 1.00f, .target = 33.00f  },
+    { .key = "X5a1c3429c0b87900e642405f88c3c54db0acbb3f", .skillset = 5, .rate = 1.80f, .target = 33.50f  },
+    { .key = "X67747444313202c8a293779d25fe76a046d51843", .skillset = 5, .rate = 1.40f, .target = 35.50f  },
     { .key = "X680ea067b24674983f37aca016f9324ef1105810", .skillset = 5, .rate = 1.00f, .target = 35.00f  },
-    { .key = "X6e20373704afadfc43eebf69217f986ad4ada494", .skillset = 5, .rate = 1.70f, .target = 33.50f  },
-    { .key = "X7246b27422f4914a47b7fff57516785fe923a153", .skillset = 5, .rate = 1.20f, .target = 34.00f  },
-    { .key = "X7b294e038ba6c4cf1fc80de0eff191f928c50080", .skillset = 5, .rate = 2.00f, .target = 34.00f  },
-    { .key = "X85e5db71c00c154dc2c58cf1a87f9fb5a6393b99", .skillset = 5, .rate = 1.00f, .target = 26.00f  },
-    { .key = "X946eebfd26510999d1092bba4e4ebee117b88d6f", .skillset = 5, .rate = 1.60f, .target = 33.50f  },
-    { .key = "Xa07fe545c2de90d9f213a5c498216b7d940477aa", .skillset = 5, .rate = 1.00f, .target = 35.00f  },
-    { .key = "Xa5a2909de3610928e4b38100542a990a483d1dcc", .skillset = 5, .rate = 1.80f, .target = 33.50f  },
-    { .key = "Xa6354153c6d83a8df968ef3a23a657264a65d961", .skillset = 5, .rate = 2.00f, .target = 34.00f  },
+    { .key = "X6d5f0db56f727336fdd35494f676e049607201c1", .skillset = 5, .rate = 1.20f, .target = 35.00f  },
+    { .key = "X7104e2816572025bf08344ab48e6b41addcb618b", .skillset = 5, .rate = 1.30f, .target = 34.50f  },
+    { .key = "X7246b27422f4914a47b7fff57516785fe923a153", .skillset = 5, .rate = 1.20f, .target = 34.50f  },
+    { .key = "X85e5db71c00c154dc2c58cf1a87f9fb5a6393b99", .skillset = 5, .rate = 1.30f, .target = 34.50f  },
+    { .key = "X8644d5d21b24b7337a3793a4543f4c016e41c129", .skillset = 5, .rate = 1.80f, .target = 34.50f  },
+    { .key = "X997686806022502805e5fb738a84872846c5aa24", .skillset = 5, .rate = 1.70f, .target = 32.00f  },
+    { .key = "Xa07fe545c2de90d9f213a5c498216b7d940477aa", .skillset = 5, .rate = 1.00f, .target = 36.00f  },
+    { .key = "Xa5a2909de3610928e4b38100542a990a483d1dcc", .skillset = 5, .rate = 1.80f, .target = 34.00f  },
+    { .key = "Xa6354153c6d83a8df968ef3a23a657264a65d961", .skillset = 5, .rate = 2.00f, .target = 35.00f  },
     { .key = "Xa8f9671eeec13b573a35242d4d2e703a45ca8d35", .skillset = 5, .rate = 2.00f, .target = 32.50f  },
-    { .key = "Xae07974ee0b0a60b3b5c7d554859cc336e0fb296", .skillset = 5, .rate = 1.70f, .target = 33.00f  },
-    { .key = "Xb11b2b8b93d2f3e2964e2872515889feb1250dd9", .skillset = 5, .rate = 1.60f, .target = 32.50f  },
-    { .key = "Xb12433fdc71f71392ffb61a9545914e3ca33739c", .skillset = 5, .rate = 1.50f, .target = 32.50f  },
-    { .key = "Xb2d874e23ab11202217f6e879dae662a84cf293f", .skillset = 5, .rate = 2.00f, .target = 30.50f  },
-    { .key = "Xb830d6e52c0acc2f4c655cc2062f68444e7cd231", .skillset = 5, .rate = 1.60f, .target = 33.50f  },
+    { .key = "Xb12433fdc71f71392ffb61a9545914e3ca33739c", .skillset = 5, .rate = 1.60f, .target = 35.50f  },
+    { .key = "Xb830d6e52c0acc2f4c655cc2062f68444e7cd231", .skillset = 5, .rate = 1.60f, .target = 35.00f  },
+    { .key = "Xbbb395ecf700aafb93477de367ea485f60ae1ea0", .skillset = 5, .rate = 1.60f, .target = 35.50f  },
     { .key = "Xc35256184d06b42690eaed15feaf810432beb0f5", .skillset = 5, .rate = 1.30f, .target = 34.00f  },
-    { .key = "Xcee78c72ba6ba436ba9325f030c482bf13843376", .skillset = 5, .rate = 1.00f, .target = 17.50f  },
+    { .key = "Xcad56ae0e72fc384cd09db76b60a6b73088f16e0", .skillset = 5, .rate = 1.00f, .target = 32.00f  },
+    { .key = "Xcb5737d3425bfc5c770510d9c86fafd7d3b47be0", .skillset = 5, .rate = 1.50f, .target = 34.50f  },
     { .key = "Xd94ccb09cdae9e4d66a34625af7cd8080dc00ca4", .skillset = 5, .rate = 1.40f, .target = 33.00f  },
-    { .key = "Xdc3ffa63396c3609cb59fd68093e0ded7e5567be", .skillset = 5, .rate = 1.80f, .target = 33.50f  },
-    { .key = "Xdf0158c52b5a3fd5ecb2cf8b65999af06020bd34", .skillset = 5, .rate = 1.50f, .target = 32.00f  },
-    { .key = "Xe0a7e1a1d4f4584db3dac036c1e6df30231388b8", .skillset = 5, .rate = 2.00f, .target = 33.50f  },
-    { .key = "Xf75a6185cf41fb74e95bb1c8d2655c5bf9b39cda", .skillset = 5, .rate = 1.70f, .target = 33.50f  },
-    { .key = "Xf96c0c2d42c86624a6e80013623042d4b1bce323", .skillset = 5, .rate = 1.10f, .target = 32.50f  },
+    { .key = "Xdc3ffa63396c3609cb59fd68093e0ded7e5567be", .skillset = 5, .rate = 1.80f, .target = 34.00f  },
+    { .key = "X7246b27422f4914a47b7fff57516785fe923a153", .skillset = 5, .rate = 1.00f, .target = 28.50f  },// zSong='Aztec Templing'>
+    { .key = "Xd94ccb09cdae9e4d66a34625af7cd8080dc00ca4", .skillset = 5, .rate = 1.50f, .target = 35.50f  },// zSong='Need U More'>
+    { .key = "X67747444313202c8a293779d25fe76a046d51843", .skillset = 5, .rate = 1.30f, .target = 33.00f  },// zSong='Fire'>
+    { .key = "X67747444313202c8a293779d25fe76a046d51843", .skillset = 5, .rate = 1.30f, .target = 24.50f  },// zSong='Fire'>
+    { .key = "X85e5db71c00c154dc2c58cf1a87f9fb5a6393b99", .skillset = 5, .rate = 1.00f, .target = 27.00f  },// zSong='The Vital Vitriol'>
+    { .key = "Xc234a5a9a8ccb81932b7b7677ecb71cc8d1a7243", .skillset = 5, .rate = 1.00f, .target = 28.50f  },// zSong='Delta Decision'>
+    { .key = "Xc35256184d06b42690eaed15feaf810432beb0f5", .skillset = 5, .rate = 1.00f, .target = 25.50f  },//zSong='zl'>
+    { .key = "Xa6354153c6d83a8df968ef3a23a657264a65d961", .skillset = 5, .rate = 1.30f, .target = 24.00f  }, //zSong='OrBiTal'>"
+    { .key = "Xbbb395ecf700aafb93477de367ea485f60ae1ea0", .skillset = 5, .rate = 1.00f, .target = 22.25f  }, //zSong='Infinitude Starshine'>
+    // more. these aren't normative, just sledgehammers to force the optimizer away from certain outliers
+    // busy? or dizzy?
+    { .key = "X659797053f2679f4a8d3caaeb39455abba08cedc", .skillset = 5, .rate = 1.00f, .target = 27.00f },
+    // maid of fire
+    { .key = "Xb12433fdc71f71392ffb61a9545914e3ca33739c", .skillset = 5, .rate = 1.00f, .target = 23.50f },
+    // mina nightmare night
+    { .key = "X549a3520add30d4e5fdd4ecc64d11e99529f8564", .skillset = 5, .rate = 1.00f, .target = 24.00 },
+    // brush your teeth
+    { .key = "X2fc490d449b4aaf031b6910346d4f57c3d9202cc", .skillset = 5, .rate = 1.00f, .target = 24.00 },
+    // princess bride
+    { .key = "X02bdb23abcf2ff5b91c4110793b2923de6a75d4a", .skillset = 5, .rate = 1.60f, .target = 26.00f },
     { .key = "X32c2f335b2f746c8b45908ab31b1a9ae42d439cb", .skillset = 6, .rate = 1.20f, .target = 33.50f  },
     { .key = "X330138373e447c3c9b542f81eb4b246385766657", .skillset = 6, .rate = 1.35f, .target = 34.50f  },
     { .key = "X34dfe3ac8dc2a002b596049065629e59b967dcd6", .skillset = 6, .rate = 1.80f, .target = 34.50f  },
@@ -273,20 +286,42 @@ struct { char *key; u32 skillset; f32 rate; f32 target; } TestFiles[] = {
     { .key = "Xe4e68826a3d00062e163f3a29b42350f86089b26", .skillset = 7, .rate = 1.00f, .target = 25.00f  },
     { .key = "Xecbb9d26ff2e40424d3c09e2bfe405149b954e2b", .skillset = 7, .rate = 1.00f, .target = 22.50f  },
     { .key = "Xfc8c31f8022a6bd24fe186ea381917b697ea14a2", .skillset = 7, .rate = 1.40f, .target = 33.50f  },
-
-    // more. these aren't normative, just sledgehammers to force the optimizer away from certain outliers
-    // busy? or dizzy?
-    { .key = "X659797053f2679f4a8d3caaeb39455abba08cedc", .skillset = 5, .rate = 1.00f, .target = 27.00f  },
-    // maid of fire
-    { .key = "Xb12433fdc71f71392ffb61a9545914e3ca33739c", .skillset = 5, .rate = 1.00f, .target = 23.50f  },
-    // mina nightmare night
-    { .key = "X549a3520add30d4e5fdd4ecc64d11e99529f8564", .skillset = 5, .rate = 1.00f, .target = 24.00f },
-    // brush your teeth
-    { .key = "X2fc490d449b4aaf031b6910346d4f57c3d9202cc", .skillset = 5, .rate = 1.00f, .target = 24.00f },
-    // princess bride
-    { .key = "X02bdb23abcf2ff5b91c4110793b2923de6a75d4a", .skillset = 5, .rate = 1.60f, .target = 26.00f  },
-    // #er
-    { .key = "X585a0b45879134590c62c294ab12f611bcd242b2", .skillset = 5, .rate = 1.0f, .target = 27.0f },
+    { .key = "Xdd74f464e7acbab921b91a2b5100901af24b3054", .skillset = 4, .rate = 1.00f, .target = 25.50f, .dead = 1  },
+    { .key = "X02bdb23abcf2ff5b91c4110793b2923de6a75d4a", .skillset = 5, .rate = 2.00f, .target = 36.00f, .dead = 1  },
+    { .key = "X04241934a67a881dce270b9a59c12d7d3465707d", .skillset = 5, .rate = 1.80f, .target = 33.50f, .dead = 1  },
+ // chartkey points at medium diff, which is not a jackspeed file (the hard diff is)
+//  { .key = "X0b9f174c0842900f11f319ef92ebc29a8d136c40", .skillset = 5, .rate = 1.80f, .target = 31.50f, .dead = 1  },
+    { .key = "X0bd2cfaff3695b86086cd972d0ff665883808fa0", .skillset = 5, .rate = 1.80f, .target = 31.50f, .dead = 1  },
+    { .key = "X228dad35261a8c058c3559e51795e0d57d1e73b4", .skillset = 5, .rate = 1.50f, .target = 32.00f, .dead = 1  },
+    { .key = "X3495c047b9e2518e22f2272224a9b46cf5124326", .skillset = 5, .rate = 1.70f, .target = 33.00f, .dead = 1  },
+    { .key = "X384726c68bdc0c7267740c9398809b26ef7b253b", .skillset = 5, .rate = 1.70f, .target = 33.50f, .dead = 1  },
+    { .key = "X39c8da1316785aa5b41f5fcae3344d09aa32cbba", .skillset = 5, .rate = 1.90f, .target = 34.00f, .dead = 1  },
+    { .key = "X42dfdf8d468f14893e4fbbc7c38e1d84ed1f65b5", .skillset = 5, .rate = 1.50f, .target = 33.50f, .dead = 1  },
+    { .key = "X46fe26ac44ce680907eef143d4027e43e47a385c", .skillset = 5, .rate = 1.70f, .target = 34.00f, .dead = 1  },
+    { .key = "X4d6bd3b7e752429b176f992d5df72e1c8fae1970", .skillset = 5, .rate = 1.00f, .target = 32.50f, .dead = 1  },
+    { .key = "X680ea067b24674983f37aca016f9324ef1105810", .skillset = 5, .rate = 1.00f, .target = 35.00f, .dead = 1  },
+    { .key = "X6e20373704afadfc43eebf69217f986ad4ada494", .skillset = 5, .rate = 1.70f, .target = 33.50f, .dead = 1  },
+    { .key = "X7246b27422f4914a47b7fff57516785fe923a153", .skillset = 5, .rate = 1.20f, .target = 34.00f, .dead = 1  },
+    { .key = "X7b294e038ba6c4cf1fc80de0eff191f928c50080", .skillset = 5, .rate = 2.00f, .target = 34.00f, .dead = 1  },
+    { .key = "X85e5db71c00c154dc2c58cf1a87f9fb5a6393b99", .skillset = 5, .rate = 1.00f, .target = 26.00f, .dead = 1  },
+    { .key = "X946eebfd26510999d1092bba4e4ebee117b88d6f", .skillset = 5, .rate = 1.60f, .target = 33.50f, .dead = 1  },
+    { .key = "Xa07fe545c2de90d9f213a5c498216b7d940477aa", .skillset = 5, .rate = 1.00f, .target = 35.00f, .dead = 1  },
+    { .key = "Xa5a2909de3610928e4b38100542a990a483d1dcc", .skillset = 5, .rate = 1.80f, .target = 33.50f, .dead = 1  },
+    { .key = "Xa6354153c6d83a8df968ef3a23a657264a65d961", .skillset = 5, .rate = 2.00f, .target = 34.00f, .dead = 1  },
+    { .key = "Xa8f9671eeec13b573a35242d4d2e703a45ca8d35", .skillset = 5, .rate = 2.00f, .target = 32.50f, .dead = 1  },
+    { .key = "Xae07974ee0b0a60b3b5c7d554859cc336e0fb296", .skillset = 5, .rate = 1.70f, .target = 33.00f, .dead = 1  },
+    { .key = "Xb11b2b8b93d2f3e2964e2872515889feb1250dd9", .skillset = 5, .rate = 1.60f, .target = 32.50f, .dead = 1  },
+    { .key = "Xb12433fdc71f71392ffb61a9545914e3ca33739c", .skillset = 5, .rate = 1.50f, .target = 32.50f, .dead = 1  },
+    { .key = "Xb2d874e23ab11202217f6e879dae662a84cf293f", .skillset = 5, .rate = 2.00f, .target = 30.50f, .dead = 1  },
+    { .key = "Xb830d6e52c0acc2f4c655cc2062f68444e7cd231", .skillset = 5, .rate = 1.60f, .target = 33.50f, .dead = 1  },
+    { .key = "Xc35256184d06b42690eaed15feaf810432beb0f5", .skillset = 5, .rate = 1.30f, .target = 34.00f, .dead = 1  },
+    { .key = "Xcee78c72ba6ba436ba9325f030c482bf13843376", .skillset = 5, .rate = 1.00f, .target = 17.50f, .dead = 1  },
+    { .key = "Xd94ccb09cdae9e4d66a34625af7cd8080dc00ca4", .skillset = 5, .rate = 1.40f, .target = 33.00f, .dead = 1  },
+    { .key = "Xdc3ffa63396c3609cb59fd68093e0ded7e5567be", .skillset = 5, .rate = 1.80f, .target = 33.50f, .dead = 1  },
+    { .key = "Xdf0158c52b5a3fd5ecb2cf8b65999af06020bd34", .skillset = 5, .rate = 1.50f, .target = 32.00f, .dead = 1  },
+    { .key = "Xe0a7e1a1d4f4584db3dac036c1e6df30231388b8", .skillset = 5, .rate = 2.00f, .target = 33.50f, .dead = 1  },
+    { .key = "Xf75a6185cf41fb74e95bb1c8d2655c5bf9b39cda", .skillset = 5, .rate = 1.70f, .target = 33.50f, .dead = 1  },
+    { .key = "Xf96c0c2d42c86624a6e80013623042d4b1bce323", .skillset = 5, .rate = 1.10f, .target = 32.50f, .dead = 1  },
 };
 
 int main(int argc, char **argv)
@@ -309,6 +344,7 @@ int main(int argc, char **argv)
         "    i32 skillset;\n"
         "    f32 rate;\n"
         "    f32 target;\n"
+        "    f32 weight;\n"
         "    isize note_data_len;\n"
         "    u32 *note_data_notes;\n"
         "    f32 *note_data_times;\n"
@@ -368,6 +404,7 @@ int main(int argc, char **argv)
             buf_printf(gen, "        .skillset = %d,\n", TestFiles[i].skillset);
             buf_printf(gen, "        .rate = %af,\n", TestFiles[i].rate);
             buf_printf(gen, "        .target = %af,\n", TestFiles[i].target);
+            buf_printf(gen, "        .weight = %af,\n", TestFiles[i].dead ? 0.0f : 1.0f);
             buf_printf(gen, "        .note_data_len = array_length(TargetFileData_%zd_Notes),\n", i);
             buf_printf(gen, "        .note_data_notes = TargetFileData_%zd_Notes,\n", i);
             buf_printf(gen, "        .note_data_times = TargetFileData_%zd_RowTime\n", i);
