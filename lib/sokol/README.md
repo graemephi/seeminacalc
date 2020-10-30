@@ -6,27 +6,29 @@ Simple
 [STB-style](https://github.com/nothings/stb/blob/master/docs/stb_howto.txt)
 cross-platform libraries for C and C++, written in C.
 
-[See what's new](#updates) (**13-Jul-2020**: ObjC ARC is now optional, plus internal cleanup
+[See what's new](#updates) (**27-Oct-2020** sokol_app.h emscripten: canvas id vs css selector bugfix)
 
 [Live Samples](https://floooh.github.io/sokol-html5/index.html) via WASM.
 
+[LearnOpenGL examples ported to sokol-gfx](https://www.geertarien.com/learnopengl-examples-html5/) by @geertarien (cool stuff!)
+
 Cross-platform libraries:
 
-- **sokol\_gfx.h**: 3D-API wrapper (GL + Metal + D3D11)
-- **sokol\_app.h**: app framework wrapper (entry + window + 3D-context + input)
-- **sokol\_time.h**: time measurement
-- **sokol\_audio.h**: minimal buffer-streaming audio playback
-- **sokol\_fetch.h**: asynchronous data streaming from HTTP and local filesystem
-- **sokol\_args.h**: unified cmdline/URL arg parser for web and native apps
+- [**sokol\_gfx.h**](https://github.com/floooh/sokol/blob/master/sokol_gfx.h): 3D-API wrapper (GL + Metal + D3D11)
+- [**sokol\_app.h**](https://github.com/floooh/sokol/blob/master/sokol_app.h): app framework wrapper (entry + window + 3D-context + input)
+- [**sokol\_time.h**](https://github.com/floooh/sokol/blob/master/sokol_time.h): time measurement
+- [**sokol\_audio.h**](https://github.com/floooh/sokol/blob/master/sokol_audio.h): minimal buffer-streaming audio playback
+- [**sokol\_fetch.h**](https://github.com/floooh/sokol/blob/master/sokol_fetch.h): asynchronous data streaming from HTTP and local filesystem
+- [**sokol\_args.h**](https://github.com/floooh/sokol/blob/master/sokol_args.h): unified cmdline/URL arg parser for web and native apps
 
 Utility libraries:
 
-- **sokol\_imgui.h**: sokol_gfx.h rendering backend for [Dear ImGui](https://github.com/ocornut/imgui)
-- **sokol\_gl.h**: OpenGL 1.x style immediate-mode rendering API on top of sokol_gfx.h
-- **sokol\_fontstash.h**: sokol_gl.h rendering backend for [fontstash](https://github.com/memononen/fontstash)
-- **sokol\_gfx\_imgui.h**: debug-inspection UI for sokol_gfx.h (implemented with Dear ImGui)
-- **sokol\_debugtext.h**: a simple text renderer using vintage home computer fonts
-- **sokol\_memtrack.h**: easily track memory allocations in sokol headers
+- [**sokol\_imgui.h**](https://github.com/floooh/sokol/blob/master/util/sokol_imgui.h): sokol_gfx.h rendering backend for [Dear ImGui](https://github.com/ocornut/imgui)
+- [**sokol\_gl.h**](https://github.com/floooh/sokol/blob/master/util/sokol_gl.h): OpenGL 1.x style immediate-mode rendering API on top of sokol_gfx.h
+- [**sokol\_fontstash.h**](https://github.com/floooh/sokol/blob/master/util/sokol_fontstash.h): sokol_gl.h rendering backend for [fontstash](https://github.com/memononen/fontstash)
+- [**sokol\_gfx\_imgui.h**](https://github.com/floooh/sokol/blob/master/util/sokol_gfx_imgui.h): debug-inspection UI for sokol_gfx.h (implemented with Dear ImGui)
+- [**sokol\_debugtext.h**](https://github.com/floooh/sokol/blob/master/util/sokol_debugtext.h): a simple text renderer using vintage home computer fonts
+- [**sokol\_memtrack.h**](https://github.com/floooh/sokol/blob/master/util/sokol_memtrack.h): easily track memory allocations in sokol headers
 
 WebAssembly is a 'first-class citizen', one important motivation for the
 Sokol headers is to provide a collection of cross-platform APIs with a
@@ -162,7 +164,7 @@ A minimal cross-platform application-wrapper library:
 - single window or canvas for 3D rendering
 - 3D context initialization
 - event-based keyboard, mouse and touch input
-- supported platforms: Win32, MacOS, Linux (X11), iOS, WASM/asm.js, Android (planned: RaspberryPi)
+- supported platforms: Win32, MacOS, Linux (X11), iOS, WASM, Android, UWP
 - supported 3D-APIs: GL3.3 (GLX/WGL), Metal, D3D11, GLES2/WebGL, GLES3/WebGL2
 
 A simple clear-loop sample using sokol_app.h and sokol_gfx.h (does not include
@@ -430,35 +432,148 @@ int main(int argc, char* argv[]) {
 See the sokol_args.h header for a more complete documentation, and the [Tiny
 Emulators](https://floooh.github.io/tiny8bit/) for more interesting usage examples.
 
-# Overview of planned features
-
-A list of things I'd like to do next:
-
-## sokol_gfx.h planned features:
-
-- 2 small additions to the per-pool-slot generation counters in sokol_gfx.h:
-    - an sg_setup() option to disable a pool slot when it's generation
-      counter overflows, this makes the dangling-check for resource ids
-      watertight at the cost that the pool will run out of slots at some point
-    - instead of the 16/16-bit split in the resource ids for unique-tag vs
-      slot-index, only use as many bits as necessary for the slot-index
-      (based on the number of slots in the pool), and the remaining bits
-      for the unique-tag
-
-## sokol_app.h planned features:
-
-Mainly some "missing features" for desktop apps:
-
-- define an application icon
-- change the window title on existing window
-- pointer lock
-- allow to change mouse cursor image (at first only switch between system-provided standard images)
-
-## sokol_audio.h planned features:
-
-- implement an alternative WebAudio backend using Audio Worklets and WASM threads
-
 # Updates
+
+- **27-Oct-2020**: I committed a bugfix for a longstanding WebGL canvas id versus
+  css-selector confusion in the emscripten/WASM backend code in sokol_app.h.
+  I think the fix should not require any changes in your code (because if
+  you'd be using a canvas name different from the default "canvas" it wouldn't
+  have worked before anyway). See this bug for details: https://github.com/floooh/sokol/issues/407
+
+- **22-Oct-2020**: sokol_app.h now has file drag'n'drop support on Win32,
+  macOS and Linux. WASM/HTML5 support will be added soon-ish. This will
+  work a bit differently because of security-related restrictions in the
+  HTML5 drag'n'drop API, but more on that later. For documentation,
+  search for 'DRAG AND DROP SUPPORT' in [sokol_app.h](https://github.com/floooh/sokol/blob/master/sokol_app.h).
+
+  Check out [events-sapp.c](https://github.com/floooh/sokol-samples/blob/master/sapp/events-sapp.cc)
+  for a simple usage example (I will also add a more real-world example to my
+  chips emulators once the WASM/HTML5 implementation is ready).
+
+  Many thanks for @prime31 and @hb3p8 for the initial PRs and valuable feature
+  discussions!
+
+- **10-Oct-2020**: Improvements to the sokol_app.h Win32+D3D11 and UWP+D3D11 swapchain code:
+  - In the Win32+D3D11 backend and when running on Win10,
+    ```DXGI_SWAP_EFFECT_FLIP_DISCARD``` is now used.  This gets rid of a
+    deprecation warning in the debugger console and also should allow slightly
+    more efficient swaps in some situations. When running on Win7 or Win8, the
+    traditional ```DXGI_SWAP_EFFECT_DISCARD``` is used.
+  - The UWP backend now supports MSAA multisampling (the required fixes for
+    this are the same as in the Win32 backend with the new swap effect: a
+    separate MSAA texture and render-target-view is created where
+    rendering goes into, and this MSAA texture is resolved into the actual
+    swapchain surface before presentation).
+
+- **07-Oct-2020**:
+    A fix in the ALSA/Linux backend initialization in sokol_audio.h: Previously,
+    initialization would fail if ALSA can't allocate the exact requested
+    buffer size. Instead sokol_audio.h let's now pick ALSA a suitable buffer
+    size. Also better log messages in the ALSA initialization code if something
+    goes wrong. Unfortunately I'm not able to reproduce the buffer allocation
+    problem on my Linux machine. Details are in this issue: https://github.com/floooh/sokol/issues/400
+
+    **NARRATOR**: the fix didn't work.
+
+- **02-Oct-2020**:
+    The sokol_app.h Win32 backend can now render while moving and resizing
+    the window. NOTE that resizing the swapchain buffers (and receiving
+    SAPP_EVENTTYPE_RESIZED events) is deferred until the resizing finished.
+    Resizing the swapchain buffers each frame created a substantial temporary
+    memory spike of up to several hundred MBytes. I need to figure out a better
+    swapchain resizing strategy.
+
+- **30-Sep-2020**:
+    sokol_audio.h now works on UWP, thanks again to Alberto Fustinoni
+    (@albertofustinoni) for the PR!
+
+- **26-Sep-2020**:
+    sokol_app.h gained a new function sapp_set_window_title() to change
+    the window title on Windows, macOS and Linux. Many thanks to
+    @medvednikov for the initial PR!
+
+- **23-Sep-2020**:
+    sokol_app.h now has initial UWP support using the C++/WinRT set of APIs.
+    Currently this requires "bleeding edge" tools: A recent VS2019 version,
+    and a very recent Windows SDK version (at least version 10.0.19041.0).
+    Furthermore the sokol_app.h implementation must be compiled as C++17
+    (this is a requirement of the C++/WinRT headers). Note that the Win32
+    backend will remain the primary and recommended backend on Windows. The UWP
+    backend should only be used when the Win32 backend is not an option.
+    The [sokol-samples](https://github.com/floooh/sokol-samples) project
+    has two new build configs ```sapp-uwp-vstudio-debug``` and
+    ```sapp-uwp-vstudio-release``` to build the sokol-app samples for UWP.
+
+    Many thanks to Alberto Fustinoni (@albertofustinoni) for providing
+    the initial PR!
+
+    (also NOTE: UWP-related fixes in other sokol headers will follow)
+
+- **22-Sep-2020**:
+    A small fix in sokol_app.h's Win32 backend: when a mouse button is pressed,
+    mouse input is now 'captured' by calling SetCapture(), and when the last
+    mouse button is released, ReleaseCapture() is called. This also provides
+    mouse events outside the window area as long as a mouse button is pressed,
+    which is useful for windowed UI applicactions (this is not the same as the
+    more 'rigorous' and explicit pointer-lock feature which is more useful for
+    camera-controls)
+
+- **31-Aug-2020**:
+    Internal change: The D3D11/DXGI backend code in sokol_gfx.h and sokol_app.h
+    now use the D3D11 and DXGI C++-APIs when the implementation is compiled as
+    C++, and the C-APIs when the implementation is compiled as C (before, the C
+    API was also used when the implementation is compiled as C++). The new
+    behaviour is useful when another header *must* use the D3D11/DXGI C++ APIs
+    but should be included in the same compilation unit as sokol_gfx.h an
+    sokol_app.h (for example see this PR:
+    https://github.com/floooh/sokol/pull/351).
+
+- **24-Aug-2020**:
+    The backend-specific callback functions that are provided to sokol_gfx.h
+    in the ```sg_setup()``` initialization call now have alternative
+    versions which accept a userdata-pointer argument. The userdata-free functions
+    still exist, so no changes are required for existing code.
+
+- **02-Aug-2020**:
+    - sokol_app.h now has a mouse-lock feature (aka pointer-lock) via two
+      new functions ```void sapp_lock_mouse(bool lock)``` and ```bool sapp_mouse_locked(void)```.
+      For documentation, please search for 'MOUSE LOCK' in sokol_app.h.
+      The sokol-app samples [events-sapp](https://floooh.github.io/sokol-html5/events-sapp.html)
+      and [cgltf-sapp](https://floooh.github.io/sokol-html5/cgltf-sapp.html) have been
+      updated to demonstrate the feature.
+    - sokol_app.h Linux: mouse pointer visibility (via ```void sapp_show_mouse(bool show)```)
+      has been implemented for Linux/X11
+    - sokol_app.h WASM: mouse wheel scroll deltas are now 'normalized' between
+      the different scroll modes (pixels, lines, pages). See this issue:
+      https://github.com/floooh/sokol/issues/339. Many thanks to @bqqbarbhg for
+      investigating the issue and providing a solution!
+    - sokol_app.h now has [better documentation](https://github.com/floooh/sokol/blob/89a3bb8da0a2df843d6cc60a270ddc69f9aa69d6/sokol_app.h#L70)
+      what system libraries must be linked on the various platforms (and on Linux two additional libraries must be
+      linked now: Xcursor and Xi)
+
+- **22-Jul-2020**: **PLEASE NOTE** cmake 3.18 breaks some of sokol samples when
+  compiling with the Visual Studio toolchain because some C files now actually
+  compile as C++ for some reason (see:
+  https://twitter.com/FlohOfWoe/status/1285996526117040128).  Until this is
+  fixed, or I have come up with a workaround, please use an older cmake version
+  to build the sokol samples with the Visual Studio compiler.
+
+  (Update: I have added a workaround to fips: https://github.com/floooh/fips/commit/89997b8ebdca6fc9455a5cfe6145eecaa017df49
+  which fixes the issue at least for fips projects)
+
+- **14-Jul-2020**:
+    - sapp_mouse_shown() has been implemented for macOS (thanks to @slmjkdbtl for
+      providing the initial PR!)
+    - On macOS, the lower-level functions CGDisplayShowCursor and CGDisplayHideCursor
+      are now used instead of the NSCursor class. This is in preparation for the
+      'pointer lock' feature which will also use CGDisplay* functions.
+    - Calling ```sapp_show_mouse(bool visible)``` no longer 'stacks' (e.g. there's
+      no 'hidden counter' underneath anymore, instead calling ```sapp_show_mouse(true)```
+      will always show the cursor and ```sapp_show_mouse(false)``` will always
+      hide it. This is a different behaviour than the underlying Win32 and
+      macOS functions ShowCursor() and CGDisplaShow/HideCursor()
+    - The mouse show/hide behaviour can now be tested in the ```events-sapp``` sample
+      (so far this only works on Windows and macOS).
 
 - **13-Jul-2020**:
     - On macOS and iOS, sokol_app.h and sokol_gfx.h can now be compiled with
