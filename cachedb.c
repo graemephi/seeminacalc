@@ -244,7 +244,7 @@ String xml_token(u8 *p)
     while (!isspace(*p) && *p != '<' && *p != '>') {
         p++;
     }
-    result.len = p - result.buf;
+    result.len = p - (u8 *)result.buf;
     return result;
 }
 

@@ -34,7 +34,7 @@ cog:
 	cog -rc graphs.c
 
 build/debug/sqlite3.obj:
-	$(Compiler) $(Common) $(Release) -c lib/sqlite3.c
+	$(Compiler) $(Common) -DDEBUG -Fd"build/debug/" -Fo"build/debug/" -Fe"build/debug/" -O2 -Ob2 -c lib/sqlite3.c
 
 build/release/sqlite3.obj:
 	$(Compiler) $(Common) $(Release) $(LTO) -c lib/sqlite3.c
@@ -50,7 +50,7 @@ build/cachedb/cachedb.exe: cachedb.c build/debug/cpp.obj build/debug/sqlite3.obj
 	$(Compiler) $(Common) $(C) -DDEBUG -Fd"build/cachedb/" -Fo"build/cachedb/" -Fe"build/cachedb/" cachedb.c build/debug/sqlite3.obj build/debug/cpp.obj
 
 build/release/seeminacalc.exe: *.h *.c Makefile build/release/sqlite3.obj
-	$(Compiler) $(Common) $(CPP) $(Release) seeminacalc.c cpp.cpp  build/release/sqlite3.obj
+	$(Compiler) $(Common) $(CPP) $(Release) $(LTO) seeminacalc.c cpp.cpp build/release/sqlite3.obj
 
 EMCCFlags :=
 EMCCFlags += -s DISABLE_EXCEPTION_CATCHING=1

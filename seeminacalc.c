@@ -1464,7 +1464,7 @@ void frame(void)
     }
 
     // Optimization window
-    if (state.loss_window) {
+    if (state.loss_window && buf_len(state.files) > 0) {
         static const char *error_message = 0;
         if (!state.optimization_graph) {
             state.optimization_graph = &state.graphs[make_optimization_graph()];
