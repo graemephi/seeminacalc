@@ -352,7 +352,8 @@ const char *file_for_param(CalcInfo *info, size_t param_index)
         } else if (str_eq(m->name, "BaseScalers")) {
             return BaseScalersFile;
         } else {
-            assert(str_eq(m->name, "InlineConstants"));
+            InlineConstantInfo *icf = info_for_inline_constant(info, param_index);
+            return icf ? icf->file : 0;
         }
     }
 

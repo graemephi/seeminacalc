@@ -204,7 +204,6 @@ typedef struct State
     int update_index;
     struct {
         i32 num_open_windows;
-        b32 show_parameter_names;
         f32 left_width;
         f32 centre_width;
         f32 right_width;
@@ -564,7 +563,7 @@ typedef struct ParamSliderChange
     f32 value;
 } ParamSliderChange;
 
-static void param_slider_widget(i32 param_idx, b32 show_parameter_names, ParamSliderChange *out)
+static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
 {
     if (state.info.params[param_idx].fake) {
         return;
@@ -603,9 +602,7 @@ static void param_slider_widget(i32 param_idx, b32 show_parameter_names, ParamSl
             type = ParamSlider_ValueChanged;
             value = state.ps.params[mp];
         }
-        if (show_parameter_names == false) {
-            tooltip(state.info.params[mp].name);
-        }
+        tooltip(state.info.params[mp].name);
         if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
             type = ParamSlider_ValueChanged;
@@ -643,10 +640,6 @@ static void param_slider_widget(i32 param_idx, b32 show_parameter_names, ParamSl
             }
         }
 #endif
-    }
-    if (show_parameter_names) {
-        igSameLine(0, 0);
-        igText(state.info.params[mp].name);
     }
     igPopID();
     if (out && type != ParamSlider_Nothing) {
@@ -935,6 +928,60 @@ void init(void)
 #endif
 }
 
+void mod_param_sliders(isize index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
+{
+    ModInfo *mod = &state.info.mods[index];
+    if (igTreeNodeExStr(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
+        for (i32 j = 0; j < mod->num_params; j++) {
+            i32 mp = mod->index + j;
+            if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+                param_slider_widget(mp, changed_param);
+            }
+        }
+        igTreePop();
+    }
+}
+
+
+char const *after_last_slash(char const *p)
+{
+    // spot the ub
+    char const *cursor = p + strlen(p);
+    while (cursor >= p && *cursor != '/') {
+        cursor--;
+    }
+    return cursor + 1;
+}
+
+void inlines_param_sliders(isize index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
+{
+    ModInfo *mod = &state.info.mods[index];
+    char const *last_mod_file = file_for_param(&state.info, mod->index);
+    char const *mod_name = after_last_slash(last_mod_file);
+    b32 node_open = igTreeNodeExStr(mod_name, ImGuiTreeNodeFlags_DefaultOpen);
+    for (i32 i = 0; i < mod->num_params; i++) {
+        i32 mp = mod->index + i;
+        char const *mod_file = file_for_param(&state.info, mp);
+        if (strcmp(mod_file, last_mod_file) != 0) {
+            last_mod_file = mod_file;
+            mod_name = after_last_slash(mod_file);
+            if (node_open) {
+                igTreePop();
+            }
+            node_open = igTreeNodeExStr(mod_name, ImGuiTreeNodeFlags_DefaultOpen);
+        }
+
+        if (node_open) {
+            if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+                param_slider_widget(mp, changed_param);
+            }
+        }
+    }
+    if (node_open) {
+        igTreePop();
+    }
+}
+
 void frame(void)
 {
     reset_scratch();
@@ -1045,9 +1092,8 @@ void frame(void)
     igEnd();
 
     ParamSliderChange changed_param = {0};
-    b32 show_parameter_names = state.last_frame.show_parameter_names;
 
-    f32 left_width = show_parameter_names ? 450.0f : 302.0f;
+    f32 left_width = 302.0f;
     igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always,  V2Zero);
     igSetNextWindowSize(V2(left_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Mod Parameters", 0, fixed_window)) {
@@ -1084,73 +1130,30 @@ void frame(void)
 
         // Tabs for param strength filters
         if (igBeginTabBar("FilterTabs", ImGuiTabBarFlags_NoTooltip)) {
-            // Arrow dropdown fake thing again
-            igSameLine(0, 0);
-            igPushStyleColorU32(ImGuiCol_HeaderHovered, 0);
-            igPushStyleColorU32(ImGuiCol_HeaderActive, 0);
-            show_parameter_names = igTreeNodeExStr("##parameter name toggle", ImGuiTreeNodeFlags_NoTreePushOnOpen);
-            tooltip("show parameter names");
-            igPopStyleColor(2);
-
-            // The actual tabs
-            if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
-                tooltip("These will basically always change the MSD of the active file's selected skillsets");
-                for (i32 i = 0; i < state.info.num_mods; i++) {
-                    if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
-                        for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
-                            i32 mp = state.info.mods[i].index + j;
-                            if (active->effects.strong == 0 || (active->effects.strong[mp] & effect_mask) != 0) {
-                                param_slider_widget(mp, show_parameter_names, &changed_param);
-                            }
-                        }
-                        igTreePop();
-                    }
-                }
-                igEndTabItem();
-            } else tooltip("These will basically always change the MSD of the active file's selected skillsets");
             if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
                 tooltip("More, plus some params that need more shoving");
-                for (i32 i = 0; i < state.info.num_mods; i++) {
-                    if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
-                        for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
-                            i32 mp = state.info.mods[i].index + j;
-                            if (active->effects.weak == 0 || (active->effects.weak[mp] & effect_mask) != 0) {
-                                param_slider_widget(mp, show_parameter_names, &changed_param);
-                            }
-                        }
-                        igTreePop();
-                    }
+                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
+                    mod_param_sliders(i, active->effects.weak, effect_mask, &changed_param);
                 }
+                inlines_param_sliders(state.info.num_mods - 1, active->effects.weak, effect_mask, &changed_param);
                 igEndTabItem();
             } else tooltip("More, plus some params that need more shoving");
+            if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
+                tooltip("These will basically always change the MSD of the active file's selected skillsets");
+                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
+                    mod_param_sliders(i,  active->effects.strong, effect_mask, &changed_param);
+                }
+                inlines_param_sliders(state.info.num_mods - 1, active->effects.strong, effect_mask, &changed_param);
+                igEndTabItem();
+            } else tooltip("These will basically always change the MSD of the active file's selected skillsets");
             if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
                 tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
-                for (i32 i = 0; i < state.info.num_mods; i++) {
-                    if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
-                        for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
-                            i32 mp = state.info.mods[i].index + j;
-                            param_slider_widget(mp, show_parameter_names, &changed_param);
-                        }
-                        igTreePop();
-                    }
+                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
+                    mod_param_sliders(i,  0, 0, &changed_param);
                 }
+                inlines_param_sliders(state.info.num_mods - 1,  0, 0, &changed_param);
                 igEndTabItem();
             } else tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
-            if (igBeginTabItem("Dead", 0, ImGuiTabItemFlags_None)) {
-                tooltip("These don't do anything to the active file's selected skillsets");
-                for (i32 i = 0; i < state.info.num_mods; i++) {
-                    if (igTreeNodeExStr(state.info.mods[i].name, ImGuiTreeNodeFlags_DefaultOpen)) {
-                        for (i32 j = 0; j < state.info.mods[i].num_params; j++) {
-                            i32 mp = state.info.mods[i].index + j;
-                            if (active->effects.weak && (active->effects.weak[mp] & effect_mask) == 0) {
-                                param_slider_widget(mp, show_parameter_names, &changed_param);
-                            }
-                        }
-                        igTreePop();
-                    }
-                }
-                igEndTabItem();
-            } else tooltip("These don't do anything to the active file's selected skillsets");
         }
         igEndTabBar();
     }
@@ -1540,7 +1543,6 @@ void frame(void)
     sg_commit();
 
     state.last_frame.num_open_windows = num_open_windows;
-    state.last_frame.show_parameter_names = show_parameter_names;
     state.last_frame.left_width = left_width;
     state.last_frame.centre_width = centre_width;
     state.last_frame.right_width = right_width;
