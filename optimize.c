@@ -171,7 +171,6 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                     regularisation_l1 += clamp(-H, H, 2 * xh->value_difference_from_initial - H);
                     regularisation_l2 += h2 * xh->value_difference_from_initial;
                 }
-                assert(loss_xh >= 0.0f);
 
                 f32 penalty = Regularisation * lerp(regularisation_l1, regularisation_l2, RegularisationAlpha);
 

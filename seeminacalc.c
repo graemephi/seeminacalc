@@ -705,7 +705,7 @@ i32 pack_opt_parameters(CalcInfo *info, f32 *params, f32 *normalization_factors,
 }
 
 static f32 SkillsetOverallBalance = 0.35f;
-static f32 UnLogScale = 1.0f;
+static f32 UnLogScale = 0.5f;
 static f32 Scale = 1.0f;
 static f32 Misclass = 1.0f;
 void setup_optimizer(void)
@@ -1273,6 +1273,7 @@ void frame(void)
 
     // Optimization window
     if (state.loss_window) {
+        static const char *message = 0;
         if (!state.optimization_graph) {
             state.optimization_graph = &state.graphs[make_optimization_graph()];
         }
@@ -1307,6 +1308,15 @@ void frame(void)
                 buf_clear(state.opt_evaluations);
 
                 for (isize i = 0; i < state.opt.n_params; i++) {
+                    if (isnan(state.opt.x[i])) {
+                        state.optimizing = false;
+                        message = "Cannot optimize due to NaNs. Reset to a good state.";
+                        break;
+                    }
+                }
+
+                // Do this even if we have NaNs so that they propagate to the UI.
+                for (isize i = 0; i < state.opt.n_params; i++) {
                     isize p = state.opt_cfg.map.to_ps[i];
                     // Apply bounds. This is a kind of a hack so it lives out here and not in the optimizer :)
                     state.opt.x[i] = clamp(state.opt_cfg.bounds[p].low, state.opt_cfg.bounds[p].high, state.opt.x[i]);
@@ -1314,86 +1324,89 @@ void frame(void)
                     state.ps.params[p] = state.opt.x[i] * state.opt_cfg.normalization_factors[p];
                 }
 
-                i32 submitted = 0;
-                for (isize i = 0; i < req.n_samples; i++) {
-                    i32 sample = state.opt.active.samples[i];
-                    i32 file_index = sample % buf_len(state.files);
-                    assert(file_index >= 0);
-                    SimFileInfo *sfi = &state.files[file_index];
+                if (state.optimizing) {
+                    message = 0;
 
-                    if (sfi->target.weight == 0.0f) {
-                        req.n_samples = req.n_samples < buf_len(state.files) ? req.n_samples + 1 : req.n_samples;
-                        continue;
-                    }
+                    i32 submitted = 0;
+                    for (isize i = 0; i < req.n_samples; i++) {
+                        i32 sample = state.opt.active.samples[i];
+                        i32 file_index = sample % buf_len(state.files);
+                        assert(file_index >= 0);
+                        SimFileInfo *sfi = &state.files[file_index];
 
-                    i32 ss = sfi->target.skillset;
-                    f32 goal = state.opt_cfg.goals[ss];
-                    f32 msd = (sfi->target.want_msd + sfi->target.msd_bias + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
-
-                    i32 params_submitted = 0;
-                    for (isize j = 0; j < state.opt.n_params; j++) {
-                        i32 param = state.opt.active.parameters[j];
-                        i32 p = state.opt_cfg.map.to_ps[param];
-                        if (sfi->num_effects_computed == 0 || sfi->effects.weak[p]) {
-                            calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
-                                .sample = sample,
-                                .param = p,
-                                .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
-                                .goal = goal,
-                                .msd = msd
-                            }, state.generation);
-                            params_submitted++;
+                        if (sfi->target.weight == 0.0f) {
+                            req.n_samples = req.n_samples < buf_len(state.files) ? req.n_samples + 1 : req.n_samples;
+                            continue;
                         }
 
-                        if (params_submitted == req.n_parameters) {
-                            break;
+                        i32 ss = sfi->target.skillset;
+                        f32 goal = state.opt_cfg.goals[ss];
+                        f32 msd = (sfi->target.want_msd + sfi->target.msd_bias + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
+
+                        i32 params_submitted = 0;
+                        for (isize j = 0; j < state.opt.n_params; j++) {
+                            i32 param = state.opt.active.parameters[j];
+                            i32 p = state.opt_cfg.map.to_ps[param];
+                            if (sfi->num_effects_computed == 0 || sfi->effects.weak[p]) {
+                                calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
+                                    .sample = sample,
+                                    .param = p,
+                                    .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
+                                    .goal = goal,
+                                    .msd = msd
+                                }, state.generation);
+                                params_submitted++;
+                            }
+
+                            if (params_submitted == req.n_parameters) {
+                                break;
+                            }
+                        }
+
+                        if (params_submitted > 0) {
+                            ParameterLossWork plw_x = { .sample = sample, .goal = goal, .msd = msd };
+                            calculate_parameter_loss(&state.low_prio_work, sfi, plw_x, state.generation);
+                            submitted++;
+
+                            submitted += params_submitted;
+                        }
+
+                        if (buf_len(state.high_prio_work) == 0 && (sfi->num_effects_computed == 0 || ((state.generation - sfi->effects_generation) > 1024))) {
+                            sfi->num_effects_computed = 0;
+                            calculate_effects(&state.high_prio_work, &state.info, sfi, true, state.generation);
                         }
                     }
 
-                    if (params_submitted > 0) {
-                        ParameterLossWork plw_x = { .sample = sample, .goal = goal, .msd = msd };
-                        calculate_parameter_loss(&state.low_prio_work, sfi, plw_x, state.generation);
-                        submitted++;
+                    state.opt_pending_evals = submitted;
 
-                        submitted += params_submitted;
+                    static u64 t = 0;
+                    if (stm_sec(stm_since(t)) > 1.0) {
+                        t = stm_now();
+
+                        for (isize i = 0; i < buf_len(state.files); i++) {
+                            calculate_skillsets(&state.high_prio_work, &state.files[i], false, state.generation);
+                        }
                     }
 
-                    if (buf_len(state.high_prio_work) == 0 && (sfi->num_effects_computed == 0 || ((state.generation - sfi->effects_generation) > 1024))) {
-                        sfi->num_effects_computed = 0;
-                        calculate_effects(&state.high_prio_work, &state.info, sfi, true, state.generation);
+                    i32 min_idx = 0;
+                    i32 max_idx = 0;
+                    for (i32 i = 1; i < buf_len(state.files); i++) {
+                        if (state.files[i].target.delta > state.files[max_idx].target.delta) {
+                            max_idx = i;
+                        }
+                        if (state.files[i].target.delta < state.files[min_idx].target.delta) {
+                            min_idx = i;
+                        }
                     }
+
+                    opt_focus(&state.opt, max_idx);
+                    opt_focus(&state.opt, min_idx);
+
+                    state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
+                    state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
                 }
-
-                state.opt_pending_evals = submitted;
-
-                static u64 t = 0;
-                if (stm_sec(stm_since(t)) > 1.0) {
-                    t = stm_now();
-
-                    for (isize i = 0; i < buf_len(state.files); i++) {
-                        calculate_skillsets(&state.high_prio_work, &state.files[i], false, state.generation);
-                    }
-                }
-
-                i32 min_idx = 0;
-                i32 max_idx = 0;
-                for (i32 i = 1; i < buf_len(state.files); i++) {
-                    if (state.files[i].target.delta > state.files[max_idx].target.delta) {
-                        max_idx = i;
-                    }
-                    if (state.files[i].target.delta < state.files[min_idx].target.delta) {
-                        min_idx = i;
-                    }
-                }
-
-                opt_focus(&state.opt, max_idx);
-                opt_focus(&state.opt, min_idx);
-
-                state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
-                state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
             }
         }
-
         igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
         igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
         if (igBegin("Loss", 0, ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoResize)) {
@@ -1422,6 +1435,10 @@ void frame(void)
         if (igButton("Save", V2Zero)) {
             rewrite_parameters(&state.info, &state.ps);
         } tooltip("Dump the current parameters directly to the source code in etterna/_MinaCalc441 to etterna/_MinaCalcRewrite");
+        if (message) {
+            igSameLine(0, 4);
+            igTextUnformatted(message, 0);
+        }
         #if 0
         igSameLine(0, 4);
         if (igButton("melt cpu", V2Zero)) {
@@ -1454,7 +1471,7 @@ void frame(void)
             igText("%s Bias", SkillsetNames[i]);
             tooltip("+ offsets the target MSD for this skillset\n* multiplies\n^ sharpens the squared loss for positive error\n%% sets the target wife%%");
             igSameLine(0, 4);
-            igSetCursorPosX(106.f);
+            igSetCursorPosX(116.f);
             igTextUnformatted("+", 0);
             igSameLine(0,4);
             igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
