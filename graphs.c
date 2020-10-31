@@ -576,19 +576,21 @@ void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
     }
 }
 
-void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, u32 generation)
+void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, b32 skip_unopt, u32 generation)
 {
-    i32 stride = 8;
+    i32 stride = 1;
     if (sfi->effects_generation != generation && sfi->num_effects_computed < info->num_params) {
         sfi->effects_generation = generation;
         for (i32 i = 0; i < info->num_params; i += stride) {
-            buf_push(*work, (CalcWork) {
-                .sfi = sfi,
-                .type = Work_Effects,
-                .effects.start = i,
-                .effects.end =  (i32)mins(i + stride, info->num_params),
-                .generation = generation,
-            });
+            if (!skip_unopt || state.opt_cfg.enabled[i]) {
+                buf_push(*work, (CalcWork) {
+                    .sfi = sfi,
+                    .type = Work_Effects,
+                    .effects.start = i,
+                    .effects.end =  (i32)mins(i + stride, info->num_params),
+                    .generation = generation,
+                });
+            }
         }
     }
 }

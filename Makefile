@@ -16,7 +16,7 @@ ExtraWarnings :=
 endif
 
 Debug := -DDEBUG -Fd"build/debug/" -Fo"build/debug/" -Fe"build/debug/"
-Release := -DRELEASE -O2 -Ob2 -MT $(LTO) -Fd"build/release/" -Fo"build/release/" -Fe"build/release/"
+Release := -DRELEASE -O2 -Ob2 -MT -Fd"build/release/" -Fo"build/release/" -Fe"build/release/"
 Common := -Oi -nologo -EHsc -W4 -WX $(Includes) $(ExtraWarnings)
 C := -Od -Ob1 -MT -Zi
 CPP := -std:c++17 -O2 -Ob2 -MT -Zi
@@ -33,18 +33,24 @@ build:
 cog:
 	cog -rc graphs.c
 
+build/debug/sqlite3.obj:
+	$(Compiler) $(Common) $(Release) -c lib/sqlite3.c
+
+build/release/sqlite3.obj:
+	$(Compiler) $(Common) $(Release) $(LTO) -c lib/sqlite3.c
+
 build/debug/cpp.obj: *.h *.cpp Makefile
 	$(Compiler) $(Common) $(CPP) $(Debug) -c cpp.cpp
 
-build/debug/seeminacalc.exe: *.h *.c build/debug/cpp.obj Makefile
-	$(Compiler) $(Common) $(C) $(Debug) seeminacalc.c build/debug/cpp.obj
+build/debug/seeminacalc.exe: *.h *.c build/debug/cpp.obj build/debug/sqlite3.obj Makefile
+	$(Compiler) $(Common) $(C) $(Debug) seeminacalc.c build/debug/sqlite3.obj build/debug/cpp.obj
 
-build/cachedb/cachedb.exe: cachedb.c build/debug/cpp.obj Makefile
+build/cachedb/cachedb.exe: cachedb.c build/debug/cpp.obj build/debug/sqlite3.obj Makefile
 	@-mkdir -p build/cachedb
-	$(Compiler) $(Common) $(C) -DDEBUG -Fd"build/cachedb/" -Fo"build/cachedb/" -Fe"build/cachedb/"  cachedb.c build/debug/cpp.obj
+	$(Compiler) $(Common) $(C) -DDEBUG -Fd"build/cachedb/" -Fo"build/cachedb/" -Fe"build/cachedb/" cachedb.c build/debug/sqlite3.obj build/debug/cpp.obj
 
-build/release/seeminacalc.exe: *.h *.c Makefile
-	$(Compiler) $(Common) $(CPP) $(Release) seeminacalc.c cpp.cpp
+build/release/seeminacalc.exe: *.h *.c Makefile build/release/sqlite3.obj
+	$(Compiler) $(Common) $(CPP) $(Release) seeminacalc.c cpp.cpp  build/release/sqlite3.obj
 
 EMCCFlags :=
 EMCCFlags += -s DISABLE_EXCEPTION_CATCHING=1

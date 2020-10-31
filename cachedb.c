@@ -18,17 +18,14 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #endif
 
-#include "sqlite3.c"
-// The perils of including sqlite3 in your translation unit
-// sqlite3.c also disables certain warnings.
-#if !defined(RELEASE)
-#undef NDEBUG
-#endif
+#define SQLITE3
+#include "sqlite3.h"
 
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
 
+#if !defined(SEEMINACALC)
 #include "stb_sprintf.h"
 
 #define SOKOL_IMPL
@@ -38,6 +35,7 @@
 #include "bottom.h"
 #include "cminacalc.h"
 #include "sm.h"
+#endif
 
 typedef struct CacheDB
 {
@@ -59,10 +57,23 @@ typedef struct DBFile
     Buffer note_data;
 } DBFile;
 
+typedef struct TargetFile
+{
+    String key;
+    String author;
+    String title;
+    i32 difficulty;
+    i32 skillset;
+    f32 rate;
+    f32 target;
+    f32 weight;
+    Buffer note_data;
+} TargetFile;
+
 b32 db_init(const char *path)
 {
     i32 result = true;
-    int rc = sqlite3_open(path, &cache_db.db);
+    int rc = sqlite3_open_v2(path, &cache_db.db, SQLITE_OPEN_READONLY, 0);
     if (rc) {
         goto err;
     }
@@ -181,6 +192,234 @@ b32 db_iter_next(DBFile *out)
     return sqlite3_stmt_busy(cache_db.all_stmt);
 }
 
+#if defined(SEEMINACALC)
+// Extremely jank xml reader
+typedef struct {
+    b32 ok;
+    u8 *ptr;
+    u8 *end;
+    u8 *last_next;
+    String *stack;
+    u8 *current_tag_end;
+} XML;
+
+XML xml_begin(Buffer buf)
+{
+    XML result = {0};
+    result.ok = buf.buf != 0;
+    result.ptr = buf.buf;
+    result.end = result.ptr + buf.len;
+    return result;
+}
+
+b32 xml_next(XML *x)
+{
+    if (x->ok) {
+        u8 *p = x->ptr + 1;
+        u8 *end = x->end;
+        while (p < end) {
+            while (p < end && *p != '<') {
+                p++;
+            }
+            if (p[1] == '!') {
+                // <!-- comment -->
+                while ((p+2) < end && !(p[0] == '-' && p[1] == '-' && p[2] == '>')) {
+                    p++;
+                }
+            } else {
+                break;
+            }
+        }
+        x->ok = p < end;
+        x->last_next = p;
+        x->ptr = p;
+    }
+    return x->ok;
+}
+
+// todo: xml_tokenize up front
+String xml_token(u8 *p)
+{
+    String result = { .buf = p };
+    while (!isspace(*p) && *p != '<' && *p != '>') {
+        p++;
+    }
+    result.len = p - result.buf;
+    return result;
+}
+
+b32 xml_open(XML *x, String tag)
+{
+    if (x->ok) {
+        do {
+            if (buf_len(x->stack) >= 0 && x->ptr[1] == '/' && strings_are_equal(buf_last(x->stack), xml_token(x->ptr + 2))) {
+                return false;
+            }
+            if (strings_are_equal(tag, xml_token(x->ptr + 1))) {
+                buf_push(x->stack, tag);
+                u8 *p = x->ptr + 1;
+                while (p < x->end && *p != '<' && *p != '>') {
+                    p++;
+                }
+                x->current_tag_end = p;
+                return true;
+            }
+        } while (xml_next(x));
+    }
+    return x->ok;
+}
+
+b32 xml_close(XML *x, String tag)
+{
+    if (buf_len(x->stack) <= 0 || strings_are_equal(tag, buf_last(x->stack)) == false) {
+        x->ok = false;
+    }
+    if (x->ok) {
+        u8 *here = x->ptr;
+        do {
+            if (x->ptr != here && strings_are_equal(tag, xml_token(x->ptr + 1))) {
+                // nested tags of the same type are not allowed
+                x->ok = false;
+                break;
+            }
+            String tok = xml_token(x->ptr + 2);
+            if (x->ptr[1] == '/' && tok.buf[tok.len] == '>' && strings_are_equal(tag, tok)) {
+                buf_pop(x->stack);
+                break;
+            }
+        } while (xml_next(x));
+    }
+
+    x->current_tag_end = 0;
+    return x->ok;
+}
+
+b32 next_char(u8 **pp, u8 c)
+{
+    u8 *p = *pp;
+    while (*p && *p != c) {
+        p++;
+    }
+    *pp = p;
+    return *p == c;
+}
+
+b32 next_char_skip_whitespace(u8 **pp, u8 c)
+{
+    u8 *p = *pp;
+    while (*p && (*p != c || *p <= ' ')) {
+        p++;
+    }
+    *pp = p;
+    return *p == c;
+}
+
+String xml_attr(XML *x, String key)
+{
+    String result = {0};
+
+    if (!x->current_tag_end) {
+        goto bail;
+    }
+
+    u8 *begin = x->ptr;
+    u8 *end = x->current_tag_end;
+
+    if (x->ok) {
+        u8 *p = begin;
+
+        while (p < end && !string_equals_cstr(key, p)) {
+            p++;
+        }
+        if (p == end) {
+            goto bail;
+        }
+        if (!next_char_skip_whitespace(&p, '=')) {
+            goto bail;
+        }
+        if (!next_char_skip_whitespace(&p, '\'')) {
+            goto bail;
+        }
+        p++;
+        u8 *start_of_value = p;
+        if (!next_char(&p, '\'')) {
+            goto bail;
+        }
+        u8 *end_of_value = p;
+        result = (String) { start_of_value, end_of_value - start_of_value };
+    }
+
+    if (0) bail: {
+        x->ok = false;
+    }
+
+    return result;
+}
+
+TargetFile *load_test_files(char const *db, char const *xml_path)
+{
+    db_init(db);
+    Buffer xml_file = read_file(xml_path);
+
+    if (!cache_db.db) {
+        printf("Unable to load db (path: %s)\n", db);
+    }
+
+    if (xml_file.len == 0) {
+        printf("Unable to load test list (path: %s)\n", xml_path);
+    }
+
+    if (!cache_db.db || xml_file.len == 0) {
+        return 0;
+    }
+
+    push_allocator(scratch);
+    TargetFile *result = 0;
+
+    XML xml = xml_begin(xml_file);
+    while (xml_open(&xml, S("CalcTestList"))) {
+        String skillset = xml_attr(&xml, S("Skillset")); skillset;
+        i32 ss = string_to_i32(skillset);
+
+        if (ss > 0 && ss < NumSkillsets) {
+            while (xml_open(&xml, S("Chart"))) {
+                String key = xml_attr(&xml, S("aKey"));
+                String rate = xml_attr(&xml, S("bRate"));
+                String target = xml_attr(&xml, S("cTarget"));
+
+                String ztkey = {0};
+                ztkey.len = buf_printf(ztkey.buf, "%.*s", key.len, key.buf);
+                DBFile dbf = db_get_file(ztkey.buf);
+
+                if (xml.ok && dbf.ok) {
+                    buf_push(result, (TargetFile) {
+                        .key = dbf.chartkey,
+                        .author = dbf.author,
+                        .title = dbf.title,
+                        .difficulty = dbf.difficulty,
+                        .skillset = ss,
+                        .rate = string_to_f32(rate),
+                        .target = string_to_f32(target),
+                        .weight = 1.0f,
+                        .note_data = dbf.note_data,
+                    });
+                } else {
+                    printf("Missing %.*s\n", (i32)key.len, key.buf);
+                }
+
+                xml_close(&xml, S("Chart"));
+            }
+        } else {
+            printf("CalcTestList parse error: skillset: %.*s (should be 1-7)\n", (i32)skillset.len, skillset.buf);
+        }
+
+        xml_close(&xml, S("CalcTestList"));
+    }
+
+    pop_allocator();
+    return result;
+}
+#else // ^ defined, v !defined(SEEMINACALC)
 struct { char *key; u32 skillset; f32 rate; f32 target; b32 dead; } TestFiles[] = {
     { .key = "X0dd1f00da8800ee98a9ac3ebc318d4c24c5bd07d", .skillset = 1, .rate = 1.30f, .target = 34.00f  },
     { .key = "X24085a6e074ca3bd89c91b748d9b42061863e9c1", .skillset = 1, .rate = 1.00f, .target = 25.00f  },
@@ -416,3 +655,4 @@ int main(int argc, char **argv)
 
     write_file("cachedb.gen.c", gen);
 }
+#endif

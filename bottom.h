@@ -442,7 +442,17 @@ String copy_string(String s)
     return result;
 }
 
-static Stack **stack_stack = 0;
+i32 string_to_i32(String s)
+{
+    return atoi(s.buf);
+}
+
+f32 string_to_f32(String s)
+{
+    return strtof(s.buf, 0);
+}
+
+Stack **stack_stack = 0;
 i32 push_allocator(Stack *a)
 {
     Stack **pushed = buf_push(stack_stack, current_allocator);
@@ -498,35 +508,52 @@ f32 rngf(void)
     return (f32)a / (f32)(1 << 23);
 }
 
-// This is for development stuff and so doesn't need to handle errors properly!!
 Buffer read_file(const char *path)
 {
+    Buffer result = {0};
     FILE *f = fopen(path, "rb");
-    assert(f);
+    if (!f) {
+        goto bail;
+    }
 
     fseek(f, 0, SEEK_END);
     long filesize = ftell(f);
     rewind(f);
 
-    Buffer result = {
+    result = (Buffer) {
         alloc(u8, filesize + 1),
         filesize + 1,
         filesize + 1
     };
 
+    if (!result.buf) {
+        goto bail;
+    }
+
     usize read = fread(result.buf, 1, filesize, f);
+
+    if (read != filesize) {
+        goto bail;
+    }
 
     fclose(f);
 
     result.buf[read] = 0;
+    return result;
 
+bail:
+    if (f) {
+        fclose(f);
+    }
+    result = (Buffer) {0};
     return result;
 }
 
 void write_file(const char *path, u8 *buf)
 {
     FILE *f = fopen(path, "wb");
-    assert(f);
-    fwrite(buf, 1, buf_len(buf), f);
-    fclose(f);
+    if (f) {
+        fwrite(buf, 1, buf_len(buf), f);
+        fclose(f);
+    }
 }

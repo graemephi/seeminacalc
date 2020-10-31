@@ -12,6 +12,7 @@
 #define SOKOL_NO_DEPRECATED
 #define SOKOL_IMPL
 #include "sokol/sokol_app.h"
+#include "sokol/sokol_args.h"
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_time.h"
 #include "sokol/sokol_glue.h"
@@ -214,7 +215,11 @@ typedef struct State
 } State;
 static State state = {0};
 
-#include "cachedb.gen.c"
+#define SEEMINACALC
+#include "cachedb.c"
+char const *db_path = 0;
+char const *test_list_path = 0;
+
 #include "graphs.c"
 
 #pragma float_control(precise, on, push)
@@ -232,7 +237,6 @@ static bool BeginPlotDefaultsFullWidth(const char* title_id, const char* x_label
 {
     return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
 }
-
 
 static ImVec4 GetColormapColor(int index)
 {
@@ -471,22 +475,14 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
 // copy n paste
 i32 add_target_files(void)
 {
-    if (buf_len(state.files) + array_length(TargetFiles) == buf_cap(state.files)) {
-        printf("please.. no more files");
-        return -1;
-    }
+    TargetFile *target_files = load_test_files(db_path, test_list_path);
 
-    push_allocator(scratch);
-    NoteInfo *ni = 0;
-    buf_reserve(ni, 40000);
-    pop_allocator();
-
-    f32 target_m = TargetFiles[0].target;
+    f32 target_m = 0.0f;
     f32 target_s = 0.0f;
 
-    for (isize i = 0; i < array_length(TargetFiles); i++) {
+    for (isize i = 0; i < buf_len(target_files); i++) {
         push_allocator(scratch);
-        TargetFile *target = &TargetFiles[i];
+        TargetFile *target = &target_files[i];
         String ck = target->key;
         String title = target->title;
         String author = target->author;
@@ -509,11 +505,6 @@ i32 add_target_files(void)
             }
         }
 
-        buf_clear(ni);
-        for (isize k = 0; k < target->note_data_len; k++) {
-            buf_push(ni, (NoteInfo) { .notes = target->note_data_notes[k], .rowTime = target->note_data_times[k] });
-        }
-
         SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
             .title = copy_string(title),
             .diff = diff,
@@ -524,11 +515,12 @@ i32 add_target_files(void)
             .target.rate = target->rate,
             .target.skillset = target->skillset,
             .target.weight = target->weight,
-            .notes_len = (i32)buf_len(ni),
-            .notes = frobble_note_data(ni, buf_len(ni)),
+            .notes_len = (i32)target->note_data.len,
+            .notes = frobble_serialized_note_data(target->note_data.buf, target->note_data.len),
             .selected_skillsets[0] = true,
         });
 
+        free(target->note_data.buf);
         buf_push(sfi->graphs, make_skillsets_graph());
 
         buf_reserve(sfi->effects.weak, state.info.num_params);
@@ -536,18 +528,16 @@ i32 add_target_files(void)
 
         calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
 
-        if (i > 0) {
-            f32 old_m = target_m;
-            f32 old_s = target_s;
-            target_m = old_m + (target->target - old_m) / (i + 1);
-            target_s = old_s + (target->target - old_m)*(target->target - target_m);
-        }
+        f32 old_m = target_m;
+        f32 old_s = target_s;
+        target_m = old_m + (target->target - old_m) / (i + 1);
+        target_s = old_s + (target->target - old_m)*(target->target - target_m);
 
-        printf("%s %s %.2fx: %.2f\n", SkillsetNames[target->skillset], title.buf, target->rate, target->target);
+        printf("Added %s %s %.2fx: %.2f\n", SkillsetNames[target->skillset], title.buf, target->rate, target->target);
         skip:;
     }
 
-    f32 target_var = target_s / (array_length(TargetFiles) - 1);
+    f32 target_var = target_s / (buf_len(target_files) - 1);
     state.target.msd_mean = target_m;
     state.target.msd_sd = sqrtf(target_var);
 
@@ -608,7 +598,7 @@ static void param_slider_widget(i32 param_idx, b32 show_parameter_names, ParamSl
             value = (f32)value_int;
         }
     } else {
-        igSetNextItemWidth(igGetFontSize() * 12.5f);
+        igSetNextItemWidth(igGetFontSize() * 16.5f);
         if (igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f)) {
             type = ParamSlider_ValueChanged;
             value = state.ps.params[mp];
@@ -733,7 +723,7 @@ void setup_optimizer(void)
     buf_pushn(initial_x, state.ps.num_params);
     pop_allocator();
 
-    NegativeEpsilon = Scale / state.target.msd_sd;
+    NegativeEpsilon = 0.5f / state.target.msd_sd;
 
     buf_pushn(normalization_factors, state.ps.num_params);
     buf_pushn(state.opt_cfg.enabled, state.ps.num_params);
@@ -790,7 +780,7 @@ void setup_optimizer(void)
     state.opt_cfg.barriers[2] = 2.0f;
     state.opt_cfg.barriers[3] = 2.0f;
     state.opt_cfg.barriers[4] = 2.0f;
-    state.opt_cfg.barriers[5] = 4.0f;
+    state.opt_cfg.barriers[5] = 2.0f;
     state.opt_cfg.barriers[6] = 2.0f;
     state.opt_cfg.barriers[7] = 2.0f;
     state.opt_cfg.goals[0] = 0.93f;
@@ -798,14 +788,14 @@ void setup_optimizer(void)
     state.opt_cfg.goals[2] = 0.93f;
     state.opt_cfg.goals[3] = 0.93f;
     state.opt_cfg.goals[4] = 0.93f;
-    state.opt_cfg.goals[5] = 0.95f;
+    state.opt_cfg.goals[5] = 0.93f;
     state.opt_cfg.goals[6] = 0.93f;
     state.opt_cfg.goals[7] = 0.93f;
     state.opt_cfg.bias[1].add = 0.0f; state.opt_cfg.bias[1].mul = 1.0f;
     state.opt_cfg.bias[2].add = 0.0f; state.opt_cfg.bias[2].mul = 1.0f;
     state.opt_cfg.bias[3].add = 0.0f; state.opt_cfg.bias[3].mul = 1.0f;
     state.opt_cfg.bias[4].add = 0.0f; state.opt_cfg.bias[4].mul = 1.0f;
-    state.opt_cfg.bias[5].add = 0.0f; state.opt_cfg.bias[5].mul = 31.5f / 31.0f;
+    state.opt_cfg.bias[5].add = 0.0f; state.opt_cfg.bias[5].mul = 1.0f;
     state.opt_cfg.bias[6].add = 0.0f; state.opt_cfg.bias[6].mul = 1.0f;
     state.opt_cfg.bias[7].add = 0.0f; state.opt_cfg.bias[7].mul = 1.0f;
 }
@@ -848,7 +838,7 @@ void init(void)
     permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
 
     push_allocator(scratch);
-    Buffer font = load_font_file("web/NotoSansCJKjp-Regular.otf");
+    Buffer font = {0}; //load_font_file("web/NotoSansCJKjp-Regular.otf");
     pop_allocator();
 
     sg_setup(&(sg_desc){
@@ -973,14 +963,14 @@ void frame(void)
         if (state.target.average_delta.E[0] != 0.0f) {
             for (isize i = 0; i < NumSkillsets; i++) {
                 igTextColored(msd_color(fabsf(state.target.average_delta.E[i]) * 3.0f), "%02.2f", (f64)state.target.average_delta.E[i]);
-                tooltip("CalcTestList: %s delta", SkillsetNames[i]);
+                tooltip("CalcTestList: %s abs delta", SkillsetNames[i]);
                 if (i == 0) {
                     igSameLine(0, 0); igTextUnformatted(" (", 0); igSameLine(0, 0);
                     igTextColored(msd_color(fabsf(state.target.min_delta) * 3.0f), "%02.2f", (f64)state.target.min_delta);
-                    tooltip("CalcTestList: min delta");
+                    tooltip("CalcTestList: min abs delta");
                     igSameLine(0, 0); igTextUnformatted(", ", 0); igSameLine(0, 0);
                     igTextColored(msd_color(fabsf(state.target.max_delta) * 3.0f), "%02.2f", (f64)state.target.max_delta);
-                    tooltip("CalcTestList: max delta");
+                    tooltip("CalcTestList: max abs delta");
                     igSameLine(0, 0); igTextUnformatted(")", 0);
                 }
                 igSameLine(0, 12.0f);
@@ -1117,7 +1107,7 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            }
+            } else tooltip("These will basically always change the MSD of the active file's selected skillsets");
             if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
                 tooltip("More, plus some params that need more shoving");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
@@ -1132,7 +1122,7 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            }
+            } else tooltip("More, plus some params that need more shoving");
             if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
                 tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
@@ -1145,7 +1135,7 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            }
+            } else tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
             if (igBeginTabItem("Dead", 0, ImGuiTabItemFlags_None)) {
                 tooltip("These don't do anything to the active file's selected skillsets");
                 for (i32 i = 0; i < state.info.num_mods; i++) {
@@ -1160,7 +1150,7 @@ void frame(void)
                     }
                 }
                 igEndTabItem();
-            }
+            } else tooltip("These don't do anything to the active file's selected skillsets");
         }
         igEndTabBar();
     }
@@ -1192,7 +1182,7 @@ void frame(void)
                 igSetNextWindowSize(sz, ImGuiCond_Once);
             }
             if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
-                calculate_effects(sfi == active ? &state.high_prio_work : &state.low_prio_work, &state.info, sfi, state.generation);
+                calculate_effects(sfi == active ? &state.high_prio_work : &state.low_prio_work, &state.info, sfi, false, state.generation);
 
                 if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
                     next_active = sfi;
@@ -1365,9 +1355,9 @@ void frame(void)
                         submitted += params_submitted;
                     }
 
-                    if (buf_len(state.high_prio_work) == 0 && sfi->num_effects_computed == 0) {
+                    if (buf_len(state.high_prio_work) == 0 && (sfi->num_effects_computed == 0 || ((state.generation - sfi->effects_generation) > 1024))) {
                         sfi->num_effects_computed = 0;
-                        calculate_effects(&state.high_prio_work, &state.info, sfi, state.generation);
+                        calculate_effects(&state.high_prio_work, &state.info, sfi, true, state.generation);
                     }
                 }
 
@@ -1402,8 +1392,8 @@ void frame(void)
         }
 
         igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
-        igSetNextWindowSize(V2(centre_width, ds.y), ImGuiWindowFlags_NoResize);
-        if (igBegin("Loss", &state.loss_window, 0)) {
+        igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
+        if (igBegin("Loss", 0, ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoResize)) {
             num_open_windows++;
             f32 err_lim = 2.0f;
             f32 loss_lim = FLT_MIN;
@@ -1428,7 +1418,9 @@ void frame(void)
         } igSameLine(0, 4);
         if (igButton("Save", V2Zero)) {
             rewrite_parameters(&state.info, &state.ps);
-        } igSameLine(0, 4);
+        } tooltip("Dump the current parameters directly to the source code in etterna/_MinaCalc441 to etterna/_MinaCalcRewrite");
+        #if 0
+        igSameLine(0, 4);
         if (igButton("melt cpu", V2Zero)) {
             for (isize i = 0; i < buf_len(state.files); i++) {
                 SimFileInfo *sfi = &state.files[i];
@@ -1438,23 +1430,26 @@ void frame(void)
                 }
             }
         }
-
+        #endif
         igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
         igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
         // igSliderFloat("MDecay", &MDecay, 0.0f, 1.0f - 1e-3f, "%g", 0.5f);
         // igSliderFloat("VDecay", &VDecay, 0.0f, 1.0f - 1e-5f, "%g", 0.5f);
-        igSliderInt("SampleBatchSize", &SampleBatchSize, 1, state.opt.n_samples, "%d");
-        igSliderInt("ParameterBatchSize", &ParameterBatchSize, 1, state.opt.n_params, "%d");
+        igSliderInt("Sample Batch Size", &SampleBatchSize, 1, state.opt.n_samples, "%d");
+        igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, state.opt.n_params, "%d");
         igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
         igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
-        igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
+        // igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
         igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
-        igSliderFloat("Negative Epsilon", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
+        tooltip("weights higher MSDs heavier automatically");
+        igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
+        tooltip("not to scale. roughly %fx of msd", 1.0f / state.target.msd_sd);
         igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
         igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
         for (isize i = 1; i < NumSkillsets; i++) {
             igPushIDInt((i32)i);
             igText("%s Bias", SkillsetNames[i]);
+            tooltip("+ offsets the target MSD for this skillset\n* multiplies\n^ sharpens the squared loss for positive error\n%% sets the target wife%%");
             igSameLine(0, 4);
             igSetCursorPosX(106.f);
             igTextUnformatted("+", 0);
@@ -1633,8 +1628,13 @@ void input(const sapp_event* event)
 
 sapp_desc sokol_main(int argc, char* argv[])
 {
-    (void)argc;
-    (void)argv;
+    sargs_setup(&(sargs_desc){
+        .argc = argc,
+        .argv = argv
+    });
+
+    db_path = sargs_value_def("db", "cache.db");
+    test_list_path = sargs_value_def("list", "CalcTestList.xml");
 
     return (sapp_desc) {
         .init_cb = init,
