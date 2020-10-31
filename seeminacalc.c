@@ -162,6 +162,8 @@ typedef struct State
     SimFileInfo *files;
     SimFileInfo *active;
 
+    ModInfo *inline_mods;
+
     ParamSet ps;
     bool *parameter_graphs_enabled;
     i32 *parameter_graph_order;
@@ -175,6 +177,7 @@ typedef struct State
     FnGraph *optimization_graph;
     struct {
         b8 *enabled;
+        b8 *all_mod_enabled;
         f32 barriers[NumSkillsets];
         f32 goals[NumSkillsets];
         f32 *normalization_factors;
@@ -650,6 +653,57 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
     }
 }
 
+void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
+{
+    if (igTreeNodeExStr(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
+        i32 count = 0;
+        for (i32 i = 0; i < mod->num_params; i++) {
+            i32 mp = mod->index + i;
+            if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+                count++;
+            }
+        }
+        if (count) {
+            if (count > 1) {
+                if (igCheckbox("##opt_all", &state.opt_cfg.all_mod_enabled[mod_index])) {
+                    for (i32 i = 0; i < mod->num_params; i++) {
+                        i32 mp = mod->index + i;
+                        if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+                            state.opt_cfg.enabled[mp] = state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
+                        }
+                    }
+                    changed_param->type = ParamSlider_OptimizingToggled;
+                } tooltip("optimize visible");
+            }
+            for (i32 i = 0; i < mod->num_params; i++) {
+                i32 mp = mod->index + i;
+                if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+                    param_slider_widget(mp, changed_param);
+                }
+            }
+        }
+        igTreePop();
+    }
+}
+
+
+char const *after_last_slash(char const *p)
+{
+    // spot the ub
+    char const *cursor = p + strlen(p);
+    while (cursor >= p && *cursor != '/') {
+        cursor--;
+    }
+    return cursor + 1;
+}
+
+void inlines_param_sliders(i32 inlines_mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
+{
+    for (i32 i = 0; i < buf_len(state.inline_mods); i++) {
+        mod_param_sliders(&state.inline_mods[i], inlines_mod_index + i, effects, effect_mask, changed_param);
+    }
+}
+
 static void skillset_line_plot(i32 ss, b32 highlight, FnGraph *fng, f32 *ys)
 {
     // Recreate highlighting cause ImPlot doesn't let you tell it to highlight lines
@@ -720,6 +774,7 @@ void setup_optimizer(void)
 
     buf_pushn(normalization_factors, state.ps.num_params);
     buf_pushn(state.opt_cfg.enabled, state.ps.num_params);
+    buf_pushn(state.opt_cfg.all_mod_enabled, state.ps.num_params);
     buf_pushn(state.opt_cfg.map.to_ps, state.ps.num_params + 1);
     // This sets to_ps[-1] = to_ps[Param_None] = 0
     state.opt_cfg.map.to_ps = state.opt_cfg.map.to_ps + 1;
@@ -922,64 +977,37 @@ void init(void)
 
     state.active = null_sfi;
 
+    {
+        ModInfo *mod = &state.info.mods[state.info.num_mods - 1];
+        i32 num_params = 0;
+        i32 last_num_params = 0;
+        char const *last_mod_file = file_for_param(&state.info, mod->index);
+        char const *mod_file = 0;
+        for (i32 i = 0; i < mod->num_params; i++) {
+            i32 mp = mod->index + i;
+            mod_file = file_for_param(&state.info, mp);
+            if (strcmp(mod_file, last_mod_file) != 0) {
+                buf_push(state.inline_mods, (ModInfo) {
+                    .name = after_last_slash(last_mod_file),
+                    .num_params = num_params - last_num_params,
+                    .index = mod->index + last_num_params,
+                });
+                last_mod_file = mod_file;
+                last_num_params = num_params;
+            }
+            num_params++;
+        }
+        buf_push(state.inline_mods, (ModInfo) {
+            .name = after_last_slash(mod_file),
+            .num_params = num_params - last_num_params,
+            .index = mod->index + last_num_params,
+        });
+    }
+
 #if !defined(EMSCRIPTEN)
     add_target_files();
     setup_optimizer();
 #endif
-}
-
-void mod_param_sliders(isize index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
-{
-    ModInfo *mod = &state.info.mods[index];
-    if (igTreeNodeExStr(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
-        for (i32 j = 0; j < mod->num_params; j++) {
-            i32 mp = mod->index + j;
-            if (effects == 0 || (effects[mp] & effect_mask) != 0) {
-                param_slider_widget(mp, changed_param);
-            }
-        }
-        igTreePop();
-    }
-}
-
-
-char const *after_last_slash(char const *p)
-{
-    // spot the ub
-    char const *cursor = p + strlen(p);
-    while (cursor >= p && *cursor != '/') {
-        cursor--;
-    }
-    return cursor + 1;
-}
-
-void inlines_param_sliders(isize index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
-{
-    ModInfo *mod = &state.info.mods[index];
-    char const *last_mod_file = file_for_param(&state.info, mod->index);
-    char const *mod_name = after_last_slash(last_mod_file);
-    b32 node_open = igTreeNodeExStr(mod_name, ImGuiTreeNodeFlags_DefaultOpen);
-    for (i32 i = 0; i < mod->num_params; i++) {
-        i32 mp = mod->index + i;
-        char const *mod_file = file_for_param(&state.info, mp);
-        if (strcmp(mod_file, last_mod_file) != 0) {
-            last_mod_file = mod_file;
-            mod_name = after_last_slash(mod_file);
-            if (node_open) {
-                igTreePop();
-            }
-            node_open = igTreeNodeExStr(mod_name, ImGuiTreeNodeFlags_DefaultOpen);
-        }
-
-        if (node_open) {
-            if (effects == 0 || (effects[mp] & effect_mask) != 0) {
-                param_slider_widget(mp, changed_param);
-            }
-        }
-    }
-    if (node_open) {
-        igTreePop();
-    }
 }
 
 void frame(void)
@@ -1133,25 +1161,25 @@ void frame(void)
             if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
                 tooltip("More, plus some params that need more shoving");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(i, active->effects.weak, effect_mask, &changed_param);
+                    mod_param_sliders(&state.info.mods[i], i, active->effects.weak, effect_mask, &changed_param);
                 }
-                inlines_param_sliders(state.info.num_mods - 1, active->effects.weak, effect_mask, &changed_param);
+                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.weak, effect_mask, &changed_param);
                 igEndTabItem();
             } else tooltip("More, plus some params that need more shoving");
             if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
                 tooltip("These will basically always change the MSD of the active file's selected skillsets");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(i,  active->effects.strong, effect_mask, &changed_param);
+                    mod_param_sliders(&state.info.mods[i], i,  active->effects.strong, effect_mask, &changed_param);
                 }
-                inlines_param_sliders(state.info.num_mods - 1, active->effects.strong, effect_mask, &changed_param);
+                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.strong, effect_mask, &changed_param);
                 igEndTabItem();
             } else tooltip("These will basically always change the MSD of the active file's selected skillsets");
             if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
                 tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(i,  0, 0, &changed_param);
+                    mod_param_sliders(&state.info.mods[i], i,  0, 0, &changed_param);
                 }
-                inlines_param_sliders(state.info.num_mods - 1,  0, 0, &changed_param);
+                inlines_param_sliders((i32)state.info.num_mods - 1,  0, 0, &changed_param);
                 igEndTabItem();
             } else tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
         }
@@ -1439,18 +1467,7 @@ void frame(void)
             igSameLine(0, 4);
             igTextUnformatted(message, 0);
         }
-        #if 0
-        igSameLine(0, 4);
-        if (igButton("melt cpu", V2Zero)) {
-            for (isize i = 0; i < buf_len(state.files); i++) {
-                SimFileInfo *sfi = &state.files[i];
-                if ((sfi->num_effects_computed == 0) || (state.generation != sfi->effects_generation)) {
-                    sfi->num_effects_computed = 0;
-                    calculate_effects(&state.low_prio_work, &state.info, sfi, state.generation);
-                }
-            }
-        }
-        #endif
+
         igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
         igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
         // igSliderFloat("MDecay", &MDecay, 0.0f, 1.0f - 1e-3f, "%g", 0.5f);

@@ -294,8 +294,10 @@ CalcInfo calc_info()
         }
     }
 
+    // Special case for rate
     param_info[0].min = 0.5;
     param_info[0].max = 3.0;
+    param_info[0].optimizable = false;
 
     ParamSet defaults = {};
     defaults.params = (float *)calloc(num_params, sizeof(float));
