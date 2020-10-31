@@ -92,6 +92,12 @@ Buffer load_font_file(char *path)
 }
 #endif
 
+typedef struct {
+    u8 *name;
+    f32 *params;
+    u32 generation;
+} OptimizationCheckpoint;
+
 typedef struct EffectMasks
 {
     u8 *weak;
@@ -192,6 +198,10 @@ typedef struct State
         } map;
     } opt_cfg;
 
+    OptimizationCheckpoint *checkpoints;
+    OptimizationCheckpoint latest_checkpoint;
+    OptimizationCheckpoint default_checkpoint;
+
     struct {
         f32 msd_mean;
         f32 msd_sd;
@@ -228,6 +238,157 @@ char const *test_list_path = 0;
 #include "sm.c"
 #pragma float_control(pop)
 
+
+OptimizationCheckpoint make_checkpoint(u8 *name)
+{
+    OptimizationCheckpoint result = {0};
+
+    buf_printf(result.name, "%s", name);
+    for (isize i = 0; i < state.info.num_params; i++) {
+        buf_push(result.params, state.ps.params[i]);
+    }
+
+    return result;
+}
+
+void save_checkpoints_to_disk(void)
+{
+    u8 *str = 0;
+    for (isize i = 0; i < buf_len(state.checkpoints); i++) {
+        buf_printf(str, "#name: %s;\n#params: ", state.checkpoints[i].name);
+        for (usize p = 0; p < state.ps.num_params; p++) {
+            buf_printf(str, "%.8g,", state.checkpoints[i].params[p]);
+        }
+        buf_printf(str, ";\n\n");
+    }
+
+    write_file("checkpoints.txt", str);
+}
+
+// Reusing sm parser code because why not
+static SmTagValue parse_checkpoint_tag(SmParser *ctx)
+{
+    static String tag_strings[] = {
+        SS("name"),
+        SS("params"),
+    };
+    consume_char(ctx, '#');
+    i32 tag = array_length(tag_strings);
+    for (i32 i = 0; i < array_length(tag_strings); i++) {
+        if (try_consume_string(ctx, tag_strings[i])) {
+            tag = i;
+            break;
+        }
+    }
+    if (tag == array_length(tag_strings)) {
+        die(ctx, "tag");
+    }
+
+    consume_char(ctx, ':');
+    isize start = parser_position(ctx);
+    advance_to(ctx, ';');
+    isize end = parser_position(ctx);
+    consume_char(ctx, ';');
+    return (SmTagValue) {
+        .tag = tag,
+        .str.index = (i32)start,
+        .str.len = (i32)(end - start)
+    };
+}
+
+static b32 try_advance_to_and_parse_checkpoint_tag(SmParser *ctx, SmTagValue *out_tag)
+{
+    consume_whitespace_and_comments(ctx);
+    if (*ctx->p != '#') {
+        return false;
+    }
+    *out_tag = parse_checkpoint_tag(ctx);
+    return true;
+}
+
+void load_checkpoints_from_disk(void)
+{
+    Buffer f = read_file("checkpoints.txt");
+    if (f.len) {
+        jmp_buf env;
+        SmParser *ctx = &(SmParser) {
+            .buf = f.buf,
+            .p = f.buf,
+            .end = f.buf + f.len,
+            .env = &env
+        };
+        i32 err = setjmp(env);
+        if (err) {
+            printf("checkpoints parse error: %s\n", ctx->error.buf);
+            return;
+        }
+
+        for (SmTagValue s, t; try_advance_to_and_parse_checkpoint_tag(ctx, &s) && try_advance_to_and_parse_checkpoint_tag(ctx, &t);) {
+            OptimizationCheckpoint cp = {0};
+            buf_printf(cp.name, "%.*s", s.str.len, f.buf + s.str.index);
+            SmParser param_ctx = *ctx;
+            param_ctx.p = f.buf + t.str.index;
+            for (usize i = 0; i < state.ps.num_params; i++) {
+                buf_push(cp.params, parse_f32(&param_ctx));
+                consume_char(&param_ctx, ',');
+            }
+            buf_push(state.checkpoints, cp);
+        }
+    }
+}
+
+void checkpoint(void)
+{
+    if (buf_len(state.checkpoints) > 0 && buf_last(state.checkpoints).generation == state.generation) {
+        return;
+    }
+    OptimizationCheckpoint cp = { .generation = state.generation };
+    time_t t = time(0);
+    u8 *date = (u8 *)asctime(localtime(&t));
+    date[strlen(date)-1] = 0; // null out new line
+    buf_printf(cp.name, "%s", date);
+    for (isize i = 0; i < state.info.num_params; i++) {
+        buf_push(cp.params, state.ps.params[i]);
+    }
+    buf_push(state.checkpoints, cp);
+
+    save_checkpoints_to_disk();
+}
+
+void checkpoint_default(void)
+{
+    buf_clear(state.default_checkpoint.name);
+    buf_clear(state.default_checkpoint.params);
+
+    buf_printf(state.default_checkpoint.name, "%s", "Default");
+    for (isize i = 0; i < state.info.num_params; i++) {
+        buf_push(state.default_checkpoint.params, state.ps.params[i]);
+    }
+    state.default_checkpoint.generation = state.generation;
+}
+
+void checkpoint_latest(void)
+{
+    buf_clear(state.latest_checkpoint.name);
+    buf_clear(state.latest_checkpoint.params);
+
+    buf_printf(state.latest_checkpoint.name, "%s", "Latest");
+    for (isize i = 0; i < state.info.num_params; i++) {
+        buf_push(state.latest_checkpoint.params, state.ps.params[i]);
+    }
+    state.latest_checkpoint.generation = state.generation;
+}
+
+void restore_checkpoint(OptimizationCheckpoint cp)
+{
+    for (isize i = 0; i < state.info.num_params; i++) {
+        state.ps.params[i] = cp.params[i];
+        state.generation++;
+    }
+
+    state.optimizing = false;
+}
+
 static const ImVec2 V2Zero = {0};
 
 bool BeginPlotCppCpp(const char* title, const char* x_label, const char* y_label, const ImVec2* size, ImPlotFlags flags, ImPlotAxisFlags x_flags, ImPlotAxisFlags y_flags, ImPlotAxisFlags y2_flags, ImPlotAxisFlags y3_flags);
@@ -235,9 +396,9 @@ static bool BeginPlotDefaults(const char* title_id, const char* x_label, const c
 {
     return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
 }
-static bool BeginPlotDefaultsFullWidth(const char* title_id, const char* x_label, const char* y_label)
+static bool BeginPlotDefaultsOptimizer(const char* title_id, const char* x_label, const char* y_label)
 {
-    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
+    return BeginPlotCppCpp(title_id, x_label, y_label, &(ImVec2){igGetWindowWidth() - 8.0f, 0}, ImPlotFlags_Default & ~ImPlotFlags_Legend, ImPlotAxisFlags_Auxiliary & ~ImPlotAxisFlags_TickLabels, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary, ImPlotAxisFlags_Auxiliary);
 }
 
 static ImVec4 GetColormapColor(int index)
@@ -1007,6 +1168,9 @@ void init(void)
 #if !defined(EMSCRIPTEN)
     add_target_files();
     setup_optimizer();
+    checkpoint_default();
+    checkpoint_latest();
+    load_checkpoints_from_disk();
 #endif
 }
 
@@ -1301,7 +1465,7 @@ void frame(void)
 
     // Optimization window
     if (state.loss_window) {
-        static const char *message = 0;
+        static const char *error_message = 0;
         if (!state.optimization_graph) {
             state.optimization_graph = &state.graphs[make_optimization_graph()];
         }
@@ -1338,7 +1502,7 @@ void frame(void)
                 for (isize i = 0; i < state.opt.n_params; i++) {
                     if (isnan(state.opt.x[i])) {
                         state.optimizing = false;
-                        message = "Cannot optimize due to NaNs. Reset to a good state.";
+                        error_message = "Cannot optimize due to NaNs. Reset to a good state.";
                         break;
                     }
                 }
@@ -1353,7 +1517,10 @@ void frame(void)
                 }
 
                 if (state.optimizing) {
-                    message = 0;
+                    if (!error_message) {
+                        checkpoint_latest();
+                    }
+                    error_message = 0;
 
                     i32 submitted = 0;
                     for (isize i = 0; i < req.n_samples; i++) {
@@ -1445,44 +1612,67 @@ void frame(void)
                 err_lim = max(err_lim, state.optimization_graph->ys[0][i]);
                 loss_lim = max(loss_lim, state.optimization_graph->ys[1][i]);
             }
+            ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[0]);
             ipSetNextPlotLimits(0, NumGraphSamples, 0, err_lim, ImGuiCond_Always);
-            if (BeginPlotDefaultsFullWidth("##Average Error", "Iteration", "Average Error")) {
-                skillset_line_plot(0, false, state.optimization_graph, state.optimization_graph->ys[0]);
+            if (BeginPlotDefaultsOptimizer("##Average Error", "", "Average Error")) {
+                ipPlotLineFloatPtrInt("Error", state.optimization_graph->ys[0], state.optimization_graph->len, 0, sizeof(float));
                 ipEndPlot();
             }
             ipSetNextPlotLimits(0, NumGraphSamples, 0, loss_lim, ImGuiCond_Always);
-            if (BeginPlotDefaultsFullWidth("##Loss", "Iteration", "Loss")) {
-                skillset_line_plot(0, false, state.optimization_graph, state.optimization_graph->ys[1]);
+            if (BeginPlotDefaultsOptimizer("##Loss", "Iteration", "Loss")) {
+                ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[0]);
+                ipPlotLineFloatPtrInt("Loss", state.optimization_graph->ys[1], state.optimization_graph->len, 0, sizeof(float));
                 ipEndPlot();
             }
+            ipPopStyleColor(1);
         }
 
         if (igButton(state.optimizing ? "Stop" : "Start", V2Zero)) {
             state.optimizing = !state.optimizing;
         } igSameLine(0, 4);
-        if (igButton("Save", V2Zero)) {
-            rewrite_parameters(&state.info, &state.ps);
-        } tooltip("Dump the current parameters directly to the source code in etterna/_MinaCalc441 to etterna/_MinaCalcRewrite");
-        if (message) {
+        if (igButton("Checkpoint", V2Zero)) {
+            checkpoint();
+        }
+        if (error_message) {
             igSameLine(0, 4);
-            igTextUnformatted(message, 0);
+            igTextUnformatted(error_message, 0);
         }
 
-        igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
-        igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
-        // igSliderFloat("MDecay", &MDecay, 0.0f, 1.0f - 1e-3f, "%g", 0.5f);
-        // igSliderFloat("VDecay", &VDecay, 0.0f, 1.0f - 1e-5f, "%g", 0.5f);
-        igSliderInt("Sample Batch Size", &SampleBatchSize, 1, state.opt.n_samples, "%d");
-        igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, state.opt.n_params, "%d");
-        igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
-        igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
-        // igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
-        igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
-        tooltip("weights higher MSDs heavier automatically");
-        igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
-        tooltip("not to scale. roughly %fx of msd", 1.0f / state.target.msd_sd);
-        igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
-        igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
+        if (igBeginChildStr("Hyperparameters", V2(GetContentRegionAvailWidth() / 2.0f, 250.0f), 0, 0)) {
+            igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
+            igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
+            // igSliderFloat("MDecay", &MDecay, 0.0f, 1.0f - 1e-3f, "%g", 0.5f);
+            // igSliderFloat("VDecay", &VDecay, 0.0f, 1.0f - 1e-5f, "%g", 0.5f);
+            igSliderInt("Sample Batch Size", &SampleBatchSize, 1, state.opt.n_samples, "%d");
+            igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, state.opt.n_params, "%d");
+            igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
+            igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
+            // igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
+            igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
+            tooltip("weights higher MSDs heavier automatically");
+            igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
+            tooltip("not to scale. roughly %fx of msd", 1.0f / state.target.msd_sd);
+            igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
+            igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
+            igEndChild();
+        }
+        igSameLine(0, 4);
+
+
+        if (igBeginChildStr("Checkpoints", V2(GetContentRegionAvailWidth(), 250.0f), 0, 0)) {
+            if (igSelectableBool(state.latest_checkpoint.name, 0, ImGuiSelectableFlags_None, V2Zero)) {
+                restore_checkpoint(state.latest_checkpoint);
+            }
+            if (igSelectableBool(state.default_checkpoint.name, 0, ImGuiSelectableFlags_None, V2Zero)) {
+                restore_checkpoint(state.default_checkpoint);
+            }
+            for (isize i = buf_len(state.checkpoints) - 1; i >= 0; i--) {
+                if (igSelectableBool(state.checkpoints[i].name, 0, ImGuiSelectableFlags_None, V2Zero)) {
+                    restore_checkpoint(state.checkpoints[i]);
+                }
+            }
+            igEndChild();
+        }
         for (isize i = 1; i < NumSkillsets; i++) {
             igPushIDInt((i32)i);
             igText("%s Bias", SkillsetNames[i]);
@@ -1510,17 +1700,12 @@ void frame(void)
 
     // Start up text window
     if (buf_len(state.files) == 0) {
-        igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f - 40.f), 0, V2(0.5f, 1.0f));
-        igBegin("MinaButan", 0, ImGuiWindowFlags_NoDecoration);
-        if (igButton("Add Mina's CalcTestList.xml", V2Zero)) {
-            add_target_files();
-        }
-        igEnd();
-
         igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f), 0, V2(0.5f, 0.5f));
 
         igBegin("Drop", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
-        igText("Drop files, song folders or packs here");
+        igText("Unable to load any files.\n\n");
+        igText("Place the .exe next to a cache.db and CalcTestList.xml, or run on the command line like:\n\n");
+        igText("seeminacalc db=/etterna/Cache/cache.db list=/path/to/CalcTestList.xml");
         igEnd();
 #ifdef NO_SSE
         igSetNextWindowPos(V2(left_width + centre_width / 2.0f, ds.y / 2.f + 20.f), 0, V2(0.5f, 0.0f));

@@ -836,7 +836,7 @@ Calc::InitAdjDiff(Calc& calc, const int& hi)
 						if (*jack_diff > 0) {
 							auto tech_funk_at_jacks = calc.soap.at(hi).at(TechBase).at(i) * tp_mods.at(ss) * basescalers.at(ss);
 							tech_funk_at_jacks /= max<float>(calc.doot.at(hi).at(CJ).at(i) * calc.doot.at(hi).at(CJ).at(i), 1.0F);
-							*jack_diff = lerp(0.1F, *jack_diff, tech_funk_at_jacks / fastsqrt(*jack_diff));
+							*jack_diff = lerp(0.F, *jack_diff, tech_funk_at_jacks / fastsqrt(*jack_diff));
 						}
 					}
 				} break;
