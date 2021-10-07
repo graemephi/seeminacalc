@@ -101,7 +101,7 @@ static void dump_constant_info_to_file(void)
         if ((i & 7) == 0) {
             buf_printf(gen, "\n    ");
         }
-        buf_printf(gen, " %a,", constant_info[i].value);
+        buf_printf(gen, " %a,", (f64)constant_info[i].value);
     }
     buf_printf(gen, "\n};\n\n");
 
@@ -165,7 +165,7 @@ static void dump_constant_info_to_file(void)
         }
         if (constant_info[i].file) {
             u8 *path = relative_path(constant_info[i].file);
-            buf_printf(gen, "    { \"%s\", %d, %d, %d, %a, %d },\n", path, constant_info[i].line, nth_of_line[i], indices[i], constant_info[i].value, constant_info[i].type == Constant_Real);
+            buf_printf(gen, "    { \"%s\", %d, %d, %d, %a, %d },\n", path, constant_info[i].line, nth_of_line[i], indices[i], (f64)constant_info[i].value, constant_info[i].type == Constant_Real);
             free(path);
         }
     }
@@ -250,7 +250,7 @@ char const *float_suffix(f32 value)
 {
     b32 have_dot = false;
     u8 *ugh = 0;
-    buf_printf(ugh, "%.7g", value);
+    buf_printf(ugh, "%.7g", (f64)value);
     for (isize i = 0; i < buf_len(ugh); i++) {
         if (ugh[i] == '.') {
             have_dot = true;
@@ -315,7 +315,7 @@ void rewrite_declaration(FileRewriter *fr, char const *name, f32 value)
     end += fr->offset;
 
     buf_clear(fr->buffer);
-    buf_printf(fr->buffer, "%.*sfloat %s = %.8g%s%s", start, rewrite, name, value, float_suffix(value), rewrite + end);
+    buf_printf(fr->buffer, "%.*sfloat %s = %.8g%s%s", start, rewrite, name, (f64)value, float_suffix(value), rewrite + end);
 
     fr->rewrite = fr->buffer;
     fr->buffer = rewrite;
@@ -334,7 +334,7 @@ FloatPosition find_next_float_in_line(u8 *buf)
         while ((*cursor < '+' || *cursor > '9') && *cursor != '\n') {
             cursor++;
         }
-        strtof(cursor, &end);
+        strtof(cursor, (char **)&end);
         if (end - cursor > 1) {
             break;
         }
@@ -365,7 +365,7 @@ void rewrite_constant(FileRewriter *fr, isize line, isize floats_to_skip, f32 va
     isize end = start + p.len;
 
     buf_clear(fr->buffer);
-    buf_printf(fr->buffer, "%.*s%.8g%s%s", start, rewrite, value, float_suffix(value), rewrite + end);
+    buf_printf(fr->buffer, "%.*s%.8g%s%s", start, rewrite, (f64)value, float_suffix(value), rewrite + end);
 
     fr->rewrite = fr->buffer;
     fr->buffer = rewrite;
@@ -400,7 +400,7 @@ void rewrite_basescalers(CalcInfo *info, ModInfo *mod, ParamSet *ps)
     buf_printf(basescalers, "0.F, ");
     isize last = mod->num_params - 1;
     for (isize i = 0; i < mod->num_params; i++) {
-        buf_printf(basescalers, "%.7g%s%s", ps->params[mod->index + i], float_suffix(ps->params[mod->index + i]), i != last ? ", " : "");
+        buf_printf(basescalers, "%.7g%s%s", (f64)ps->params[mod->index + i], float_suffix(ps->params[mod->index + i]), i != last ? ", " : "");
     }
 
     isize start = find_string(source.buf, S("basescalers = {"));

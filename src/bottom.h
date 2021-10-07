@@ -345,7 +345,7 @@ void *buf_fit_(Buf *hdr, isize size, isize count)
 }
 
 #define buf_printf(buf, ...) buf_printf_(&(buf), __VA_ARGS__)
-i32 buf_printf_(char **buf_ref, char *fmt, ...)
+i32 buf_printf_(u8 **buf_ref, char *fmt, ...)
 {
     char *buf = *buf_ref;
 
@@ -413,7 +413,7 @@ void buf_remove_sorted_(Buf *hdr, isize size, isize index)
 
 typedef struct String
 {
-    char *buf;
+    u8 *buf;
     isize len;
 } String;
 #define S(imm) ((String) { .buf = imm, .len = sizeof(imm) - 1 })

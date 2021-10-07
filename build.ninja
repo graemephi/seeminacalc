@@ -1,0 +1,52 @@
+# This has been written for windows and emscripten. To build for linux or
+# macos, you'll have to link to the libraries that sokol_app.h needs. Read the
+# documentation there.
+
+cxx = clang
+builddir = build
+warnings = -Wall -Werror -Wno-unused-command-line-argument -Wdouble-promotion -Wimplicit-int-float-conversion -Wstrict-prototypes
+cflags = -Ietterna -Ilib -D_CRT_SECURE_NO_WARNINGS -fno-strict-aliasing -fvisibility=hidden -funsigned-char -fuse-ld=lld -g
+cppflags = $cflags -fno-rtti -fno-exceptions -std=c++17
+
+rule obj
+  deps = gcc
+  depfile = $out.d
+  command = $cxx -MD -MF $out.d $cflags $warnings -o $out -c $in
+
+rule bin
+  deps = gcc
+  depfile = $out.d
+  command = $cxx -MD -MF $out.d $cflags $warnings -o $out $in
+
+#
+# Debug build. This compiles the calc with optimisations on as the assumption is
+# you won't be debugging the calc. The visualization and optimization mostly waits
+# around for calc results, so this is pretty usable.
+build $builddir/debug/sqlite3.o: obj lib/sqlite3.c
+  cflags = -DDEBUG -O2 $cflags
+  warnings = -w
+build $builddir/debug/cpp.o: obj src/cpp.cpp
+  cflags = -DDEBUG -O2 $cppflags
+  cxx = clang++
+build $builddir/debug/seeminacalc.exe: bin src/seeminacalc.c $builddir/debug/sqlite3.o $builddir/debug/cpp.o
+  cflags = -DDEBUG $cflags
+
+#
+# Native release build.
+build $builddir/release/sqlite3.o: obj lib/sqlite3.c
+  cflags = -O2 -flto $cflags
+  warnings = -w
+build $builddir/release/cpp.o: obj src/cpp.cpp
+  cflags = -O2 -flto $cppflags
+  cxx = clang++
+build $builddir/release/seeminacalc.exe: bin src/seeminacalc.c $builddir/release/sqlite3.o $builddir/release/cpp.o
+  cflags = -O2 $cflags
+
+#
+# Cachedb.
+build $builddir/cachedb/cachedb.exe: bin src/cachedb.c $builddir/debug/cpp.o $builddir/debug/sqlite3.o
+
+default $builddir/debug/seeminacalc.exe
+build debug: phony $builddir/debug/seeminacalc.exe
+build release: phony $builddir/release/seeminacalc.exe
+build cachedb: phony $builddir/cachedb/cachedb.exe

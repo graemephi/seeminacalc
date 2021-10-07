@@ -1,12 +1,12 @@
 // Utility program. This takes the big list of chartkeys somewhere below and dumps the note data into a .h file as static byte arrays.
 // Usage:
 //   Build with
-//       make cachedb
+//       ninja cachedb
 //
 //   Run with
 //       ./build/cachedb/cachedb /path/to/cache/db
 //
-// It will overwrite cachedb.gen.c. `make all` will build cachedb but _not_ run it; cachedb.gen.c is checked into the repo.
+// It will overwrite cachedb.gen.c. This isn't a build step, cachedb.gen.c is checked into the repo.
 
 #ifdef __clang__
 // for libs only
@@ -17,6 +17,8 @@
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #endif
+
+#include <ctype.h>
 
 #define SQLITE3
 #include "sqlite3.h"
@@ -378,7 +380,7 @@ TargetFile *load_test_files(char const *db, char const *xml_path)
 
     XML xml = xml_begin(xml_file);
     while (xml_open(&xml, S("CalcTestList"))) {
-        String skillset = xml_attr(&xml, S("Skillset")); skillset;
+        String skillset = xml_attr(&xml, S("Skillset"));
         i32 ss = string_to_i32(skillset);
 
         if (ss > 0 && ss < NumSkillsets) {
@@ -615,7 +617,7 @@ int main(int argc, char **argv)
                 if ((index & 7) == 0) {
                     buf_printf(gen, "\n    ");
                 }
-                buf_printf(gen, "%a,", nd[index].rowTime);
+                buf_printf(gen, "%a,", (f64)nd[index].rowTime);
             }
             buf_pop(gen);
             buf_printf(gen, "\n};\n\n");
@@ -641,9 +643,9 @@ int main(int argc, char **argv)
             buf_printf(gen, "        .title = SS(\"%s\"),\n", files[i].title.buf);
             buf_printf(gen, "        .difficulty = %d,\n", files[i].difficulty);
             buf_printf(gen, "        .skillset = %d,\n", TestFiles[i].skillset);
-            buf_printf(gen, "        .rate = %af,\n", TestFiles[i].rate);
-            buf_printf(gen, "        .target = %af,\n", TestFiles[i].target);
-            buf_printf(gen, "        .weight = %af,\n", TestFiles[i].dead ? 0.0f : 1.0f);
+            buf_printf(gen, "        .rate = %af,\n", (f64)TestFiles[i].rate);
+            buf_printf(gen, "        .target = %af,\n", (f64)TestFiles[i].target);
+            buf_printf(gen, "        .weight = %af,\n", TestFiles[i].dead ? 0.0 : 1.0);
             buf_printf(gen, "        .note_data_len = array_length(TargetFileData_%zd_Notes),\n", i);
             buf_printf(gen, "        .note_data_notes = TargetFileData_%zd_Notes,\n", i);
             buf_printf(gen, "        .note_data_times = TargetFileData_%zd_RowTime\n", i);

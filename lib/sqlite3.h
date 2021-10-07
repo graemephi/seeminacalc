@@ -6031,7 +6031,7 @@ SQLITE_API int sqlite3_sleep(int);
 ** sqlite3_temp_directory = sqlite3_mprintf("%s", zPathBuf);
 ** </pre></blockquote>
 */
-SQLITE_API char *sqlite3_temp_directory;
+// SQLITE_API char *sqlite3_temp_directory;
 
 /*
 ** CAPI3REF: Name Of The Folder Holding Database Files
@@ -6068,7 +6068,7 @@ SQLITE_API char *sqlite3_temp_directory;
 ** made NULL or made to point to memory obtained from [sqlite3_malloc]
 ** or else the use of the [data_store_directory pragma] should be avoided.
 */
-SQLITE_API char *sqlite3_data_directory;
+// SQLITE_API char *sqlite3_data_directory;
 
 /*
 ** CAPI3REF: Win32 Specific Interface

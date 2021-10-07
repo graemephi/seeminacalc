@@ -6,19 +6,20 @@ The intended target is WebAssembly. The only way to get data into the program is
 
 ## Building
 
-There are two compilation units, `seeminacalc.c` and `cpp.cpp`. Point a C++ compiler at them. This is sufficient to build with MSVC:
+For native binaries,
 
 ```
-cl -Ietterna -Ilib -std:c++17 seeminacalc.c cpp.cpp  
+ninja [release]
 ```
 
-The WebAssembly target is more involved. Run 
+For emscripten (don't ask), 
 
 ```
-make emscripten
+make
 ```
 
-(on Windows, from the emscripten comnmand prompt). Then serve `./web` on some server. For more than this, the makefile is a glorified shell script, you can figure it out.
+with emscripten's environment variables set up. Then server './web/' on some server.
+
 
 ## License
 

@@ -12,8 +12,10 @@ enum {
     Param_None = -1
 };
 
-i32 int_cmp(i32 const *a, i32 const *b)
+i32 int_cmp(void const *va, void const *vb)
 {
+    i32 const *a = va;
+    i32 const *b = vb;
     return (*a < *b) ? -1
          : (*a > *b) ?  1
          : 0;
@@ -159,7 +161,7 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
         for (isize i = 0; i < opt->n_params; i++) {
             if (param_evals[i].samples) {
                 f32 regularisation_l1 = 0;
-                f32 regularisation_l2 = -hsq * buf_len(param_evals[i].samples);
+                f32 regularisation_l2 = -hsq * (f32)buf_len(param_evals[i].samples);
                 f32 loss_x = 0.0f;
                 f32 loss_xh = 0.0f;
                 for (isize j = 0; j < buf_len(param_evals[i].samples); j++) {

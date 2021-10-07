@@ -257,7 +257,7 @@ void save_checkpoints_to_disk(void)
     for (isize i = 0; i < buf_len(state.checkpoints); i++) {
         buf_printf(str, "#name: %s;\n#params: ", state.checkpoints[i].name);
         for (usize p = 0; p < state.ps.num_params; p++) {
-            buf_printf(str, "%.8g,", state.checkpoints[i].params[p]);
+            buf_printf(str, "%.8g,", (f64)state.checkpoints[i].params[p]);
         }
         buf_printf(str, ";\n\n");
     }
@@ -657,7 +657,7 @@ i32 add_target_files(void)
             author.len == 0 ? 0 : 2, ", ",
             diff.len, diff.buf,
             ck.len, ck.buf,
-            target->rate,
+            (f64)target->rate,
             target->skillset
         );
         pop_allocator();
@@ -693,14 +693,14 @@ i32 add_target_files(void)
 
         f32 old_m = target_m;
         f32 old_s = target_s;
-        target_m = old_m + (target->target - old_m) / (i + 1);
+        target_m = old_m + (target->target - old_m) / (f32)(i + 1);
         target_s = old_s + (target->target - old_m)*(target->target - target_m);
 
-        printf("Added %s %s %.2fx: %.2f\n", SkillsetNames[target->skillset], title.buf, target->rate, target->target);
+        printf("Added %s %s %.2fx: %.2f\n", SkillsetNames[target->skillset], title.buf, (f64)target->rate, (f64)target->target);
         skip:;
     }
 
-    f32 target_var = target_s / (buf_len(target_files) - 1);
+    f32 target_var = target_s / (f32)(buf_len(target_files) - 1);
     state.target.msd_mean = target_m;
     state.target.msd_sd = sqrtf(target_var);
 
@@ -1391,7 +1391,7 @@ void frame(void)
                 // File difficulty + chartkey text
                 igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
                 igSameLine(0, 4);
-                igText("(Want %g at %gx)", sfi->target.want_msd, sfi->target.rate);
+                igText("(Want %g at %gx)", (f64)sfi->target.want_msd, (f64)sfi->target.rate);
                 igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
                 igText(sfi->chartkey.buf);
 
@@ -1613,12 +1613,12 @@ void frame(void)
                 loss_lim = max(loss_lim, state.optimization_graph->ys[1][i]);
             }
             ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[0]);
-            ipSetNextPlotLimits(0, NumGraphSamples, 0, err_lim, ImGuiCond_Always);
+            ipSetNextPlotLimits(0, NumGraphSamples, 0, (f64)err_lim, ImGuiCond_Always);
             if (BeginPlotDefaultsOptimizer("##Average Error", "", "Average Error")) {
                 ipPlotLineFloatPtrInt("Error", state.optimization_graph->ys[0], state.optimization_graph->len, 0, sizeof(float));
                 ipEndPlot();
             }
-            ipSetNextPlotLimits(0, NumGraphSamples, 0, loss_lim, ImGuiCond_Always);
+            ipSetNextPlotLimits(0, NumGraphSamples, 0, (f64)loss_lim, ImGuiCond_Always);
             if (BeginPlotDefaultsOptimizer("##Loss", "Iteration", "Loss")) {
                 ipPushStyleColorU32(ImPlotCol_Line, state.skillset_colors[0]);
                 ipPlotLineFloatPtrInt("Loss", state.optimization_graph->ys[1], state.optimization_graph->len, 0, sizeof(float));
@@ -1651,7 +1651,7 @@ void frame(void)
             igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
             tooltip("weights higher MSDs heavier automatically");
             igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
-            tooltip("not to scale. roughly %fx of msd", 1.0f / state.target.msd_sd);
+            tooltip("not to scale. roughly %fx of msd", 1.0 / (f64)state.target.msd_sd);
             igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
             igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
             igEndChild();

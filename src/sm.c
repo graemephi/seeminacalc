@@ -953,7 +953,7 @@ String generate_chart_key(SmFile *sm, isize diff)
 {
     BPMChange *bpm = sm->bpms;
     SmRow *r = sm->diffs[diff].rows;
-    char *prep = 0;
+    u8 *prep = 0;
     for (isize i = 0; i < sm->diffs[diff].n_rows; i++) {
         MinaSerializedRow row = row_mina_serialize(r[i]);
         if (row.row) {

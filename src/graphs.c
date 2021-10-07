@@ -1,4 +1,4 @@
-
+// cog -rc graphs.c
 /*[[[cog
 import cog
 import numpy as np
@@ -759,7 +759,7 @@ void submit_work(WorkQueue *q, CalcWork work[], u32 generation)
     buf_set_len(work, buf_len(work) - N);
 }
 
-void finish_work()
+void finish_work(void)
 {
     push_allocator(scratch);
     FnGraph **updated_fngs = 0;
