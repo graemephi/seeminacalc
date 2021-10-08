@@ -12,29 +12,25 @@ enum {
     Param_None = -1
 };
 
-i32 int_cmp(void const *va, void const *vb)
+void swap(i32 *a, i32 *b)
 {
-    i32 const *a = va;
-    i32 const *b = vb;
-    return (*a < *b) ? -1
-         : (*a > *b) ?  1
-         : 0;
+    i32 temp = *a;
+    *a = *b;
+    *b = temp;
 }
 
-void shuffle(i32 arr[], i32 head[])
+void random_sequence(i32 arr[], i32 head[])
 {
-    qsort(arr, buf_len(arr), sizeof(i32), int_cmp);
+    for (i32 i = 0; i < buf_len(arr); i++) {
+        arr[i] = i;
+    }
     for (i32 i = 0; i < buf_len(head); i++) {
-        i32 idx = head[i];
-        arr[idx] = i;
-        arr[i] = idx;
+        swap(arr + i, arr + head[i]);
     }
     isize len = buf_len(arr);
     for (isize i = buf_len(head); i < len; i++) {
         isize idx = i + rngu(len - i);
-        i32 v = arr[i];
-        arr[i] = arr[idx];
-        arr[idx] = v;
+        swap(arr + i, arr + idx);
     }
 }
 
@@ -202,8 +198,8 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
 
     opt->loss /= n_losses;
 
-    shuffle(opt->active.samples, opt->focus);
-    shuffle(opt->active.parameters, 0);
+    random_sequence(opt->active.samples, opt->focus);
+    random_sequence(opt->active.parameters, 0);
 
     i32 sample_batch_size = (i32)clamps(0, opt->n_samples, SampleBatchSize);
     i32 parameter_batch_size = (i32)clamps(0, opt->n_params, ParameterBatchSize);
