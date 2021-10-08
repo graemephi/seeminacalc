@@ -55,4 +55,3 @@ build $builddir/release/seeminacalc.exe: bin src/seeminacalc.c $builddir/release
 default $builddir/debug/seeminacalc.exe
 build debug: phony $builddir/debug/seeminacalc.exe
 build release: phony $builddir/release/seeminacalc.exe
-build cachedb: phony $builddir/cachedb/cachedb.exe
