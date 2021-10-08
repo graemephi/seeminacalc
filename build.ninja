@@ -1,4 +1,4 @@
-# This has been written for windows and emscripten. To build for linux or
+# This has been written for windows. To build for linux or
 # macos, you'll have to link to the libraries that sokol_app.h needs. Read the
 # documentation there.
 

@@ -1015,14 +1015,18 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
     i32 ss = sfi->target.skillset;
     f32 mean = state.target.msd_mean;
     f32 target = (work.msd - mean) / state.target.msd_sd;
-    target = lerp(1.0f + target, expf(1.0f + target) / 2.71828182846f, UnLogScale) - 1.0f;
+    target = lerp(1.0f + target, expf(target), UnLogScale) - 1.0f;
     f32 skillset = (ssr.E[ss] - mean) / state.target.msd_sd;
-    skillset = lerp(1.0f + skillset, expf(1.0f + skillset) / 2.71828182846f, UnLogScale) - 1.0f;
+    skillset = lerp(1.0f + skillset, expf(skillset), UnLogScale) - 1.0f;
     f32 overall = (ssr.overall - mean) / state.target.msd_sd;
-    overall = lerp(1.0f + overall, expf(1.0f + overall) / 2.71828182846f, UnLogScale) - 1.0f;
+    overall = lerp(1.0f + overall, expf(overall), UnLogScale) - 1.0f;
     f32 delta_skillset = skillset - target;
     f32 delta_overall = overall - target;
-    f32 misclass = Misclass * expf(ssr.overall / ssr.E[ss]) / 2.71828182846f;
+    f32 ssr_largest = 0;
+    for (isize i = 1; i < NumSkillsets; i++) {
+        ssr_largest = max(ssr_largest, ssr.E[i]);
+    }
+    f32 misclass = Misclass * expf(ssr_largest / ssr.E[ss] - 1.0f);
     f32 delta = sfi->target.weight * Scale * misclass * lerp(delta_skillset, delta_overall, SkillsetOverallBalance);
     i32 opt_param = state.opt_cfg.map.to_opt[work.param];
     f32 difference = 0.0f;
@@ -1605,7 +1609,7 @@ void frame(void)
             }
         }
         igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
-        igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
+        igSetNextWindowSize(V2(centre_width, ds.y - 50.f), ImGuiCond_Always);
         if (igBegin("Loss", 0, ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoResize)) {
             num_open_windows++;
             f32 err_lim = 2.0f;
@@ -1641,23 +1645,31 @@ void frame(void)
         }
 
         if (igBeginChildStr("Hyperparameters", V2(GetContentRegionAvailWidth() / 2.0f, 250.0f), 0, 0)) {
-            igSliderFloat("H", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
-            igSliderFloat("StepSize", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
+            igSliderFloat("h", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
+            tooltip("coarseness of the derivative approximation\n\nfinite differences baybee");
+            igSliderFloat("Step Size", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
+            tooltip("how fast to change parameters. large values can be erratic");
             // igSliderFloat("MDecay", &MDecay, 0.0f, 1.0f - 1e-3f, "%g", 0.5f);
             // igSliderFloat("VDecay", &VDecay, 0.0f, 1.0f - 1e-5f, "%g", 0.5f);
             igSliderInt("Sample Batch Size", &SampleBatchSize, 1, state.opt.n_samples, "%d");
+            tooltip("random sample of n files for each step");
             igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, state.opt.n_params, "%d");
+            tooltip("random sample of n parameters for each step");
             igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", 1.0f);
+            tooltip("0 = train only on skillset\n1 = train only on overall");
             igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
+            tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
             // igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
             igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
             tooltip("weights higher MSDs heavier automatically");
             igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
-            tooltip("not to scale. roughly %fx of msd", 1.0 / (f64)state.target.msd_sd);
+            tooltip("be more accepting of files that come under their target ssr than over");
             igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
+            tooltip("penalise moving parameters very far away from the defaults");
             igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
-            igEndChild();
+            tooltip("0 = prefer large changes to few parameters\n1 = prefer small changes to many parameters\n...theoretically");
         }
+        igEndChild();
         igSameLine(0, 4);
 
 
@@ -1673,8 +1685,8 @@ void frame(void)
                     restore_checkpoint(state.checkpoints[i]);
                 }
             }
-            igEndChild();
         }
+        igEndChild();
         for (isize i = 1; i < NumSkillsets; i++) {
             igPushIDInt((i32)i);
             igText("%s Bias", SkillsetNames[i]);
@@ -1714,7 +1726,7 @@ void frame(void)
         igBegin("SSE", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
         igTextColored((ImVec4) { 1, 0, 0, 1.0f}, "No SSE available");
         igText("Turn on SIMD support in about:flags if you want the calc to be exactly the same as in game");
-        igTextColored((ImVec4) { 1, 1, 1, 0.5f}, "(Computer touchers: this is a numerical precision thing, not a speed thing)");
+        igTextColored((ImVec4) { 1, 1, 1, 0.5f}, "(this is a numerical precision thing, not a speed thing)");
         igEnd();
 #endif
     }
@@ -1722,8 +1734,10 @@ void frame(void)
     // Debug window
     if (igIsKeyPressed('`', false)) {
         state.debug_window = !state.debug_window;
+
+        DUMP_CONSTANT_INFO;
     }
-    if (state.debug_window) {
+    if (!state.debug_window) {
         debug_counters.skipped = 0;
         debug_counters.done = 0;
         f64 time = 0;
@@ -1754,8 +1768,6 @@ void frame(void)
         igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%.2fms", time); igEndGroup();
 
         igEnd();
-
-        DUMP_CONSTANT_INFO;
     }
 
     sg_begin_default_pass(&state.pass_action, width, height);
