@@ -939,7 +939,7 @@ i32 pack_opt_parameters(CalcInfo *info, f32 *params, f32 *normalization_factors,
 }
 
 static f32 SkillsetOverallBalance = 0.35f;
-static f32 UnLogScale = 0.5f;
+static f32 ExpScale = 0.5f;
 static f32 Scale = 1.0f;
 static f32 Misclass = 1.0f;
 void setup_optimizer(void)
@@ -1034,11 +1034,11 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
     i32 ss = sfi->target.skillset;
     f32 mean = state.target.msd_mean;
     f32 target = (work.msd - mean) / state.target.msd_sd;
-    target = lerp(1.0f + target, expf(target), UnLogScale) - 1.0f;
+    target = lerp(target, expf(target), ExpScale);
     f32 skillset = (ssr.E[ss] - mean) / state.target.msd_sd;
-    skillset = lerp(1.0f + skillset, expf(skillset), UnLogScale) - 1.0f;
+    skillset = lerp(skillset, expf(skillset), ExpScale);
     f32 overall = (ssr.overall - mean) / state.target.msd_sd;
-    overall = lerp(1.0f + overall, expf(overall), UnLogScale) - 1.0f;
+    overall = lerp(overall, expf(overall), ExpScale);
     f32 delta_skillset = skillset - target;
     f32 delta_overall = overall - target;
     f32 ssr_largest = 0;
@@ -1678,7 +1678,7 @@ void frame(void)
             tooltip("0 = train only on skillset\n1 = train only on overall");
             igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
             tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
-            igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
+            igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", 1.0f);
             tooltip("weights higher MSDs heavier automatically");
             igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
             tooltip("be more accepting of files that come under their target ssr than over");
