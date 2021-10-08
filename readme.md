@@ -4,7 +4,7 @@ A tool for visualising the (currently 323-dimensional) parameter space of `MinaC
 
 ## Building
 
-Only clang on windows and emscripten are supported. However, the ninja/makefiles are very simple so if you're comfortable with C/C++ it shouldn't be hard to get it running for other systems / compilers.
+Only windows, with clang rather than msvc, and emscripten are supported. However, the ninja/makefiles are very simple so if you're comfortable with C/C++ it shouldn't be hard to get it running for other systems/compilers.
 
 For native binaries using clang,
 
@@ -12,13 +12,13 @@ For native binaries using clang,
 ninja [release]
 ```
 
-For emscripten (don't ask), 
+For emscripten,
 
 ```
 make
 ```
 
-with emscripten's environment variables set up. Then server './web/' on some server.
+with emscripten's environment variables set up. Then serve './web/' on some server.
 
 ## License
 
