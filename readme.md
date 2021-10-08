@@ -1,12 +1,10 @@
 # [SeeMinaCalc](https://seeminacalc.glitch.me/)
 
-A tool for visualising the (currently 171-dimensional) parameter space of `MinaCalc`, the difficulty calculator for the rhythm game [Etterna](https://github.com/etternagame/etterna). 
-
-The intended target is WebAssembly. The only way to get data into the program is by drag and drop from the browser. Native executables are for development only.
+A tool for visualising the (currently 323-dimensional) parameter space of `MinaCalc`, the difficulty calculator for the rhythm game [Etterna](https://github.com/etternagame/etterna). 
 
 ## Building
 
-Only windows and emscripten are supported. However, the build process is very simple so if you're comfortable with C/C++ it shouldn't be hard to get it running for other systems / compilers.
+Only clang on windows and emscripten are supported. However, the ninja/makefiles are very simple so if you're comfortable with C/C++ it shouldn't be hard to get it running for other systems / compilers.
 
 For native binaries using clang,
 
