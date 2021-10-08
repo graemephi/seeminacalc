@@ -1,5 +1,3 @@
-#include <string>
-
 #ifdef _MSC_VER
 #pragma warning(push, 0)
 #pragma warning(disable : 4706) // assignment within conditional expression

@@ -217,7 +217,7 @@ u8 *get_calc_source_path_to_read(char const *file)
         }
     }
 
-    String new_root = S("etterna/_MinaCalc441");
+    String new_root = S("etterna/_MinaCalc466");
     if (use_rewrite) {
         new_root = S("etterna/_MinaCalcRewrite");
     } else {
@@ -453,7 +453,7 @@ void rewrite_constants(CalcInfo *info, ParamSet *ps, isize mod_index, isize star
 
 void rewrite_parameters(CalcInfo *info, ParamSet *ps)
 {
-    // stupid hack so each rewriter can behave as if it loads a 441/ file off
+    // stupid hack so each rewriter can behave as if it loads a 466/ file off
     // disk, but redirects to a newly rewritten file if the file is being
     // accessed a second time (instead of the original file again). yes this
     // needs some more structure, but why bother rn
@@ -520,15 +520,19 @@ extern "C" struct {
 static void add_constant_info(int id,  char const *file, int line, float value, ConstantType type)
 {
     assert(id < sizeof(constant_info)/sizeof(constant_info[0]));
-    bool is_minacalc_cpp = strstr(file, "MinaCalc.cpp") > 0;
+    bool is_minacalc_cpp = strstr(file, "MinaCalc.cpp") != 0;
 
     // Pretend stupud hack doesn't exist
     if (is_minacalc_cpp) {
         // these are line numbers
-        if (line > 500) {
-            line -= (528 - 500);
+        int start_stupud_hack = 498;
+        int end_stupud_hack = 527;
+        if (line > start_stupud_hack) {
+            line -= (end_stupud_hack - start_stupud_hack);
         }
-        line -= (52 - 17);
+        int start_global_constants = 17;
+        int end_global_constants = 56;
+        line -= (end_global_constants - start_global_constants);
     }
 
     if (constant_info[id].file == 0) {

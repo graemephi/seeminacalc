@@ -23,28 +23,34 @@ rule bin
 # you won't be debugging the calc. The visualization and optimization mostly waits
 # around for calc results, so this is pretty usable.
 build $builddir/debug/sqlite3.o: obj lib/sqlite3.c
+  description = $cxx sqlite3
   cflags = -DDEBUG -O2 $cflags
   warnings = -w
+
 build $builddir/debug/cpp.o: obj src/cpp.cpp
+  description = $cxx cpp.cpp
   cflags = -DDEBUG -O2 $cppflags
   cxx = clang++
+
 build $builddir/debug/seeminacalc.exe: bin src/seeminacalc.c $builddir/debug/sqlite3.o $builddir/debug/cpp.o
+  description = $cxx seeminacalc.c
   cflags = -DDEBUG $cflags
 
 #
 # Native release build.
 build $builddir/release/sqlite3.o: obj lib/sqlite3.c
+  description = $cxx sqlite3
   cflags = -O2 -flto $cflags
   warnings = -w
+
 build $builddir/release/cpp.o: obj src/cpp.cpp
+  description = $cxx cpp.cpp
   cflags = -O2 -flto $cppflags
   cxx = clang++
-build $builddir/release/seeminacalc.exe: bin src/seeminacalc.c $builddir/release/sqlite3.o $builddir/release/cpp.o
-  cflags = -O2 $cflags
 
-#
-# Cachedb.
-build $builddir/cachedb/cachedb.exe: bin src/cachedb.c $builddir/debug/cpp.o $builddir/debug/sqlite3.o
+build $builddir/release/seeminacalc.exe: bin src/seeminacalc.c $builddir/release/sqlite3.o $builddir/release/cpp.o
+  description = $cxx seeminacalc.c
+  cflags = -O2 $cflags
 
 default $builddir/debug/seeminacalc.exe
 build debug: phony $builddir/debug/seeminacalc.exe

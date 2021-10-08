@@ -971,13 +971,13 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.stream_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.bad_newbie_skillsets_pbm"))].low = 1.0f;
 #if DUMP_CONSTANTS == 0 // almost always
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(78)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(86)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(91, 2)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(109)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(163)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(163, 2)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(538)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(81)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(89)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(76, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(94)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148, 2)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(536)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
         state.opt_cfg.bounds[i].low /= normalization_factors[i];
@@ -1140,29 +1140,31 @@ void init(void)
 
     {
         ModInfo *mod = &state.info.mods[state.info.num_mods - 1];
-        i32 num_params = 0;
-        i32 last_num_params = 0;
-        char const *last_mod_file = file_for_param(&state.info, mod->index);
-        char const *mod_file = 0;
-        for (i32 i = 0; i < mod->num_params; i++) {
-            i32 mp = mod->index + i;
-            mod_file = file_for_param(&state.info, mp);
-            if (strcmp(mod_file, last_mod_file) != 0) {
-                buf_push(state.inline_mods, (ModInfo) {
-                    .name = after_last_slash(last_mod_file),
-                    .num_params = num_params - last_num_params,
-                    .index = mod->index + last_num_params,
-                });
-                last_mod_file = mod_file;
-                last_num_params = num_params;
+        if (mod->num_params > 0) {
+            i32 num_params = 0;
+            i32 last_num_params = 0;
+            char const *last_mod_file = file_for_param(&state.info, mod->index);
+            char const *mod_file = 0;
+            for (i32 i = 0; i < mod->num_params; i++) {
+                i32 mp = mod->index + i;
+                mod_file = file_for_param(&state.info, mp);
+                if (strcmp(mod_file, last_mod_file) != 0) {
+                    buf_push(state.inline_mods, (ModInfo) {
+                        .name = after_last_slash(last_mod_file),
+                        .num_params = num_params - last_num_params,
+                        .index = mod->index + last_num_params,
+                    });
+                    last_mod_file = mod_file;
+                    last_num_params = num_params;
+                }
+                num_params++;
             }
-            num_params++;
+            buf_push(state.inline_mods, (ModInfo) {
+                .name = after_last_slash(mod_file),
+                .num_params = num_params - last_num_params,
+                .index = mod->index + last_num_params,
+            });
         }
-        buf_push(state.inline_mods, (ModInfo) {
-            .name = after_last_slash(mod_file),
-            .num_params = num_params - last_num_params,
-            .index = mod->index + last_num_params,
-        });
     }
 
 #if !defined(EMSCRIPTEN)

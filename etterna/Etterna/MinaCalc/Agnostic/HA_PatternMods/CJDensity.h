@@ -1,6 +1,9 @@
 #pragma once
 #include "../../PatternModHelpers.h"
 
+/// Hand-Agnostic PatternMod describing chord density.
+/// Forms a value based on counts of chords of different sizes
+/// relative to the number of notes in the interval
 struct CJDensityMod
 {
 	const CalcPatternMod _pmod = CJDensity;
@@ -16,7 +19,7 @@ struct CJDensityMod
 	float single_scaler = 2.F;
 	float jump_scaler = 1.2F;
 	float hand_scaler = 0.95F;
-	float quad_scaler = 0.95F;
+	float quad_scaler = 0.9F;
 
 	const std::vector<std::pair<std::string, float*>> _params{
 		{ "min_mod", &min_mod },

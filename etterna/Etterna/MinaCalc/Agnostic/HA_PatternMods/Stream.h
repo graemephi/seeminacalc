@@ -5,6 +5,9 @@
 // just - and then normalization, we will use this to depress the
 // stream rating for non-stream files.
 
+/// Hand-Agnostic PatternMod detecting Stream.
+/// Looks for single taps out of all taps in the interval.
+/// Begins to dampen in value if too many jacks are present
 struct StreamMod
 {
 	const CalcPatternMod _pmod = Stream;
@@ -67,6 +70,7 @@ struct StreamMod
 		  static_cast<float>(static_cast<float>(itvi.total_taps) -
 							 prop_buffer) *
 		  prop_scaler;
+
 		// allow for a mini/triple jack in streams.. but not more than that
 		jack_component = std::clamp(
 		  jack_pool - mitvi.actual_jacks, jack_comp_min, jack_comp_max);

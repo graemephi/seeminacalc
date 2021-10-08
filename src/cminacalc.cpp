@@ -1,4 +1,6 @@
 #include <cstring>
+#include <string>
+#include <cmath>
 #include <memory>
 #include <vector>
 #include <string_view>
@@ -34,7 +36,7 @@ T clamp(T t, T a, T b)
 
 #include "calcconstants.h"
 
-// Note on updating the calc: not quite drag-and-drop. grep for "Stupud hack"
+// Note on updating the calc: grep for "Stupud hack"
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/MinaCalc.cpp"
 
@@ -56,78 +58,60 @@ static b32 str_eq(char const *a, char const *b)
     return strcmp(a, b) == 0;
 }
 
-const char *ModNames[] = {
-    "Rate",
-    "StreamMod",
-    "JSMod",
-    "HSMod",
-    "CJMod",
-    "CJDensityMod",
-    "OHJumpModGuyThing",
-    "CJOHJumpMod",
-    "RollMod",
-    "BalanceMod",
-    "OHTrillMod",
-    "VOHTrillMod",
-    "ChaosMod",
-    "RunningManMod",
-    "WideRangeBalanceMod",
-    "WideRangeRollMod",
-    "WideRangeJumptrillMod",
-    "WideRangeAnchorMod",
-    "FlamJamMod",
-    "TheThingLookerFinderThing",
-    "TheThingLookerFinderThing2",
-    "BaseScalers",
-    "Globals",
-    "InlineConstants",
-};
-
-const char *ModFiles[] = {
-    0,
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHJ.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h",
-    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h",
-    0,
-    0,
-    0,
+struct {
+    const char *name;
+    const char *file;
+} Mods[] = {
+    { "Rate",                       0 },
+    { "StreamMod",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h" },
+    { "JSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h" },
+    { "HSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h" },
+    { "CJMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h" },
+    { "CJDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h" },
+    { "HSDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HSDensity.h" },
+    { "OHJumpModGuyThing",          "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHJ.h" },
+    { "CJOHJumpMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h" },
+    { "RollMod",                    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h" },
+    { "BalanceMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h" },
+    { "OHTrillMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h" },
+    { "VOHTrillMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h" },
+    { "ChaosMod",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h" },
+    { "CJOHAnchorMod (Chain)",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHAnchor.h" },
+    { "RunningManMod",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h" },
+    { "WideRangeBalanceMod",        "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h" },
+    { "WideRangeRollMod",           "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h" },
+    { "WideRangeJumptrillMod",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h" },
+    { "WideRangeAnchorMod",         "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h" },
+    { "FlamJamMod",                 "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h" },
+    { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h" },
+    { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h" },
+    { "BaseScalers",                0 },
+    { "Globals",                    0 },
+    { "InlineConstants",            0 },
 };
 
 const char *BaseScalersFile = "etterna/Etterna/MinaCalc/UlbuAcolytes.h";
 
 const char *GlobalFiles[] = {
-    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
-    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
-    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
-    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
-    "etterna/Etterna/MinaCalc/MinaCalc.cpp",
-    "etterna/Etterna/MinaCalc/SequencingHelpers.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",
-    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/RMSequencing.h",
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",                                  // { "MinaCalc.magic_num", &magic_num },
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",                                  // { "MinaCalc.tech_pbm", &tech_pbm },
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",                                  // { "MinaCalc.jack_pbm", &jack_pbm },
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",                                  // { "MinaCalc.stream_pbm", &stream_pbm },
+    "etterna/Etterna/MinaCalc/MinaCalc.cpp",                                  // { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
+    "etterna/Etterna/MinaCalc/SequencingHelpers.h",                           // { "SequencingHelpers.finalscaler", &finalscaler },
+    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h", // { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/CJOHASequencing.h",     // { "CJOHASequencing.chain_slowdown_scale_threshold ", &chain_slowdown_scale_threshold },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.jack_spacing_buffer_ms", &jack_spacing_buffer_ms },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.jack_speed_increase_cutoff_factor", &jack_speed_increase_cutoff_factor },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.guaranteed_reset_buffer_ms", &guaranteed_reset_buffer_ms },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/RMSequencing.h",        // { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
 };
 
 enum
 {
-    NumMods = sizeof(ModNames) / sizeof(char *)
+    NumMods = sizeof(Mods) / sizeof(Mods[0])
 };
 
 struct NoteData
@@ -179,6 +163,7 @@ CalcInfo calc_info()
         &shalhoub._hs._params,
         &shalhoub._cj._params,
         &shalhoub._cjd._params,
+        &shalhoub._hsd._params,
         &shalhoub._ohj._params,
         &shalhoub._cjohj._params,
         &shalhoub._roll._params,
@@ -186,6 +171,7 @@ CalcInfo calc_info()
         &shalhoub._oht._params,
         &shalhoub._voht._params,
         &shalhoub._ch._params,
+        &shalhoub._chain._params,
         &shalhoub._rm._params,
         &shalhoub._wrb._params,
         &shalhoub._wrr._params,
@@ -201,7 +187,7 @@ CalcInfo calc_info()
 
     int num_params = 0;
     for (isize i = 0; i < NumMods; i++) {
-        mod_info[i].name = ModNames[i];
+        mod_info[i].name = Mods[i].name;
         mod_info[i].num_params = (int)params[i]->size();
         mod_info[i].index = num_params;
         num_params += mod_info[i].num_params;
@@ -272,9 +258,10 @@ CalcInfo calc_info()
 
     for (isize i = 0; i < num_params; i++) {
         if (param_info[i].constant &&
-            (  (str_eq((char *)param_info[i].name, "MinaCalc.cpp(91, 2)"))
-            || (str_eq((char *)param_info[i].name, "MinaCalc.cpp(109)")))) {
+            (  (str_eq((char *)param_info[i].name, "MinaCalc.cpp(76, 2)"))
+            || (str_eq((char *)param_info[i].name, "MinaCalc.cpp(94)")))) {
             // Hack to fix bad bad no good infinite loop causer
+            // chisel P(10.24) and P(0.32). should add P_MIN(10.24, 0.1) or something
             param_info[i].min = 0.1f;
         } else if (param_info[i].integer == false) {
             float test_value = -1.0f * make_test_value(param_info[i].default_value);
@@ -342,8 +329,8 @@ const char *file_for_param(CalcInfo *info, size_t param_index)
 
     assert(param_index >= 0 && param_index < info->num_params);
     ParamInfo *p = &info->params[param_index];
-    if (ModFiles[p->mod]) {
-        result = ModFiles[p->mod];
+    if (Mods[p->mod].file) {
+        result = Mods[p->mod].file;
     } else {
         ModInfo *m = &info->mods[p->mod];
         if (str_eq(m->name, "Globals")) {
