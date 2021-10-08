@@ -227,7 +227,6 @@ typedef struct State
 } State;
 static State state = {0};
 
-#define SEEMINACALC
 #include "cachedb.c"
 char const *db_path = 0;
 char const *test_list_path = 0;
@@ -254,6 +253,7 @@ OptimizationCheckpoint make_checkpoint(u8 *name)
 void save_checkpoints_to_disk(void)
 {
     u8 *str = 0;
+    buf_printf(str, "#calc version: %d\n\n", state.info.version);
     for (isize i = 0; i < buf_len(state.checkpoints); i++) {
         buf_printf(str, "#name: %s;\n#params: ", state.checkpoints[i].name);
         for (usize p = 0; p < state.ps.num_params; p++) {
@@ -296,6 +296,14 @@ static SmTagValue parse_checkpoint_tag(SmParser *ctx)
     };
 }
 
+static i32 parse_checkpoint_version(SmParser *ctx)
+{
+    if (try_consume_string(ctx, S("#calc version:"))) {
+        return (i32)parse_f32(ctx);
+    }
+    return 0;
+}
+
 static b32 try_advance_to_and_parse_checkpoint_tag(SmParser *ctx, SmTagValue *out_tag)
 {
     consume_whitespace_and_comments(ctx);
@@ -320,6 +328,16 @@ void load_checkpoints_from_disk(void)
         i32 err = setjmp(env);
         if (err) {
             printf("checkpoints parse error: %s\n", ctx->error.buf);
+            return;
+        }
+        consume_whitespace_and_comments(ctx);
+        i32 v = parse_checkpoint_version(ctx);
+        if (v == 0) {
+            printf("checkpoints error: checkpoints has no version string\n");
+            return;
+        }
+        if (v != state.info.version) {
+            printf("checkpoints error: seeminacalc has calc version %d, checkpoints is for %d\n", state.info.version, v);
             return;
         }
 
@@ -387,6 +405,7 @@ void restore_checkpoint(OptimizationCheckpoint cp)
     }
 
     state.optimizing = false;
+    calculate_skillsets_in_background(&state.low_prio_work, state.generation);
 }
 
 static const ImVec2 V2Zero = {0};
