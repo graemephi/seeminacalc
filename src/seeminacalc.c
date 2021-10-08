@@ -839,7 +839,7 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
         i32 count = 0;
         for (i32 i = 0; i < mod->num_params; i++) {
             i32 mp = mod->index + i;
-            if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+            if (effects == 0 || (effects[mp] & effect_mask) != 0 || state.opt_cfg.enabled[mp]) {
                 count++;
             }
         }
@@ -857,7 +857,7 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
             }
             for (i32 i = 0; i < mod->num_params; i++) {
                 i32 mp = mod->index + i;
-                if (effects == 0 || (effects[mp] & effect_mask) != 0) {
+                if (effects == 0 || (effects[mp] & effect_mask) != 0 || state.opt_cfg.enabled[mp]) {
                     param_slider_widget(mp, changed_param);
                 }
             }
@@ -963,7 +963,7 @@ void setup_optimizer(void)
     for (i32 i = 1; i < state.ps.num_params; i++) {
         // source inline constants can be optimized, but opt-in only
         state.opt_cfg.enabled[i] = false &&  state.info.params[i].optimizable && !state.info.params[i].constant;
-        // since we use divided difference to get the derivative we scale all parameters before feeding them to the optimizer
+        // since we use finite differences to get the derivative we scale all parameters before feeding them to the optimizer
         normalization_factors[i] = clamp_low(1.0f, fabsf(state.info.params[i].default_value));
     }
     i32 n_params = pack_opt_parameters(&state.info, state.ps.params, normalization_factors, state.opt_cfg.enabled, initial_x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
@@ -1070,7 +1070,7 @@ void init(void)
     permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
 
     push_allocator(scratch);
-    Buffer font = {0}; //load_font_file("web/NotoSansCJKjp-Regular.otf");
+    Buffer font = load_font_file("web/NotoSansCJKjp-Regular.otf");
     pop_allocator();
 
     sg_setup(&(sg_desc){
@@ -1608,6 +1608,7 @@ void frame(void)
                         }
                     }
 
+#if 0
                     i32 min_idx = 0;
                     i32 max_idx = 0;
                     for (i32 i = 1; i < buf_len(state.files); i++) {
@@ -1621,6 +1622,7 @@ void frame(void)
 
                     opt_focus(&state.opt, max_idx);
                     opt_focus(&state.opt, min_idx);
+#endif
 
                     state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
                     state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
@@ -1668,8 +1670,6 @@ void frame(void)
             tooltip("coarseness of the derivative approximation\n\nfinite differences baybee");
             igSliderFloat("Step Size", &StepSize, 1.0e-8f, 0.1f, "%g", 1.0f);
             tooltip("how fast to change parameters. large values can be erratic");
-            // igSliderFloat("MDecay", &MDecay, 0.0f, 1.0f - 1e-3f, "%g", 0.5f);
-            // igSliderFloat("VDecay", &VDecay, 0.0f, 1.0f - 1e-5f, "%g", 0.5f);
             igSliderInt("Sample Batch Size", &SampleBatchSize, 1, state.opt.n_samples, "%d");
             tooltip("random sample of n files for each step");
             igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, state.opt.n_params, "%d");
@@ -1678,7 +1678,6 @@ void frame(void)
             tooltip("0 = train only on skillset\n1 = train only on overall");
             igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", 1.0f);
             tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
-            // igSliderFloat("Scale", &Scale, 0.1f, 20.0f, "%f", 1.0f);
             igSliderFloat("Exp Scale", &UnLogScale, 0.0f, 1.0f, "%f", 1.0f);
             tooltip("weights higher MSDs heavier automatically");
             igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
