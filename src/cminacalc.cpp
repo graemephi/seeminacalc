@@ -36,9 +36,72 @@ T clamp(T t, T a, T b)
 
 #include "calcconstants.h"
 
-// Note on updating the calc: grep for "Stupud hack"
+// Changes made to the calc source:
+//   - some constexpr globals changed to thread_local
+//   - flat params pointer added to MinaCalc and distributed to ulbu by calling stupud_hack
+//   - float literals are marked up with macros to make them accessible at runtime
 #include "Etterna/MinaCalc/MinaCalc.h"
+#include "Etterna/MinaCalc/Ulbu.h"
+static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor);
 #include "Etterna/MinaCalc/MinaCalc.cpp"
+
+using ParamJunk = std::vector<std::pair<std::string,float*>>;
+thread_local ParamJunk BaseScalers {
+	// Overall not included
+    { "Stream", (float *)(&basescalers[1]) },
+    { "Jumpstream", (float *)&basescalers[2] },
+    { "Handstream", (float *)&basescalers[3] },
+    { "Stamina", (float *)&basescalers[4] },
+    { "Jackspeed", (float *)&basescalers[5] },
+    { "Chordjacks", (float *)&basescalers[6] },
+    { "Technical", (float *)&basescalers[7] },
+};
+
+thread_local ParamJunk ManualConstants {
+    { "MinaCalc.magic_num", &magic_num },
+    { "MinaCalc.tech_pbm", &tech_pbm },
+    { "MinaCalc.jack_pbm", &jack_pbm },
+    { "MinaCalc.stream_pbm", &stream_pbm },
+    { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
+    { "SequencingHelpers.finalscaler", &finalscaler },
+    { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
+	{ "CJOHASequencing.chain_slowdown_scale_threshold ", &chain_slowdown_scale_threshold },
+    { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
+    { "GenericSequencing.anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
+    { "GenericSequencing.jack_spacing_buffer_ms", &jack_spacing_buffer_ms },
+    { "GenericSequencing.jack_speed_increase_cutoff_factor", &jack_speed_increase_cutoff_factor },
+	{ "GenericSequencing.guaranteed_reset_buffer_ms", &guaranteed_reset_buffer_ms },
+    { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
+};
+
+static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
+{
+    for (const auto &p : ulbu->_s._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_js._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_hs._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_cj._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_cjd._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_hsd._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_ohj._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_cjohj._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_roll._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_bal._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_oht._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_voht._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_ch._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_chain._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_rm._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_wrb._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_wrr._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_wrjt._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_wra._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_fj._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_tt._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_tt2._params) *p.second = *mod_cursor++;
+	for (const auto &p : BaseScalers) *p.second = *mod_cursor++;
+	for (const auto &p : ManualConstants) *p.second = *mod_cursor++;
+	for (const auto &p : MinaCalcConstants) *p.second = *mod_cursor++;
+}
 
 #include "common.h"
 #include "cminacalc.h"

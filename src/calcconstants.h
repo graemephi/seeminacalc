@@ -520,20 +520,6 @@ extern "C" struct {
 static void add_constant_info(int id,  char const *file, int line, float value, ConstantType type)
 {
     assert(id < sizeof(constant_info)/sizeof(constant_info[0]));
-    bool is_minacalc_cpp = strstr(file, "MinaCalc.cpp") != 0;
-
-    // Pretend stupud hack doesn't exist
-    if (is_minacalc_cpp) {
-        // these are line numbers
-        int start_stupud_hack = 498;
-        int end_stupud_hack = 527;
-        if (line > start_stupud_hack) {
-            line -= (end_stupud_hack - start_stupud_hack);
-        }
-        int start_global_constants = 17;
-        int end_global_constants = 56;
-        line -= (end_global_constants - start_global_constants);
-    }
 
     if (constant_info[id].file == 0) {
         int file_id = 9377747;

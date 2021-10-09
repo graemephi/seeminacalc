@@ -14,45 +14,6 @@ using std::max;
 using std::min;
 using std::pow;
 
-/* pbm = point buffer multiplier, or basically starting with a max points some
- * degree above the actual max points as a cheap hack to water down some of the
- * absurd scaling hs/js/cj had. Note: do not set these values below 1 */
-thread_local float tech_pbm = 1.F;
-thread_local float jack_pbm = 1.0175F;
-thread_local float stream_pbm = 1.01F;
-thread_local float bad_newbie_skillsets_pbm = 1.05F;
-
-thread_local float magic_num = 16.F;
-
-using ParamJunk = std::vector<std::pair<std::string,float*>>;
-thread_local ParamJunk BaseScalers {
-	// Overall not included
-    { "Stream", (float *)(&basescalers[1]) },
-    { "Jumpstream", (float *)&basescalers[2] },
-    { "Handstream", (float *)&basescalers[3] },
-    { "Stamina", (float *)&basescalers[4] },
-    { "Jackspeed", (float *)&basescalers[5] },
-    { "Chordjacks", (float *)&basescalers[6] },
-    { "Technical", (float *)&basescalers[7] },
-};
-
-thread_local ParamJunk ManualConstants {
-    { "MinaCalc.magic_num", &magic_num },
-    { "MinaCalc.tech_pbm", &tech_pbm },
-    { "MinaCalc.jack_pbm", &jack_pbm },
-    { "MinaCalc.stream_pbm", &stream_pbm },
-    { "MinaCalc.bad_newbie_skillsets_pbm", &bad_newbie_skillsets_pbm },
-    { "SequencingHelpers.finalscaler", &finalscaler },
-    { "WideRangeJumptrillMod.wrjt_cv_factor", &wrjt_cv_factor },
-	{ "CJOHASequencing.chain_slowdown_scale_threshold ", &chain_slowdown_scale_threshold },
-    { "GenericSequencing.anchor_spacing_buffer_ms", &anchor_spacing_buffer_ms },
-    { "GenericSequencing.anchor_speed_increase_cutoff_factor", &anchor_speed_increase_cutoff_factor },
-    { "GenericSequencing.jack_spacing_buffer_ms", &jack_spacing_buffer_ms },
-    { "GenericSequencing.jack_speed_increase_cutoff_factor", &jack_speed_increase_cutoff_factor },
-	{ "GenericSequencing.guaranteed_reset_buffer_ms", &guaranteed_reset_buffer_ms },
-    { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
-};
-
 static const std::array<std::pair<unsigned, std::string_view>, 16>
   note_mapping = { { { 0U, "----" },
 					 { 1U, "x---" },
@@ -360,7 +321,7 @@ JackStamAdjust(const float x, Calc& calc, const int hand)
 	return output;
 }
 
-//
+thread_local float magic_num = 12.F;
 
 [[nodiscard]] inline auto
 jack_pointloser_func(const float& x, const float& y) -> float
@@ -493,36 +454,7 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	// ulbu calculates everything needed for the block below
 	// (mostly patternmods)
 	thread_local TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(
-	  *this);
-
-	// Stupud hack
-	float *mod_cursor = mod_params + 1;
-
-    for (const auto &p : ulbu_that_which_consumes_all._s._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._js._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._hs._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._cj._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._cjd._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._hsd._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._ohj._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._cjohj._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._roll._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._bal._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._oht._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._voht._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._ch._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._chain._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._rm._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._wrb._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._wrr._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._wrjt._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._wra._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._fj._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._tt._params) *p.second = *mod_cursor++;
-    for (const auto &p : ulbu_that_which_consumes_all._tt2._params) *p.second = *mod_cursor++;
-	for (const auto &p : BaseScalers) *p.second = *mod_cursor++;
-	for (const auto &p : ManualConstants) *p.second = *mod_cursor++;
-	for (const auto &p : MinaCalcConstants) *p.second = *mod_cursor++;
+	  *this); stupud_hack(&ulbu_that_which_consumes_all, mod_params + 1);
 
 	// if debug, force params to load
 	if (debugmode || loadparams)
@@ -578,13 +510,13 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	return false;
 }
 
-//
-//
-//
-//
-//
-//
-//
+/* pbm = point buffer multiplier, or basically starting with a max points some
+ * degree above the actual max points as a cheap hack to water down some of the
+ * absurd scaling hs/js/cj had. Note: do not set these values below 1 */
+thread_local float tech_pbm = 1.F;
+thread_local float jack_pbm = 1.0175F;
+thread_local float stream_pbm = 1.01F;
+thread_local float bad_newbie_skillsets_pbm = 1.05F;
 
 // each skillset should just be a separate calc function [todo]
 auto
