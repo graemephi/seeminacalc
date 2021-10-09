@@ -1,3 +1,6 @@
+#if defined(SOKOL_IMPL) && !defined(SOKOL_FETCH_IMPL)
+#define SOKOL_FETCH_IMPL
+#endif
 #ifndef SOKOL_FETCH_INCLUDED
 /*
     sokol_fetch.h -- asynchronous data loading/streaming
@@ -5,7 +8,8 @@
     Project URL: https://github.com/floooh/sokol
 
     Do this:
-        #define SOKOL_IMPL
+        #define SOKOL_IMPL or
+        #define SOKOL_FETCH_IMPL
     before you include this file in *one* C or C++ file to create the
     implementation.
 
@@ -16,7 +20,8 @@
     SOKOL_FREE(p)               - your own free function (default: free(p))
     SOKOL_LOG(msg)              - your own logging function (default: puts(msg))
     SOKOL_UNREACHABLE()         - a guard macro for unreachable code (default: assert(false))
-    SOKOL_API_DECL              - public function declaration prefix (default: extern)
+    SOKOL_FETCH_API_DECL        - public function declaration prefix (default: extern)
+    SOKOL_API_DECL              - same as SOKOL_FETCH_API_DECL
     SOKOL_API_IMPL              - public function implementation prefix (default: -)
     SFETCH_MAX_PATH             - max length of UTF-8 filesystem path / URL (default: 1024 bytes)
     SFETCH_MAX_USERDATA_UINT64  - max size of embedded userdata in number of uint64_t, userdata
@@ -29,7 +34,7 @@
 
     SOKOL_DLL
 
-    On Windows, SOKOL_DLL will define SOKOL_API_DECL as __declspec(dllexport)
+    On Windows, SOKOL_DLL will define SOKOL_FETCH_API_DECL as __declspec(dllexport)
     or __declspec(dllimport) as needed.
 
     NOTE: The following documentation talks a lot about "IO threads". Actual
@@ -113,9 +118,15 @@
             }
         }
 
-    (4) finally, call sfetch_shutdown() at the end of the application:
+    (4) pump the sokol-fetch message queues, and invoke response callbacks
+        by calling:
 
-        sfetch_shutdown()
+        sfetch_dowork(); 
+
+        In an event-driven app this should be called in the event loop. If you
+        use sokol-app this would be in your frame_cb function.
+
+    (5) finally, call sfetch_shutdown() at the end of the application:
 
     There's many other loading-scenarios, for instance one doesn't have to
     provide a buffer upfront, this can also happen in the response callback.
@@ -829,13 +840,16 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifndef SOKOL_API_DECL
-#if defined(_WIN32) && defined(SOKOL_DLL) && defined(SOKOL_IMPL)
-#define SOKOL_API_DECL __declspec(dllexport)
+#if defined(SOKOL_API_DECL) && !defined(SOKOL_FETCH_API_DECL)
+#define SOKOL_FETCH_API_DECL SOKOL_API_DECL
+#endif
+#ifndef SOKOL_FETCH_API_DECL
+#if defined(_WIN32) && defined(SOKOL_DLL) && defined(SOKOL_FETCH_IMPL)
+#define SOKOL_FETCH_API_DECL __declspec(dllexport)
 #elif defined(_WIN32) && defined(SOKOL_DLL)
-#define SOKOL_API_DECL __declspec(dllimport)
+#define SOKOL_FETCH_API_DECL __declspec(dllimport)
 #else
-#define SOKOL_API_DECL extern
+#define SOKOL_FETCH_API_DECL extern
 #endif
 #endif
 
@@ -856,7 +870,7 @@ typedef struct sfetch_desc_t {
 typedef struct sfetch_handle_t { uint32_t id; } sfetch_handle_t;
 
 /* error codes */
-typedef enum {
+typedef enum sfetch_error_t {
     SFETCH_ERROR_NO_ERROR,
     SFETCH_ERROR_FILE_NOT_FOUND,
     SFETCH_ERROR_NO_BUFFER,
@@ -904,35 +918,35 @@ typedef struct sfetch_request_t {
 } sfetch_request_t;
 
 /* setup sokol-fetch (can be called on multiple threads) */
-SOKOL_API_DECL void sfetch_setup(const sfetch_desc_t* desc);
+SOKOL_FETCH_API_DECL void sfetch_setup(const sfetch_desc_t* desc);
 /* discard a sokol-fetch context */
-SOKOL_API_DECL void sfetch_shutdown(void);
+SOKOL_FETCH_API_DECL void sfetch_shutdown(void);
 /* return true if sokol-fetch has been setup */
-SOKOL_API_DECL bool sfetch_valid(void);
+SOKOL_FETCH_API_DECL bool sfetch_valid(void);
 /* get the desc struct that was passed to sfetch_setup() */
-SOKOL_API_DECL sfetch_desc_t sfetch_desc(void);
+SOKOL_FETCH_API_DECL sfetch_desc_t sfetch_desc(void);
 /* return the max userdata size in number of bytes (SFETCH_MAX_USERDATA_UINT64 * sizeof(uint64_t)) */
-SOKOL_API_DECL int sfetch_max_userdata_bytes(void);
+SOKOL_FETCH_API_DECL int sfetch_max_userdata_bytes(void);
 /* return the value of the SFETCH_MAX_PATH implementation config value */
-SOKOL_API_DECL int sfetch_max_path(void);
+SOKOL_FETCH_API_DECL int sfetch_max_path(void);
 
 /* send a fetch-request, get handle to request back */
-SOKOL_API_DECL sfetch_handle_t sfetch_send(const sfetch_request_t* request);
+SOKOL_FETCH_API_DECL sfetch_handle_t sfetch_send(const sfetch_request_t* request);
 /* return true if a handle is valid *and* the request is alive */
-SOKOL_API_DECL bool sfetch_handle_valid(sfetch_handle_t h);
+SOKOL_FETCH_API_DECL bool sfetch_handle_valid(sfetch_handle_t h);
 /* do per-frame work, moves requests into and out of IO threads, and invokes response-callbacks */
-SOKOL_API_DECL void sfetch_dowork(void);
+SOKOL_FETCH_API_DECL void sfetch_dowork(void);
 
 /* bind a data buffer to a request (request must not currently have a buffer bound, must be called from response callback */
-SOKOL_API_DECL void sfetch_bind_buffer(sfetch_handle_t h, void* buffer_ptr, uint32_t buffer_size);
+SOKOL_FETCH_API_DECL void sfetch_bind_buffer(sfetch_handle_t h, void* buffer_ptr, uint32_t buffer_size);
 /* clear the 'buffer binding' of a request, returns previous buffer pointer (can be 0), must be called from response callback */
-SOKOL_API_DECL void* sfetch_unbind_buffer(sfetch_handle_t h);
+SOKOL_FETCH_API_DECL void* sfetch_unbind_buffer(sfetch_handle_t h);
 /* cancel a request that's in flight (will call response callback with .cancelled + .finished) */
-SOKOL_API_DECL void sfetch_cancel(sfetch_handle_t h);
+SOKOL_FETCH_API_DECL void sfetch_cancel(sfetch_handle_t h);
 /* pause a request (will call response callback each frame with .paused) */
-SOKOL_API_DECL void sfetch_pause(sfetch_handle_t h);
+SOKOL_FETCH_API_DECL void sfetch_pause(sfetch_handle_t h);
 /* continue a paused request */
-SOKOL_API_DECL void sfetch_continue(sfetch_handle_t h);
+SOKOL_FETCH_API_DECL void sfetch_continue(sfetch_handle_t h);
 
 #ifdef __cplusplus
 } /* extern "C" */
@@ -945,7 +959,7 @@ inline sfetch_handle_t sfetch_send(const sfetch_request_t& request) { return sfe
 #endif // SOKOL_FETCH_INCLUDED
 
 /*--- IMPLEMENTATION ---------------------------------------------------------*/
-#ifdef SOKOL_IMPL
+#ifdef SOKOL_FETCH_IMPL
 #define SOKOL_FETCH_IMPL_INCLUDED (1)
 #include <string.h> /* memset, memcpy */
 
@@ -1467,7 +1481,7 @@ _SOKOL_PRIVATE uint32_t _sfetch_file_size(_sfetch_file_handle_t h) {
 }
 
 _SOKOL_PRIVATE bool _sfetch_file_read(_sfetch_file_handle_t h, uint32_t offset, uint32_t num_bytes, void* ptr) {
-    fseek(h, offset, SEEK_SET);
+    fseek(h, (long)offset, SEEK_SET);
     return num_bytes == fread(ptr, 1, num_bytes, h);
 }
 
@@ -1607,8 +1621,8 @@ _SOKOL_PRIVATE void _sfetch_thread_dequeue_outgoing(_sfetch_thread_t* thread, _s
 #if _SFETCH_PLATFORM_WINDOWS
 _SOKOL_PRIVATE bool _sfetch_win32_utf8_to_wide(const char* src, wchar_t* dst, int dst_num_bytes) {
     SOKOL_ASSERT(src && dst && (dst_num_bytes > 1));
-    memset(dst, 0, dst_num_bytes);
-    const int dst_chars = dst_num_bytes / sizeof(wchar_t);
+    memset(dst, 0, (size_t)dst_num_bytes);
+    const int dst_chars = dst_num_bytes / (int)sizeof(wchar_t);
     const int dst_needed = MultiByteToWideChar(CP_UTF8, 0, src, -1, 0, 0);
     if ((dst_needed > 0) && (dst_needed < dst_chars)) {
         MultiByteToWideChar(CP_UTF8, 0, src, -1, dst, dst_chars);
@@ -1927,14 +1941,14 @@ EM_JS(void, sfetch_js_send_head_request, (uint32_t slot_id, const char* path_cst
 });
 
 /* if bytes_to_read != 0, a range-request will be sent, otherwise a normal request */
-EM_JS(void, sfetch_js_send_get_request, (uint32_t slot_id, const char* path_cstr, int offset, int bytes_to_read, void* buf_ptr, int buf_size), {
+EM_JS(void, sfetch_js_send_get_request, (uint32_t slot_id, const char* path_cstr, uint32_t offset, uint32_t bytes_to_read, void* buf_ptr, uint32_t buf_size), {
     var path_str = UTF8ToString(path_cstr);
     var req = new XMLHttpRequest();
     req.open('GET', path_str);
     req.responseType = 'arraybuffer';
     var need_range_request = (bytes_to_read > 0);
     if (need_range_request) {
-        req.setRequestHeader('Range', 'bytes='+offset+'-'+(offset+bytes_to_read));
+        req.setRequestHeader('Range', 'bytes='+offset+'-'+(offset+bytes_to_read-1));
     }
     req.onreadystatechange = function() {
         if (this.readyState == this.DONE) {
@@ -2505,5 +2519,5 @@ SOKOL_API_IMPL void sfetch_cancel(sfetch_handle_t h) {
     }
 }
 
-#endif /* SOKOL_IMPL */
+#endif /* SOKOL_FETCH_IMPL */
 

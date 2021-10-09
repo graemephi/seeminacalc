@@ -1089,7 +1089,7 @@ void init(void)
     state = (State) {
         .pass_action = {
             .colors[0] = {
-                .action = SG_ACTION_CLEAR, .val = { 0.0f, 0.0f, 0.0f, 1.0f }
+                .action = SG_ACTION_CLEAR, .value = { 0.0f, 0.0f, 0.0f, 1.0f }
             }
         }
     };
@@ -1119,8 +1119,8 @@ void init(void)
         img_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
         img_desc.min_filter = SG_FILTER_LINEAR;
         img_desc.mag_filter = SG_FILTER_LINEAR;
-        img_desc.content.subimage[0][0].ptr = font_pixels;
-        img_desc.content.subimage[0][0].size = font_width * font_height * sizeof(uint32_t);
+        img_desc.data.subimage[0][0].ptr = font_pixels;
+        img_desc.data.subimage[0][0].size = font_width * font_height * sizeof(uint32_t);
         img_desc.label = "sokol-imgui-font";
         _simgui.img = sg_make_image(&img_desc);
         io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
