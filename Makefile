@@ -16,8 +16,9 @@ EMCCFlags += -DSOKOL_GLES3
 EMCCFlags += -s ENVIRONMENT=web,worker
 EMCCFlags += -O3
 EMCCFlags += -s "EXPORTED_FUNCTIONS=['_main', '_set_font', '_open_file', '_calloc']"
-EMCCFlags += -s "EXTRA_EXPORTED_RUNTIME_METHODS=['ccall']"
+EMCCFlags += -s "EXPORTED_RUNTIME_METHODS=['ccall']"
 EMCCFlags += -s USE_PTHREADS=1
+EMCCFlags += -s PTHREAD_POOL_SIZE=navigator.hardwareConcurrency
 
 Includes = -Ilib -Ietterna
 

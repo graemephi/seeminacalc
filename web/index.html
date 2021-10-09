@@ -4,10 +4,6 @@
         <meta charset="utf-8">
         <meta content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no" name="viewport">
         <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-eval' 'unsafe-inline'; worker-src 'self';">
-        <link rel="preload" href="NotoSansCJKjp-Regular.otf" as="fetch" crossorigin="anonymous">
-        <link rel="preload" href="seeminacalc.nosse.js" as="script">
-        <link rel="prefetch" href="seeminacalc.nosse.worker.js" as="worker">
-        <link rel="preload" href="seeminacalc.nosse.wasm" as="fetch">
         <title>SeeMinaCalc</title>
         <style>
             body {
@@ -131,7 +127,6 @@
                 })
             }
 
-            let font = fetch('NotoSansCJKjp-Regular.otf').then(res => res.arrayBuffer());
             testSSE().then(isSSEAvailable => {
                 let js = document.createElement("script");
                 js.async = true;
@@ -141,25 +136,10 @@
             });
 
             var Module = {
-                preRun: [],
-                postRun: [() => {
-                    var buf = 0;
-                    font.then(data => {
-                        let bytes = new Uint8Array(data);
-                        buf = Module._calloc(bytes.length + 1, 1);
-                        Module.HEAPU8.set(bytes, buf);
-                        Module.ccall('set_font', null, ['number', 'number'], [buf, bytes.length]);
-                    }).catch(err => {
-                        console.error(err);
-                    }).then(_ => {
-                        callMain();
-                    });
-                }],
                 print: (...args) => console.log(...args),
                 printErr: (...args) => console.error(...args),
                 canvas: document.getElementById("canvas"),
-                setStatus: (...args) => console.log("status:", ...args),
-                noInitialRun: true,
+                setStatus: (...args) => console.log("status:", ...args)
             };
         </script>
     </body>

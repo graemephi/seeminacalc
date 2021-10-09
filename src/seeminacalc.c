@@ -57,13 +57,17 @@ void set_font(char *buf, int len)
 Buffer load_font_file(char *path)
 {
     (void)path;
-    Buffer result = (Buffer) {
-        .buf = alloc(u8, font_data.len),
-        .len = font_data.len,
-        .cap = font_data.len
-    };
-    memcpy(result.buf, font_data.buf, font_data.len);
-    free(font_data.buf);
+
+    Buffer result = {0};
+    if (font_data.buf) {
+        result = (Buffer) {
+            .buf = alloc(u8, font_data.len),
+            .len = font_data.len,
+            .cap = font_data.len
+        };
+        memcpy(result.buf, font_data.buf, font_data.len);
+        free(font_data.buf);
+    }
     return result;
 }
 
