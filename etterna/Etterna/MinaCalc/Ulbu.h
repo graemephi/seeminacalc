@@ -113,14 +113,14 @@ struct TheGreatBazoinkazoinkInTheSky
 
 	explicit TheGreatBazoinkazoinkInTheSky(Calc& calc)
 	  : _calc(calc)
-	{		
+	{
 		// setup our data pointers
 		_last_mri = std::make_unique<metaRowInfo>();
 		_mri = std::make_unique<metaRowInfo>();
 		_last_mhi = std::make_unique<metaHandInfo>();
 		_mhi = std::make_unique<metaHandInfo>();
 	}
-	
+
 	void operator()()
 	{
 		hand = 0;
@@ -335,7 +335,7 @@ struct TheGreatBazoinkazoinkInTheSky
 									 const float& row_time)
 	{
 		auto thing =
-		  std::pair{ row_time,
+		  std::pair<float,float>{ row_time,
 					 ms_to_scaled_nps(_seq._as.get_lowest_jack_ms()) *
 					   basescalers[Skill_JackSpeed] };
 		if (std::isnan(thing.second)) {
