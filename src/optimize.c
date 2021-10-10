@@ -4,7 +4,7 @@ static f32 MDecay = 0.9f;
 static f32 VDecay = 0.999f;
 static i32 SampleBatchSize = 16;
 static i32 ParameterBatchSize = 16;
-static f32 NegativeEpsilon = 1.0f;
+static f32 NegativeEpsilon = 0.0f;
 static f32 Regularisation = 0.01f;
 static f32 RegularisationAlpha = 0.15f;
 
@@ -77,6 +77,20 @@ typedef struct {
 
 f32 loss(f32 delta, f32 barrier)
 {
+    // The complicated loss function is from before regularisation was added
+    // which was more effective keeping the optimizer away from 'obviously' bad
+    // solutions than these. So, disabled them.
+    //
+    // NegativeEpsilon adds a flat region to the base of the loss curve, on the
+    // negative side of the origin. I think this is not a good idea, it will let
+    // losses cluster at the edges rather than push them as high in the flat
+    // region as possible. Also, it's not obvious what scale it is on.
+    //
+    // Barrier, for postiive x, switches from x^2 to x^barrier loss at the point
+    // their derivatives are equal. So, as far as I can tell, this should be
+    // well behaved for the optimizer. But it's hard to reason about so yeeting
+    // it.
+#if 0
     f32 x = delta;
     f32 a = barrier;
     if (x < -NegativeEpsilon) {
@@ -88,6 +102,9 @@ f32 loss(f32 delta, f32 barrier)
     } else {
         return (2.0f / a) * (powf(x, a) - 1.0f) + 1.0f;
     }
+#else
+    return delta*delta;
+#endif
 }
 
 OptimizationContext optimize(i32 n_params, f32 *initial_x, i32 n_samples)

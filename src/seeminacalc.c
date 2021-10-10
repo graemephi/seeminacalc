@@ -740,38 +740,6 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
             type = ParamSlider_ValueChanged;
             value = state.ps.params[mp];
         }
-
-#if 0
-        igSameLine(0, 4);
-        f32 speed = (state.ps.max[mp] - state.ps.min[mp]) / 100.f;
-        // min/max bounds
-        b32 changed = false;
-        b32 reset = false;
-        igSetNextItemWidth(igGetFontSize() * 4.0f);
-        if (igDragFloatRange2("##range",  &state.ps.min[mp], &state.ps.max[mp], speed, -100.0f, 100.0f, "%.1f", "%.1f", 1.0f)) {
-            changed = true;
-        }
-        tooltip("min/max override (the defaults are guesses)");
-        if (ItemDoubleClicked(0)) {
-            reset = true;
-        }
-        if (changed || reset) {
-            ImVec2 l, u;
-            igGetItemRectMin(&l);
-            igGetItemRectMax(&u);
-            u.x = l.x + (u.x - l.x) * 0.5f;
-            b32 left = igIsMouseHoveringRect(l, u, true);
-            if (left) {
-                state.ps.min[mp] = reset ? state.info.defaults.min[mp] : state.ps.min[mp];
-                type = ParamSlider_LowerBoundChanged;
-                value = state.ps.min[mp];
-            } else {
-                state.ps.max[mp] = reset ? state.info.defaults.max[mp] : state.ps.max[mp];
-                type = ParamSlider_UpperBoundChanged;
-                value = state.ps.max[mp];
-            }
-        }
-#endif
     }
     igPopID();
     if (out && type != ParamSlider_Nothing) {
@@ -891,6 +859,9 @@ static f32 SkillsetOverallBalance = 0.35f;
 static f32 ExpScale = 0.5f;
 static f32 Scale = 1.0f;
 static f32 Misclass = 1.0f;
+#if 0
+static f32 UnderratedDeadZone = 0.5f;
+#endif
 void setup_optimizer(void)
 {
     f32 *normalization_factors = 0;
@@ -898,8 +869,6 @@ void setup_optimizer(void)
     push_allocator(scratch);
     buf_pushn(initial_x, state.ps.num_params);
     pop_allocator();
-
-    NegativeEpsilon = 0.5f / state.target.msd_sd;
 
     buf_pushn(normalization_factors, state.ps.num_params);
     buf_pushn(state.opt_cfg.enabled, state.ps.num_params);
@@ -938,7 +907,7 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.jack_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.stream_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.bad_newbie_skillsets_pbm"))].low = 1.0f;
-#if DUMP_CONSTANTS == 0 // almost always
+#if DUMP_CONSTANTS == 0
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(81)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(89)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(76, 2)"))].low = 0.1f;
@@ -1661,8 +1630,11 @@ void frame(void)
             tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
             igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", 1.0f);
             tooltip("weights higher MSDs heavier automatically");
+#if 0
             igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
             tooltip("be more accepting of files that come under their target ssr than over");
+            NegativeEpsilon = UnderratedDeadZone / state.target.msd_sd;
+#endif
             igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", 2.f);
             tooltip("penalise moving parameters very far away from the defaults");
             igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", 1.0f);
@@ -1686,10 +1658,12 @@ void frame(void)
             }
         }
         igEndChild();
+
+#if 0
         for (isize i = 1; i < NumSkillsets; i++) {
             igPushIDInt((i32)i);
             igText("%s Bias", SkillsetNames[i]);
-            tooltip("+ offsets the target MSD for this skillset\n* multiplies\n^ sharpens the squared loss for positive error\n%% sets the target wife%%");
+            tooltip("+ offsets the target MSD for this skillset\n* multiplies\n%% sets the target wife%%");
             igSameLine(0, 4);
             igSetCursorPosX(116.f);
             igTextUnformatted("+", 0);
@@ -1701,12 +1675,10 @@ void frame(void)
             igSliderFloat("^##*", &state.opt_cfg.bias[i].mul, 0.1f, 5.0f, "%f", 1.0f);
             igSameLine(0, 4);
             igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
-            igSliderFloat("%##^", &state.opt_cfg.barriers[i], 2.0f, 8.0f, "%f", 1.0f);
-            igSameLine(0, 4);
-            igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
             igSliderFloat("##%", &state.opt_cfg.goals[i], 0.9f, 0.965f, "%f", 1.0f);
             igPopID();
         }
+#endif
 
         igEnd();
     }
