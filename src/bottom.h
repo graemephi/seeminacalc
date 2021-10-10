@@ -2,6 +2,7 @@
 // seeminacalc.c to see where the good stuff is.
 
 #include <float.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -509,6 +510,7 @@ f32 rngf(void)
     return (f32)a / (f32)(1 << 23);
 }
 
+#if !defined(__EMSCRIPTEN__)
 Buffer read_file(const char *path)
 {
     Buffer result = {0};
@@ -550,11 +552,76 @@ bail:
     return result;
 }
 
-void write_file(const char *path, u8 *buf)
+Buffer read_file_malloc(const char *path)
+{
+    Buffer result = {0};
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        goto bail;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long filesize = ftell(f);
+    rewind(f);
+
+    result = (Buffer) {
+        calloc(sizeof(u8), filesize + 1),
+        filesize + 1,
+        filesize + 1
+    };
+
+    if (!result.buf) {
+        goto bail;
+    }
+
+    usize read = fread(result.buf, 1, filesize, f);
+
+    if (read != filesize) {
+        goto bail;
+    }
+
+    fclose(f);
+
+    result.buf[read] = 0;
+    return result;
+
+bail:
+    if (f) {
+        fclose(f);
+    }
+    if (result.buf) {
+        free(result.buf);
+    }
+    result = (Buffer) {0};
+    return result;
+}
+
+void write_file(const char *path, u8 buf[])
 {
     FILE *f = fopen(path, "wb");
     if (f) {
         fwrite(buf, 1, buf_len(buf), f);
         fclose(f);
     }
+}
+
+#else // ^^^^ !defined(__EMSCRIPTEN__)
+Buffer read_file(const char *path) { return (Buffer) {}; }
+Buffer read_file_malloc(const char *path) { return (Buffer) {}; }
+void write_file(const char *path, u8 buf[]) {}
+#endif
+
+b32 buffer_begins_with(Buffer *buffer, String s)
+{
+    return memcmp(buffer->buf, s.buf, mins(buffer->len, s.len)) == 0;
+}
+
+u8 buffer_first_nonwhitespace_char(Buffer *buffer)
+{
+    for (isize i = 0; i < buffer->len; i++) {
+        if (isspace(buffer->buf[i]) == false) {
+            return buffer->buf[i];
+        }
+    }
+    return 0;
 }

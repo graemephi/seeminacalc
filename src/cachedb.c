@@ -1,5 +1,5 @@
 #ifdef __clang__
-// for libs only
+// Disabling these warnings is for libraries only.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdouble-promotion"
 #pragma clang diagnostic ignored "-Wstrict-prototypes"
@@ -12,9 +12,15 @@
 
 #define SQLITE3
 #include "sqlite3.h"
+#include "cachedb_vfs.c"
 
 #ifdef __clang__
 #pragma clang diagnostic pop
+#endif
+
+#if defined(__EMSCRIPTEN__)
+// One weird trick to avoid sqlite pulling in the emscripten FS library
+void utimes(void *a, int b) {}
 #endif
 
 typedef struct CacheDB
@@ -50,27 +56,28 @@ typedef struct TargetFile
     Buffer note_data;
 } TargetFile;
 
-b32 db_init(const char *path)
+b32 db_init(Buffer db)
 {
+    cachedb_vfs_register(db.buf, db.len);
     i32 result = true;
-    int rc = sqlite3_open_v2(path, &cache_db.db, SQLITE_OPEN_READONLY, 0);
+    int rc = sqlite3_open_v2("vfs db", &cache_db.db, SQLITE_OPEN_READONLY, 0);
     if (rc) {
         goto err;
     }
 
-    char note_query[] = "select serializednotedata from steps where chartkey=?;";
+    static const char note_query[] = "select serializednotedata from steps where chartkey=?;";
     rc = sqlite3_prepare_v2(cache_db.db, note_query, sizeof(note_query), &cache_db.note_data_stmt, 0);
     if (rc) {
         goto err;
     }
 
-    char file_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where chartkey=?;";
+    static const char file_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where chartkey=?;";
     rc = sqlite3_prepare_v2(cache_db.db, file_query, sizeof(file_query), &cache_db.file_stmt, 0);
     if (rc) {
         goto err;
     }
 
-    char all_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where steps.stepstype=\"dance-single\"";
+    static const char all_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where steps.stepstype=\"dance-single\"";
     rc = sqlite3_prepare_v2(cache_db.db, all_query, sizeof(all_query), &cache_db.all_stmt, 0);
     if (rc) {
         goto err;
@@ -84,6 +91,11 @@ err:
     cache_db = (CacheDB) {0};
     result = false;
     return result;
+}
+
+b32 db_ready(void)
+{
+    return cache_db.db != 0;
 }
 
 Buffer db_get_steps(char *key)
@@ -334,23 +346,8 @@ String xml_attr(XML *x, String key)
     return result;
 }
 
-TargetFile *load_test_files(char const *db, char const *xml_path)
+TargetFile *load_test_files(Buffer xml_file)
 {
-    db_init(db);
-    Buffer xml_file = read_file(xml_path);
-
-    if (!cache_db.db) {
-        printf("Unable to load db (path: %s)\n", db);
-    }
-
-    if (xml_file.len == 0) {
-        printf("Unable to load test list (path: %s)\n", xml_path);
-    }
-
-    if (!cache_db.db || xml_file.len == 0) {
-        return 0;
-    }
-
     push_allocator(scratch);
     TargetFile *result = 0;
 

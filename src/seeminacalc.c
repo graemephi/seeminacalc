@@ -3,7 +3,7 @@
 #endif
 
 #ifdef __clang__
-// for libs only
+// Disabling these warnings is for libraries only.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdouble-promotion"
 #pragma clang diagnostic ignored "-Wstrict-prototypes"
@@ -38,63 +38,6 @@
 #include "optimize.c"
 
 #include "calcconstants.h"
-
-#ifdef __EMSCRIPTEN__
-static Buffer font_data = {0};
-
-// Must be called before main. In theory we can just fread off Emscripten's VFS
-// but it throws for me and I ain't looking into it, might as well just get the
-// size reduction from not using it instead
-void set_font(char *buf, int len)
-{
-    font_data = (Buffer) {
-        .buf = buf,
-        .len = len,
-        .cap = len
-    };
-}
-
-Buffer load_font_file(char *path)
-{
-    (void)path;
-
-    Buffer result = {0};
-    if (font_data.buf) {
-        result = (Buffer) {
-            .buf = alloc(u8, font_data.len),
-            .len = font_data.len,
-            .cap = font_data.len
-        };
-        memcpy(result.buf, font_data.buf, font_data.len);
-        free(font_data.buf);
-    }
-    return result;
-}
-
-void open_file(char *data, int len, b32 open_window)
-{
-    if (permanent_memory->end - permanent_memory->ptr < 4*1024*1024) {
-        printf("oom :(\n");
-        return;
-    }
-
-    Buffer buf = (Buffer) {
-        .buf = alloc(u8, len + 1),
-        .len = len,
-        .cap = len
-    };
-
-    memcpy(buf.buf, data, len);
-    i32 parse_and_add_sm(Buffer buf, b32 open_window);
-    parse_and_add_sm(buf, open_window);
-    free(data);
-}
-#else
-Buffer load_font_file(char *path)
-{
-    return read_file(path);
-}
-#endif
 
 typedef struct {
     u8 *name;
@@ -228,6 +171,8 @@ typedef struct State
 
     b8 debug_window;
     b8 loss_window;
+
+    Buffer *pending_files;
 } State;
 static State state = {0};
 
@@ -659,9 +604,9 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
 }
 
 // copy n paste
-i32 add_target_files(void)
+i32 add_target_files(Buffer xml_test_list)
 {
-    TargetFile *target_files = load_test_files(db_path, test_list_path);
+    TargetFile *target_files = load_test_files(xml_test_list);
 
     f32 target_m = 0.0f;
     f32 target_s = 0.0f;
@@ -1074,7 +1019,7 @@ void init(void)
     permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
 
     push_allocator(scratch);
-    Buffer font = load_font_file("web/NotoSansCJKjp-Regular.otf");
+    Buffer font = read_file("web/NotoSansCJKjp-Regular.otf");
     pop_allocator();
 
     sg_setup(&(sg_desc){
@@ -1194,19 +1139,51 @@ void init(void)
         }
     }
 
-#if !defined(EMSCRIPTEN)
-    add_target_files();
+    if (db_path) {
+        Buffer db = read_file_malloc(db_path);
+        if (db.buf) {
+            buf_push(state.pending_files, db);
+        }
+    }
+
+    if (test_list_path) {
+        Buffer list = read_file_malloc(test_list_path);
+        if (list.buf) {
+            buf_push(state.pending_files, list);
+        }
+    }
+
     setup_optimizer();
     checkpoint_default();
     checkpoint_latest();
     load_checkpoints_from_disk();
-#endif
 }
 
 void frame(void)
 {
     reset_scratch();
     finish_work();
+
+    while (buf_len(state.pending_files) > 0) {
+        Buffer b = buf_pop(state.pending_files);
+
+        if (buffer_begins_with(&b, S("SQLite format 3\0"))) {
+            // Assume sqlite database
+            db_init(b);
+            // Don't free, db_init takes ownership to avoid a potentially large double-copy
+        } else if (buffer_first_nonwhitespace_char(&b) == '<') {
+            // Assume CalcTestList.xml
+            if (db_ready()) {
+                add_target_files(b);
+            }
+            free(b.buf);
+        } else if ((buffer_first_nonwhitespace_char(&b) == '/') || (buffer_first_nonwhitespace_char(&b) == '#')) {
+            // Assume .sm
+            free(b.buf);
+        } else {
+            printf("Bad dropped file\n");
+        }
+    }
 
     i32 width = sapp_width();
     i32 height = sapp_height();
@@ -1878,12 +1855,43 @@ void cleanup(void)
     sg_shutdown();
 }
 
+#if defined(__EMSCRIPTEN__)
+static void emsc_load_callback(const sapp_html5_fetch_response *response) {
+    if (response->succeeded) {
+        buf_push(state.pending_files, (Buffer) {
+            .buf = response->buffer_ptr,
+            .len = response->fetched_size,
+            .cap = response->buffer_size
+        });
+    } else {
+        // todo
+    }
+}
+#endif
+
 void input(const sapp_event* event)
 {
     simgui_handle_event(event);
+    if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
+        int n = sapp_get_num_dropped_files();
+        for (int i = 0; i < n; i++) {
+#if defined(__EMSCRIPTEN__)
+            uint32_t size = sapp_html5_get_dropped_file_size(i);
+            sapp_html5_fetch_dropped_file(&(sapp_html5_fetch_request){
+                .dropped_file_index = i,
+                .callback = emsc_load_callback,
+                .buffer_ptr = malloc(size),
+                .buffer_size = size,
+            });
+#else
+            char const *path = sapp_get_dropped_file_path(i);
+            buf_push(state.pending_files, read_file_malloc(path));
+#endif
+        }
+    }
 }
 
-sapp_desc sokol_main(int argc, char* argv[])
+sapp_desc sokol_main(int argc, char **argv)
 {
     sargs_setup(&(sargs_desc){
         .argc = argc,
@@ -1902,6 +1910,10 @@ sapp_desc sokol_main(int argc, char* argv[])
         .height = 1080,
         .sample_count = 8,
         .window_title = "SeeMinaCalc",
-        .ios_keyboard_resizes_canvas = false
+        .ios_keyboard_resizes_canvas = false,
+        .enable_clipboard = true,
+        .enable_dragndrop = true,
+        .max_dropped_files = 128,
+        .icon.sokol_default = true,
     };
 }

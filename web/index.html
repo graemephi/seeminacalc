@@ -47,84 +47,13 @@
         <div id="gh">
             <a href="https://github.com/graemephi/seeminacalc" target="_blank">github</a>
         </div>
-        <canvas class="sokol" id="canvas" oncontextmenu="event.preventDefault();" ondrop="dropHandler(event);" ondragover="event.preventDefault();"></canvas>
+        <canvas class="sokol" id="canvas" oncontextmenu="event.preventDefault();"></canvas>
         <script>
             function testSSE() {
                 let simdfeaturetest = "AGFzbQEAAAABCAJgAABgAAF7AwMCAAEFBgEBgAKAAgcxBAZtZW1vcnkCABFfX3dhc21fY2FsbF9jdG9ycwAAAmZuAAELX2luaXRpYWxpemUAAAoPAgMAAQsJAEMAAAAA/RMLCwoBAEGADAsDoAZQ";
                 return WebAssembly.compile(Uint8Array.from(atob(simdfeaturetest), c => c.charCodeAt(0)))
                     .then(_ => true)
                     .catch(_ => false);
-            }
-
-            function getAsEntry(item) {
-                return item.getAsEntry ? item.getAsEntry() : item.webkitGetAsEntry();
-            }
-
-            function flattenArrayOfArrays(aoa) {
-                let result = [];
-                aoa.forEach(arr => result.push(...arr));
-                return result;
-            }
-
-            function readEntries(reader, acc, depth) {
-                // how do you design an api this bad
-                acc = acc ? acc : [];
-                depth = depth ? depth : 0;
-                return new Promise((resolve, reject) => {
-                    reader.readEntries(resolve, reject);
-                }).then(entries => {
-                    if (entries.length == 0) {
-                        return acc;
-                    }
-                    acc.push(...entries);
-                    return readEntries(reader, acc, depth);
-                }).then(entries => {
-                    // One degree of folder recursion only
-                    promises = [];
-                    for (let i = 0; i < entries.length; i++) {
-                        let entry = entries[i];
-                        if (entry.isFile) {
-                            promises.push(Promise.resolve([entry]));
-                        } else if (depth < 1) {
-                            promises.push(readEntries(entry.createReader(), [], 1));
-                        }
-                    }
-                    return Promise.all(promises);
-                }).then(flattenArrayOfArrays);
-            }
-
-            function dataTransferItemsToFlatFiles(dti) {
-                let promises = [];
-
-                for (let i = 0; i < dti.length; i++) {
-                    let entry = getAsEntry(dti[i]);
-                    promises.push(entry.isFile ? Promise.resolve([entry]) : readEntries(entry.createReader()));
-                }
-
-                return Promise.all(promises).then(flattenArrayOfArrays).then(items => {
-                    let yetMorePromises = items.map(item => new Promise((resolve, reject) => item.file(resolve, reject)));
-                    return Promise.all(yetMorePromises);
-                });
-            }
-
-
-            function dropHandler(event) {
-                event.preventDefault();
-
-                dataTransferItemsToFlatFiles(event.dataTransfer.items).then(files => {
-                    files.forEach(f => {
-                        if (files.length == 1 || f.name.endsWith('.sm')) {
-                            f.arrayBuffer().then(data => {
-                                let bytes = new Uint8Array(data);
-                                let buf = Module._calloc(bytes.length + 1, 1);
-                                Module.HEAPU8.set(bytes, buf);
-                                Module.ccall('open_file', null, ['number', 'number', 'number'], [buf, bytes.length, files.length == 1]);
-                            }).catch(err => {
-                                console.error(f.name, "made my parser crash :(");
-                            })
-                        }
-                    });
-                })
             }
 
             testSSE().then(isSSEAvailable => {
