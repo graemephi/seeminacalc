@@ -30,13 +30,6 @@ static int fsOpen(sqlite3_vfs*, const char *, sqlite3_file*, int , int *);
 static int fsDelete(sqlite3_vfs*, const char *zName, int syncDir);
 static int fsAccess(sqlite3_vfs*, const char *zName, int flags, int *);
 static int fsFullPathname(sqlite3_vfs*, const char *zName, int nOut,char *zOut);
-static void *fsDlOpen(sqlite3_vfs*, const char *zFilename);
-static void fsDlError(sqlite3_vfs*, int nByte, char *zErrMsg);
-static void (*fsDlSym(sqlite3_vfs*,void*, const char *zSymbol))(void);
-static void fsDlClose(sqlite3_vfs*, void*);
-static int fsRandomness(sqlite3_vfs*, int nByte, char *zOut);
-static int fsSleep(sqlite3_vfs*, int microseconds);
-static int fsCurrentTime(sqlite3_vfs*, double*);
 
 typedef struct fs_vfs_t fs_vfs_t;
 struct fs_vfs_t {
@@ -59,13 +52,13 @@ static fs_vfs_t fs_vfs = {
     fsDelete,                                   /* xDelete */
     fsAccess,                                   /* xAccess */
     fsFullPathname,                             /* xFullPathname */
-    fsDlOpen,                                   /* xDlOpen */
-    fsDlError,                                  /* xDlError */
-    fsDlSym,                                    /* xDlSym */
-    fsDlClose,                                  /* xDlClose */
-    fsRandomness,                               /* xRandomness */
-    fsSleep,                                    /* xSleep */
-    fsCurrentTime,                              /* xCurrentTime */
+    0,                                          /* xDlOpen */
+    0,                                          /* xDlError */
+    0,                                          /* xDlSym */
+    0,                                          /* xDlClose */
+    0,                                          /* xRandomness */
+    0,                                          /* xSleep */
+    0,                                          /* xCurrentTime */
     0                                           /* xCurrentTimeInt64 */
   },
   0,                                            /* pFileList */
@@ -258,55 +251,6 @@ static int fsFullPathname(
   char *zOut                    /* Output buffer */
 ){
   if (nOut > 8) memcpy(zOut, "vfs db", sizeof("vfs db"));
-  return SQLITE_OK;
-}
-
-/*
-** Open the dynamic library located at zPath and return a handle.
-*/
-static void *fsDlOpen(sqlite3_vfs *pVfs, const char *zPath){
-  return SQLITE_ERROR;
-}
-
-/*
-** Populate the buffer zErrMsg (size nByte bytes) with a human readable
-** utf-8 string describing the most recent error encountered associated
-** with dynamic libraries.
-*/
-static void fsDlError(sqlite3_vfs *pVfs, int nByte, char *zErrMsg){}
-
-/*
-** Return a pointer to the symbol zSymbol in the dynamic library pHandle.
-*/
-static void (*fsDlSym(sqlite3_vfs *pVfs, void *pH, const char *zSym))(void){}
-
-/*
-** Close the dynamic library handle pHandle.
-*/
-static void fsDlClose(sqlite3_vfs *pVfs, void *pHandle){}
-
-/*
-** Populate the buffer pointed to by zBufOut with nByte bytes of
-** random data.
-*/
-static int fsRandomness(sqlite3_vfs *pVfs, int nByte, char *zBufOut){
-  sqlite3_vfs *pParent = ((fs_vfs_t *)pVfs)->pParent;
-  return pParent->xRandomness(pParent, nByte, zBufOut);
-}
-
-/*
-** Sleep for nMicro microseconds. Return the number of microseconds
-** actually slept.
-*/
-static int fsSleep(sqlite3_vfs *pVfs, int nMicro){
-  return SQLITE_OK;
-}
-
-/*
-** Return the current time as a Julian Day number in *pTimeOut.
-*/
-static int fsCurrentTime(sqlite3_vfs *pVfs, double *pTimeOut){
-  if (pTimeOut) *pTimeOut = 0;
   return SQLITE_OK;
 }
 
