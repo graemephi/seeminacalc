@@ -78,6 +78,10 @@ b32 xml_open(XML *x, String tag)
 {
     if (x->ok) {
         do {
+            if (buf_len(x->stack) >= 32) {
+                x->ok = false;
+                return false;
+            }
             if (buf_len(x->stack) >= 0 && x->ptr[1] == '/' && strings_are_equal(buf_last(x->stack), xml_token(x->ptr + 2))) {
                 return false;
             }
@@ -88,7 +92,8 @@ b32 xml_open(XML *x, String tag)
                     p++;
                 }
                 x->current_tag_end = p;
-                return true;
+                x->ok = (*p == '>');
+                return x->ok;
             }
         } while (xml_next(x));
     }
@@ -120,20 +125,20 @@ b32 xml_close(XML *x, String tag)
     return x->ok;
 }
 
-b32 next_char(u8 **pp, u8 c)
+b32 scan_to_char(u8 **pp, u8 *end, u8 c)
 {
     u8 *p = *pp;
-    while (*p && *p != c) {
+    while (*p && p != end && *p != c) {
         p++;
     }
     *pp = p;
     return *p == c;
 }
 
-b32 next_char_skip_whitespace(u8 **pp, u8 c)
+b32 scan_to_char_skip_whitespace(u8 **pp, u8 *end, u8 c)
 {
     u8 *p = *pp;
-    while (*p && (*p != c || *p <= ' ')) {
+    while (*p && p != end && (*p != c || *p <= ' ')) {
         p++;
     }
     *pp = p;
@@ -160,15 +165,15 @@ String xml_attr(XML *x, String key)
         if (p == end) {
             goto bail;
         }
-        if (!next_char_skip_whitespace(&p, '=')) {
+        if (!scan_to_char_skip_whitespace(&p, end, '=')) {
             goto bail;
         }
-        if (!next_char_skip_whitespace(&p, '\'')) {
+        if (!scan_to_char_skip_whitespace(&p, end, '\'')) {
             goto bail;
         }
         p++;
         u8 *start_of_value = p;
-        if (!next_char(&p, '\'')) {
+        if (!scan_to_char(&p, end, '\'')) {
             goto bail;
         }
         u8 *end_of_value = p;
