@@ -107,30 +107,30 @@ f32 loss(f32 delta, f32 barrier)
 #endif
 }
 
-OptimizationContext optimize(i32 n_params, f32 *initial_x, i32 n_samples)
+void optimize(OptimizationContext *opt, i32 n_params, f32 *initial_x, i32 n_samples)
 {
-    OptimizationContext result = {
-        .n_params = n_params,
-        .n_samples = n_samples,
-    };
-    buf_zeros(result.x, n_params);
-    buf_zeros(result.v, n_params);
-    buf_zeros(result.v_correction, n_params);
-    buf_zeros(result.m, n_params);
-    buf_zeros(result.m_correction, n_params);
-    buf_zeros(result.active.samples, n_samples);
-    buf_zeros(result.active.parameters, n_params);
+    opt->n_params = n_params;
+    opt->n_samples = n_samples;
+    opt->loss = 0.0f;
+    buf_zeros(opt->x, n_params);
+    buf_zeros(opt->v, n_params);
+    buf_zeros(opt->v_correction, n_params);
+    buf_zeros(opt->m, n_params);
+    buf_zeros(opt->m_correction, n_params);
+    buf_zeros(opt->active.samples, n_samples);
+    buf_zeros(opt->active.parameters, n_params);
     for (isize i = 0; i < n_params; i++) {
-        result.x[i] = initial_x[i];
-        result.active.parameters[i] = (i32)i;
-        result.v_correction[i] = VDecay;
-        result.m_correction[i] = MDecay;
+        opt->x[i] = initial_x[i];
+        opt->active.parameters[i] = (i32)i;
+        opt->v_correction[i] = VDecay;
+        opt->m_correction[i] = MDecay;
     }
     for (isize i = 0; i < n_samples; i++) {
-        result.active.samples[i] = (i32)i;
+        opt->active.samples[i] = (i32)i;
     }
-    buf_reserve(result.focus, 8);
-    return result;
+    buf_reserve(opt->focus, 8);
+    buf_clear(opt->focus);
+    opt->iter = 0;
 }
 
 void opt_focus(OptimizationContext *opt, i32 sample)

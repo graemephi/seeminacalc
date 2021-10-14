@@ -23,173 +23,11 @@
 void utimes(void *a, int b) {}
 #endif
 
-typedef struct CacheDB
-{
-    sqlite3 *db;
-    sqlite3_stmt *note_data_stmt;
-    sqlite3_stmt *file_stmt;
-    sqlite3_stmt *all_stmt;
-} CacheDB;
-
-static CacheDB cache_db = {0};
-
-typedef struct DBFile
-{
-    b32 ok;
-    String title;
-    String author;
-    i32 difficulty;
-    String chartkey;
-    Buffer note_data;
-} DBFile;
-
-typedef struct TargetFile
-{
-    String key;
-    String author;
-    String title;
-    i32 difficulty;
-    i32 skillset;
-    f32 rate;
-    f32 target;
-    f32 weight;
-    Buffer note_data;
-} TargetFile;
-
-b32 db_init(Buffer db)
-{
-    cachedb_vfs_register(db.buf, db.len);
-    i32 result = true;
-    int rc = sqlite3_open_v2("vfs db", &cache_db.db, SQLITE_OPEN_READONLY, 0);
-    if (rc) {
-        goto err;
-    }
-
-    static const char note_query[] = "select serializednotedata from steps where chartkey=?;";
-    rc = sqlite3_prepare_v2(cache_db.db, note_query, sizeof(note_query), &cache_db.note_data_stmt, 0);
-    if (rc) {
-        goto err;
-    }
-
-    static const char file_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where chartkey=?;";
-    rc = sqlite3_prepare_v2(cache_db.db, file_query, sizeof(file_query), &cache_db.file_stmt, 0);
-    if (rc) {
-        goto err;
-    }
-
-    static const char all_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where steps.stepstype=\"dance-single\"";
-    rc = sqlite3_prepare_v2(cache_db.db, all_query, sizeof(all_query), &cache_db.all_stmt, 0);
-    if (rc) {
-        goto err;
-    }
-
-    return result;
-
-err:
-    fprintf(stderr, "sqlite3 oops: %s\n", sqlite3_errmsg(cache_db.db));
-    sqlite3_close(cache_db.db);
-    cache_db = (CacheDB) {0};
-    result = false;
-    return result;
-}
-
-b32 db_ready(void)
-{
-    return cache_db.db != 0;
-}
-
-Buffer db_get_steps(char *key)
-{
-    Buffer result = (Buffer) {0};
-    sqlite3_bind_text(cache_db.note_data_stmt, 1, key, -1, 0);
-    sqlite3_step(cache_db.note_data_stmt);
-    const void *blob = sqlite3_column_blob(cache_db.note_data_stmt, 0);
-    size_t len = sqlite3_column_bytes(cache_db.note_data_stmt, 0);
-
-    result.buf = calloc(len, sizeof(char));
-    memcpy(result.buf, blob, len);
-    result.len = len;
-    result.cap = len;
-
-    sqlite3_reset(cache_db.note_data_stmt);
-    return result;
-}
-
-void dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
-{
-    out->ok = false;
-    assert(stmt == cache_db.file_stmt || stmt == cache_db.all_stmt);
-    sqlite3_step(stmt);
-
-    const u8 *title = sqlite3_column_text(stmt, 0);
-    isize title_len = sqlite3_column_bytes(stmt, 0);
-
-    const u8 *author = sqlite3_column_text(stmt, 1);
-    isize author_len = sqlite3_column_bytes(stmt, 1);
-
-    int difficulty = sqlite3_column_int(stmt, 2);
-
-    const void *nd = sqlite3_column_blob(stmt, 3);
-    isize nd_len = sqlite3_column_bytes(stmt, 3);
-
-    const u8 *ck = sqlite3_column_blob(stmt, 4);
-    isize ck_len = sqlite3_column_bytes(stmt, 4);
-
-    if (nd_len == 0) {
-        return;
-    }
-
-    if (title_len) {
-        out->title.len = buf_printf(out->title.buf, "%.*s", title_len, title);
-    } else {
-        out->title = S("");
-    }
-
-    assert(ck_len);
-    out->chartkey.len = buf_printf(out->chartkey.buf, "%.*s", ck_len, ck);
-
-    if (author_len) {
-        out->author.len = buf_printf(out->author.buf, "%.*s", author_len, author);
-    } else {
-        out->author = S("");
-    }
-
-    out->difficulty = difficulty;
-
-    if (nd_len > out->note_data.cap) {
-        out->note_data.buf = realloc(out->note_data.buf, nd_len * 4);
-        out->note_data.cap = nd_len * 4;
-    }
-    memcpy(out->note_data.buf, nd, nd_len);
-    out->note_data.len = nd_len;
-
-    out->ok = true;
-}
-
-DBFile db_get_file(char *key)
-{
-    sqlite3_bind_text(cache_db.file_stmt, 1, key, -1, 0);
-    DBFile result = {0};
-    dbfile_from_stmt(cache_db.file_stmt, &result);
-    sqlite3_reset(cache_db.file_stmt);
-    return result;
-}
-
-b32 db_iter_next(DBFile *out)
-{
-    buf_clear(out->title.buf);
-    buf_clear(out->author.buf);
-    buf_clear(out->chartkey.buf);
-    dbfile_from_stmt(cache_db.all_stmt, out);
-    return sqlite3_stmt_busy(cache_db.all_stmt);
-}
-
 // Extremely jank xml reader
 typedef struct {
     b32 ok;
     u8 *ptr;
     u8 *end;
-    u8 *last_next;
     String *stack;
     u8 *current_tag_end;
 } XML;
@@ -222,7 +60,6 @@ b32 xml_next(XML *x)
             }
         }
         x->ok = p < end;
-        x->last_next = p;
         x->ptr = p;
     }
     return x->ok;
@@ -346,51 +183,278 @@ String xml_attr(XML *x, String key)
     return result;
 }
 
-TargetFile *load_test_files(Buffer xml_file)
+typedef struct DBFile
 {
-    push_allocator(scratch);
-    TargetFile *result = 0;
+    b32 ok;
+    i32 difficulty;
+    String title;
+    String author;
+    String chartkey;
+    NoteData *note_data;
+    usize n_rows;
+} DBFile;
 
-    XML xml = xml_begin(xml_file);
-    while (xml_open(&xml, S("CalcTestList"))) {
-        String skillset = xml_attr(&xml, S("Skillset"));
-        i32 ss = string_to_i32(skillset);
+enum {
+    DBRequestQueueSize = 64,
+    DBRequestQueueMask = DBRequestQueueSize - 1,
+    DBResultQueueSize = 1024,
+    DBResultQueueMask = DBResultQueueSize - 1
+};
 
-        if (ss > 0 && ss < NumSkillsets) {
-            while (xml_open(&xml, S("Chart"))) {
-                String key = xml_attr(&xml, S("aKey"));
-                String rate = xml_attr(&xml, S("bRate"));
-                String target = xml_attr(&xml, S("cTarget"));
+typedef enum DBRequestType
+{
+    DBRequest_UseDB,
+    DBRequest_File,
+    DBRequest_Search,
+} DBRequestType;
 
-                String ztkey = {0};
-                ztkey.len = buf_printf(ztkey.buf, "%.*s", key.len, key.buf);
-                DBFile dbf = db_get_file(ztkey.buf);
+typedef struct DBRequest
+{
+    DBRequestType type;
+    u64 id;
+    union {
+        Buffer db;
+        Buffer xml;
+        String query;
+    };
+} DBRequest;
 
-                if (xml.ok && dbf.ok) {
-                    buf_push(result, (TargetFile) {
-                        .key = dbf.chartkey,
-                        .author = dbf.author,
-                        .title = dbf.title,
-                        .difficulty = dbf.difficulty,
-                        .skillset = ss,
-                        .rate = string_to_f32(rate),
-                        .target = string_to_f32(target),
-                        .weight = 1.0f,
-                        .note_data = dbf.note_data,
-                    });
-                } else {
-                    printf("Missing %.*s\n", (i32)key.len, key.buf);
-                }
+typedef struct DBResult
+{
+    DBRequestType type;
+    String query;
+    u64 id;
+    DBFile file;
+} DBResult;
 
-                xml_close(&xml, S("Chart"));
-            }
-        } else {
-            printf("CalcTestList parse error: skillset: %.*s (should be 1-7)\n", (i32)skillset.len, skillset.buf);
+typedef struct DBRequestQueue
+{
+    alignas(64) volatile usize read;
+    alignas(64) volatile usize write;
+    DBRequest entries[DBRequestQueueSize];
+} DBRequestQueue;
+
+typedef struct DBResultQueue
+{
+    alignas(64) volatile usize read;
+    alignas(64) volatile usize write;
+    DBResult entries[DBResultQueueSize];
+} DBResultQueue;
+
+DBRequestQueue db_request_queue = {0};
+DBResultQueue db_result_queue = {0};
+BadSem db_sem = {0};
+DBRequest *db_pending_requests = 0;
+u64 db_request_id = 1;
+
+u64 db_next_id(void)
+{
+    return db_request_id++;
+}
+
+b32 db_ready(void)
+{
+    return db_pending_requests != 0;
+}
+
+void db_use(Buffer db)
+{
+    if (!db_ready()) {
+        db_sem = sem_create();
+        buf_reserve(db_pending_requests, 1024);
+        Buffer *eh = 0;
+        buf_push(eh, db);
+        int db_thread(void*);
+        make_thread(db_thread, eh);
+    } else {
+        buf_push(db_pending_requests, (DBRequest) {
+            .type = DBRequest_UseDB,
+            .db = db
+        });
+    }
+}
+
+u64 db_get(String key)
+{
+    u64 id = db_next_id();
+    buf_push(db_pending_requests, (DBRequest) {
+        .type = DBRequest_File,
+        .id = id,
+        .query = key
+    });
+    return id;
+}
+
+u64 db_search(String query)
+{
+    u64 id = db_next_id();
+    buf_push(db_pending_requests, (DBRequest) {
+        .type = DBRequest_Search,
+        .id = id,
+        .query = query
+    });
+    return id;
+}
+
+DBResult *db_pump(void)
+{
+    b32 notify = false;
+
+    // Submit requests
+    {
+        isize read = db_request_queue.read;
+        isize write = db_request_queue.write;
+        memory_barrier();
+        isize queue_capacity = (DBRequestQueueSize - 1) - (write - read);
+        isize n = mins(queue_capacity, buf_len(db_pending_requests));
+        for (isize i = 0; i < n; i++) {
+            db_request_queue.entries[(write + i) & DBRequestQueueMask] = db_pending_requests[i];
         }
+        memory_barrier();
+        db_request_queue.write = write + n;
 
-        xml_close(&xml, S("CalcTestList"));
+        buf_remove_first_n(db_pending_requests, n);
+
+        notify = (n > 0);
     }
 
+    // Read results
+    DBResult *results = 0;
+    push_allocator(scratch);
+    {
+        isize read = db_result_queue.read;
+        isize write = db_result_queue.write;
+        memory_barrier();
+        isize n = write - read;
+        buf_pushn(results, n);
+        for (isize i = 0; i < n; i++) {
+            results[i] = db_result_queue.entries[(read + i) & DBResultQueueMask];
+        }
+        memory_barrier();
+        db_result_queue.read = read + n;
+
+        notify = notify || (n == (DBResultQueueSize - 1));
+    }
     pop_allocator();
-    return result;
+
+    if (notify) {
+        sem_notify(db_sem);
+    }
+
+    return results;
+}
+
+b32 db_next(DBRequest *req)
+{
+    while (db_request_queue.read == db_request_queue.write) {
+        sem_wait(db_sem);
+    }
+    usize read = db_request_queue.read;
+    memory_barrier();
+    *req = db_request_queue.entries[read & DBRequestQueueMask];
+    memory_barrier();
+    db_request_queue.read = read + 1;
+    return true;
+}
+
+void db_respond(DBResult *result)
+{
+    while (db_result_queue.write == db_result_queue.read + (DBResultQueueSize - 1)) {
+        sem_wait(db_sem);
+    }
+    usize write = db_result_queue.write;
+    memory_barrier();
+    db_result_queue.entries[write & DBResultQueueMask] = *result;
+    memory_barrier();
+    db_result_queue.write = write + 1;
+}
+
+b32 dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
+{
+    memset(out, 0, sizeof(DBFile));
+    int step = sqlite3_step(stmt);
+    int stmt_can_continue = (step == SQLITE_ROW);
+
+    const u8 *title = sqlite3_column_text(stmt, 0);
+    isize title_len = sqlite3_column_bytes(stmt, 0);
+
+    const u8 *author = sqlite3_column_text(stmt, 1);
+    isize author_len = sqlite3_column_bytes(stmt, 1);
+
+    int difficulty = sqlite3_column_int(stmt, 2);
+
+    const void *nd = sqlite3_column_blob(stmt, 3);
+    isize nd_len = sqlite3_column_bytes(stmt, 3);
+
+    const u8 *ck = sqlite3_column_blob(stmt, 4);
+    isize ck_len = sqlite3_column_bytes(stmt, 4);
+
+    out->difficulty = difficulty;
+    out->title.len = buf_printf(out->title.buf, "%.*s", title_len, title);
+    out->chartkey.len = buf_printf(out->chartkey.buf, "%.*s", ck_len, ck);
+    out->author.len = buf_printf(out->author.buf, "%.*s", author_len, author);
+    if (nd_len > 0) {
+        out->note_data = frobble_serialized_note_data(nd, nd_len);
+        out->n_rows = note_data_rows(out->note_data);
+    }
+    out->ok = (ck_len > 0);
+    return stmt_can_continue;
+}
+
+i32 db_thread(void *userdata)
+{
+    Buffer db_buffer = *(Buffer *)userdata;
+    cachedb_vfs_register(db_buffer.buf, db_buffer.len);
+
+    isize mb = 8*1024*1024;
+    Stack stack = stack_make(malloc(mb), mb);
+    current_allocator = &stack;
+
+    sqlite3 *db = 0;
+    sqlite3_stmt *file_stmt = 0;
+
+    int rc = sqlite3_open_v2("vfs db", &db, SQLITE_OPEN_READONLY, 0);
+    if (rc) {
+        goto err;
+    }
+
+    static const char file_query[] = "select songs.title, songs.credit, steps.difficulty, steps.serializednotedata, steps.chartkey from steps inner join songs on songs.id = steps.songid where chartkey=?;";
+    rc = sqlite3_prepare_v2(db, file_query, sizeof(file_query), &file_stmt, 0);
+    if (rc) {
+        goto err;
+    }
+
+    DBRequest req = {0};
+    while (db_next(&req)) {
+        switch (req.type) {
+            case DBRequest_UseDB: {
+                cachedb_vfs_register(req.db.buf, req.db.len);
+            } break;
+            case DBRequest_File: {
+                sqlite3_bind_text(file_stmt, 1, req.query.buf, req.query.len, 0);
+
+                DBFile file = {0};
+                dbfile_from_stmt(file_stmt, &file);
+
+                db_respond(&(DBResult) {
+                    .type = req.type,
+                    .id = req.id,
+                    .query = req.query,
+                    .file = file
+                });
+
+                sqlite3_reset(file_stmt);
+            } break;
+            case DBRequest_Search: {
+
+            } break;
+        }
+    }
+
+    return 0;
+
+err:
+    fprintf(stderr, "sqlite3 oops: %s\n", sqlite3_errmsg(db));
+    sqlite3_close(db);
+    return 0;
 }

@@ -100,7 +100,7 @@ typedef struct InlineConstantInfo InlineConstantInfo;
 
 // Turns the SQLite binary blob from the `serializednotedata` column in the `steps`
 // table of the cache db into an opaque handle to C++ whateverisms.
-NoteData *frobble_serialized_note_data(char *note_data, size_t length);
+NoteData *frobble_serialized_note_data(char const *note_data, size_t length);
 
 // Turns arbitrary NoteInfo into an opaque handle to C++ whateverisms.
 // Note that if you aren't getting this from cache.db you probably want to
@@ -108,6 +108,8 @@ NoteData *frobble_serialized_note_data(char *note_data, size_t length);
 // __If your note data is not bit-for-bit identical you will see error__
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
 void free_note_data(NoteData *note_data);
+
+isize note_data_rows(NoteData *note_data);
 
 CalcInfo calc_info(void);
 const char *file_for_param(CalcInfo *info, size_t param_index);

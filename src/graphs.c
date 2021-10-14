@@ -334,13 +334,6 @@ typedef struct DoneWork
     SkillsetRatings ssr;
 } DoneWork;
 
-#if defined(_MSC_VER) && !defined(alignas)
-#define alignas(n) __declspec(align(n))
-#pragma warning(disable : 4324) // structure was padded due to alignment specifier
-#else
-#define alignas(n) _Alignas(n)
-#endif
-
 enum {
     WorkQueueSize = 4096,
     DoneQueueSize = WorkQueueSize * 4
@@ -366,6 +359,7 @@ typedef struct DoneQueue
 static WorkQueue high_prio_work_queue = {0};
 static WorkQueue low_prio_work_queue = {0};
 static DoneQueue *done_queues = 0;
+static BadSem calc_sem;
 
 struct {
     usize requested;
@@ -582,7 +576,9 @@ void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, b32 s
     if (sfi->effects_generation != generation && sfi->num_effects_computed < info->num_params) {
         sfi->effects_generation = generation;
         for (i32 i = 0; i < info->num_params; i += stride) {
-            if (!skip_unopt || state.opt_cfg.enabled[i]) {
+            b32 active = !skip_unopt || state.opt_cfg.enabled[i];
+            b32 already_positive = sfi->effects.weak[i];
+            if (active && !already_positive) {
                 buf_push(*work, (CalcWork) {
                     .sfi = sfi,
                     .type = Work_Effects,
@@ -615,8 +611,9 @@ b32 get_done_work(DoneWork *out)
         return false;
     }
 
+    memory_barrier();
     *out = done_queues[q].entries[done_queues[q].read & DoneQueueMask];
-    wag_tail();
+    memory_barrier();
     done_queues[q].read++;
 
     return true;
@@ -716,17 +713,17 @@ i32 calc_thread(void *userdata)
                 .work = work,
                 .ssr = ssr
             };
-            wag_tail();
+            memory_barrier();
             done->write++;
 
             ct->debug_counters.done++;
 
-            if (now - then > 0 && work.sfi->notes_len > 0) {
-                ct->debug_counters.time = ct->debug_counters.time*0.99 + 0.01*(stm_ms(now - then) / work.sfi->notes_len);
+            if (now - then > 0 && work.sfi->n_rows > 0) {
+                ct->debug_counters.time = ct->debug_counters.time*0.99 + 0.01*(stm_ms(now - then) / work.sfi->n_rows);
             }
         }
 
-        thread_wait();
+        sem_wait(calc_sem);
     }
 
     return 0;
@@ -738,6 +735,7 @@ void submit_work(WorkQueue *q, CalcWork work[], u32 generation)
     // consequence is always that max_to_submit is smaller than it could be,
     // which is fine
     isize max_to_submit = (array_length(q->entries) - 1) - (q->write - q->read);
+    memory_barrier();
     assert(0 <= max_to_submit && max_to_submit < 4096);
 
     isize N = mins(buf_len(work), max_to_submit);
@@ -749,14 +747,13 @@ void submit_work(WorkQueue *q, CalcWork work[], u32 generation)
         }
     }
 
-    wag_tail();
+    memory_barrier();
     q->write += n;
-    thread_notify();
+    sem_notify(calc_sem);
 
     debug_counters.requested += n;
 
-    memmove(work, work + N, sizeof(CalcWork) * (buf_len(work) - N));
-    buf_set_len(work, buf_len(work) - N);
+    buf_remove_first_n(work, N);
 }
 
 void finish_work(void)

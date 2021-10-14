@@ -186,7 +186,7 @@ static float RateParam = 1.0f;
 static const ParamJunk RateMod{{ "rate", (float *)&RateParam }};
 
 
-NoteData *frobble_serialized_note_data(char *note_data, size_t length)
+NoteData *frobble_serialized_note_data(char const *note_data, size_t length)
 {
     return new NoteData{{ (NoteInfo *)note_data, (NoteInfo *)(note_data + length) }};
 }
@@ -194,6 +194,11 @@ NoteData *frobble_serialized_note_data(char *note_data, size_t length)
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
 {
     return frobble_serialized_note_data((char *)note_data, length * sizeof(NoteInfo));
+}
+
+isize note_data_rows(NoteData *note_data)
+{
+    return (isize)note_data->ref.size();
 }
 
 void free_note_data(NoteData *note_data)

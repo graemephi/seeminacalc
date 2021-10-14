@@ -6,6 +6,11 @@
 // like working this way, presumably because directly interacting with .db files
 // in any way completely screws with any guarantees they can give about fault
 // tolerance and consistency. So we need to do this song and dance with a VFS.
+//
+// The actual set up here seems really dumb; SQLite might be deserializing data
+// out of the "file" constantly. So maybe it would be better to load the db this
+// way, use sqlite's api to serialize it all at once into memory, then load it
+// into sqlite as a :memory: database.
 
 /*
 ** Method declarations for fs_file.
@@ -250,7 +255,7 @@ static int fsFullPathname(
   int nOut,                     /* Size of output buffer in bytes */
   char *zOut                    /* Output buffer */
 ){
-  if (nOut > 8) memcpy(zOut, "vfs db", sizeof("vfs db"));
+  strncpy(zOut, zPath, nOut);
   return SQLITE_OK;
 }
 
@@ -260,11 +265,12 @@ static int fsFullPathname(
 ** available function in this file.
 */
 int cachedb_vfs_register(void *mem, sqlite_int64 size){
-  if (NEVER(fs_vfs.pParent)) return SQLITE_OK;
+  if (fs_vfs.mem) free(fs_vfs.mem);
+  fs_vfs.mem = mem;
+  fs_vfs.size = size;
+  if (fs_vfs.pParent) return SQLITE_OK;
   fs_vfs.pParent = sqlite3_vfs_find(0);
   fs_vfs.base.mxPathname = fs_vfs.pParent->mxPathname;
   fs_vfs.base.szOsFile = sizeof(sqlite3_file);
-  fs_vfs.mem = mem;
-  fs_vfs.size = size;
   return sqlite3_vfs_register(&fs_vfs.base, 1);
 }

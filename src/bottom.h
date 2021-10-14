@@ -1,8 +1,8 @@
 // Buncha top-of-the-file crap that will just confuse anyone trying to look at
 // seeminacalc.c to see where the good stuff is.
 
-#include <float.h>
 #include <ctype.h>
+#include <float.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -11,7 +11,15 @@
 #include <string.h>
 #include <time.h>
 
+
 #define alignof _Alignof
+
+#if defined(_MSC_VER) && !defined(alignas)
+#define alignas(n) __declspec(align(n))
+#pragma warning(disable : 4324) // structure was padded due to alignment specifier
+#else
+#define alignas(n) _Alignas(n)
+#endif
 
 #ifdef _MSC_VER
 
@@ -19,8 +27,10 @@
 #define static_assert(cond) static_assert(cond, #cond)
 #endif
 
+#if defined(min)
 #undef min
 #undef max
+#endif
 
 #if defined(DEBUG)
 // force_inline is a debugging aid mostly
@@ -30,7 +40,9 @@
 #define force_inline
 #endif
 
+#define thread_local __declspec(thread)
 #else
+#define thread_local _Thread_local
 #define force_inline
 #endif // _MSC_VER
 
@@ -187,11 +199,19 @@ void *stack_push_(Stack *stack, usize size, usize alignment, void *buf)
 
 Stack scratch_stack = {0};
 Stack permanent_memory_stack = {0};
-Stack *const scratch = &scratch_stack;
-Stack *const permanent_memory = &permanent_memory_stack;
-Stack *current_allocator = &permanent_memory_stack;
+thread_local Stack *current_allocator = 0;
+Stack *scratch = &scratch_stack;
+Stack *permanent_memory = &permanent_memory_stack;
 #define alloc_scratch(type, count) stack_alloc(scratch, type, count)
 #define alloc(type, count) stack_alloc(current_allocator, type, count)
+
+void setup_allocators(void)
+{
+    isize bignumber = 100*1024*1024;
+    scratch_stack = stack_make(malloc(bignumber), bignumber);
+    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
+    current_allocator = permanent_memory;
+}
 
 void reset_scratch(void)
 {
@@ -412,6 +432,20 @@ void buf_remove_sorted_(Buf *hdr, isize size, isize index)
     }
 }
 
+#define buf_remove_first_n(buf, n) buf_remove_first_n_(buf_hdr(buf), buf_elem_size(buf), n)
+void buf_remove_first_n_(Buf *hdr, isize size, isize n)
+{
+    if (hdr && n > 0) {
+        if (n >= hdr->len) {
+            hdr->len = 0;
+            return;
+        }
+        isize remaining = hdr->len - n;
+        memmove(hdr_buf(hdr), hdr_buf(hdr) + n * size, size * remaining);
+        hdr->len -= n;
+    }
+}
+
 typedef struct String
 {
     u8 *buf;
@@ -477,8 +511,8 @@ void restore_allocator(i32 handle)
 
 u64 rng(void)
 {
-    // wikipedia
-    static usize x = 1;
+    // wikipedia, xorshift
+    static u64 x = 1;
     x ^= x >> 12;
     x ^= x << 25;
     x ^= x >> 27;

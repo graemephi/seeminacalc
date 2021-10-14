@@ -61,13 +61,12 @@ typedef struct SimFileInfo
     f32 aa_rating;
     f32 max_rating;
 
-    i32 notes_len; // just for stats
     NoteData *notes;
+    i32 n_rows;
     EffectMasks effects;
     i32 *graphs;
 
     struct {
-        i32 index;
         f32 want_msd;
         f32 rate;
         i32 skillset;
@@ -94,6 +93,27 @@ typedef struct SimFileInfo
 
 static SimFileInfo null_sfi_ = {0};
 static SimFileInfo *const null_sfi = &null_sfi_;
+
+typedef struct TargetFile
+{
+    u64 id;
+    String key;
+    String author;
+    String title;
+    i32 difficulty;
+    i32 skillset;
+    f32 rate;
+    f32 target;
+    f32 weight;
+    b32 loaded;
+} TargetFile;
+
+typedef struct CalcTestListLoader {
+    b32 workin;
+    Buffer xml;
+    TargetFile *requested_files;
+    f32 mean, unscaled_variance;
+} CalcTestListLoader;
 
 typedef struct { f32 low; f32 high; } Bound;
 
@@ -127,6 +147,7 @@ typedef struct State
     OptimizationEvaluation *opt_evaluations;
     i32 opt_pending_evals;
     b32 optimizing;
+    b32 reset_optimizer_flag;
     FnGraph *optimization_graph;
     struct {
         b8 *enabled;
@@ -172,7 +193,8 @@ typedef struct State
     b8 debug_window;
     b8 loss_window;
 
-    Buffer *pending_files;
+    Buffer *dropped_files;
+    CalcTestListLoader loader;
 } State;
 static State state = {0};
 
@@ -538,6 +560,7 @@ void free_all_graphs(i32 handles[])
 
 i32 parse_and_add_sm(Buffer buf, b32 open_window)
 {
+#if 0
     if (buf_len(state.files) == buf_cap(state.files)) {
         printf("please.. no more files");
         return -1;
@@ -580,7 +603,6 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
             .diff = diff,
             .chartkey = copy_string(ck),
             .id = copy_string(id),
-            .notes_len = (i32)buf_len(ni),
             .notes = frobble_note_data(ni, buf_len(ni)),
             .stops = sm.has_stops,
             .open = open_window,
@@ -601,82 +623,169 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
 
     return 0;
+#endif
+    return 0;
 }
 
-// copy n paste
-i32 add_target_files(Buffer xml_test_list)
+void load_target_files(CalcTestListLoader *loader, Buffer test_list_xml)
 {
-    TargetFile *target_files = load_test_files(xml_test_list);
+    buf_clear(loader->requested_files);
+    XML xml = xml_begin(test_list_xml);
+    while (xml_open(&xml, S("CalcTestList"))) {
+        String skillset = xml_attr(&xml, S("Skillset"));
+        i32 ss = string_to_i32(skillset);
 
-    f32 target_m = 0.0f;
-    f32 target_s = 0.0f;
+        if (ss > 0 && ss < NumSkillsets) {
+            while (xml_open(&xml, S("Chart"))) {
+                String key = xml_attr(&xml, S("aKey"));
+                String rate = xml_attr(&xml, S("bRate"));
+                String target = xml_attr(&xml, S("cTarget"));
 
-    for (isize i = 0; i < buf_len(target_files); i++) {
-        push_allocator(scratch);
-        TargetFile *target = &target_files[i];
-        String ck = target->key;
-        String title = target->title;
-        String author = target->author;
-        String diff = SmDifficultyStrings[target->difficulty];
-        String id = {0};
-        id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s%g.%d",
-            title.len, title.buf,
-            author.len, author.buf,
-            author.len == 0 ? 0 : 2, ", ",
-            diff.len, diff.buf,
-            ck.len, ck.buf,
-            (f64)target->rate,
-            target->skillset
-        );
-        pop_allocator();
+                if (xml.ok) {
+                    u64 id = db_get(key);
+                    buf_push(loader->requested_files, (TargetFile) {
+                        .id = id,
+                        .key = key,
+                        .rate = string_to_f32(rate),
+                        .target = string_to_f32(target),
+                        .skillset = ss,
+                        .weight = 1.0f,
+                    });
+                }
 
-        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-            if (strings_are_equal(sfi->id, id)) {
-                goto skip;
+                xml_close(&xml, S("Chart"));
             }
+        } else {
+            printf("CalcTestList parse error: skillset: %.*s (should be 1-7)\n", (i32)skillset.len, skillset.buf);
         }
 
-        SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
-            .title = copy_string(title),
-            .diff = diff,
-            .chartkey = copy_string(ck),
-            .id = copy_string(id),
-            .target.index = (i32)i,
-            .target.want_msd = target->target,
-            .target.rate = target->rate,
-            .target.skillset = target->skillset,
-            .target.weight = target->weight,
-            .notes_len = (i32)target->note_data.len,
-            .notes = frobble_serialized_note_data(target->note_data.buf, target->note_data.len),
-            .selected_skillsets[0] = true,
-        });
-
-        free(target->note_data.buf);
-        buf_push(sfi->graphs, make_skillsets_graph());
-
-        buf_reserve(sfi->effects.weak, state.info.num_params);
-        buf_reserve(sfi->effects.strong, state.info.num_params);
-
-        calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
-
-        f32 old_m = target_m;
-        f32 old_s = target_s;
-        target_m = old_m + (target->target - old_m) / (f32)(i + 1);
-        target_s = old_s + (target->target - old_m)*(target->target - target_m);
-
-        printf("Added %s %s %.2fx: %.2f\n", SkillsetNames[target->skillset], title.buf, (f64)target->rate, (f64)target->target);
-        skip:;
+        xml_close(&xml, S("CalcTestList"));
     }
 
-    f32 target_var = target_s / (f32)(buf_len(target_files) - 1);
+    if (buf_len(loader->requested_files) > 0) {
+        loader->workin = true;
+        loader->xml = test_list_xml;
+    } else {
+        free(test_list_xml.buf);
+    }
+}
+
+b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
+{
+    if (loader->workin == false || buf_len(results) == 0) {
+        return false;
+    }
+
+    // Todo: move these off loader, they aren't tied to a single load
+    f32 target_m = loader->mean;
+    f32 target_s = loader->unscaled_variance;
+
+    isize added_count = 0;
+    isize req_index = 0;
+    for (; req_index < buf_len(loader->requested_files); req_index++) {
+        if (loader->requested_files[req_index].loaded == false) {
+            break;
+        }
+    }
+
+    for (isize result_index = 0; result_index < buf_len(results); result_index++, req_index++) {
+        assert(req_index < buf_len(loader->requested_files));
+        if (results[result_index].type == DBRequest_File) {
+            DBResult *result = &results[result_index];
+            DBFile *file = &result->file;
+            TargetFile *req = &loader->requested_files[req_index];
+
+            if (result->id != req->id) {
+                assert_unreachable();
+                goto give_up;
+            }
+
+            if (req->loaded) {
+                assert_unreachable();
+                goto give_up;
+            }
+
+            req->loaded = true;
+
+            push_allocator(scratch);
+            String ck = file->chartkey;
+            String title = file->title;
+            String author = file->author;
+            String diff = SmDifficultyStrings[file->difficulty];
+            String id = {0};
+            id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s%g.%d",
+                title.len, title.buf,
+                author.len, author.buf,
+                author.len == 0 ? 0 : 2, ", ",
+                diff.len, diff.buf,
+                ck.len, ck.buf,
+                (f64)req->rate,
+                req->skillset
+            );
+            pop_allocator();
+
+            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                if (strings_are_equal(sfi->id, id)) {
+                    goto skip;
+                }
+            }
+
+            SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
+                .title = copy_string(title),
+                .diff = diff,
+                .chartkey = copy_string(ck),
+                .id = copy_string(id),
+                .target.want_msd = req->target,
+                .target.rate = req->rate,
+                .target.skillset = req->skillset,
+                .target.weight = req->weight,
+                .notes = file->note_data,
+                .n_rows = file->n_rows,
+                .selected_skillsets[0] = true,
+            });
+
+            buf_push(sfi->graphs, make_skillsets_graph());
+            buf_reserve(sfi->effects.weak, state.info.num_params);
+            buf_reserve(sfi->effects.strong, state.info.num_params);
+
+            calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
+
+            f32 old_m = target_m;
+            f32 old_s = target_s;
+            target_m = old_m + (req->target - old_m) / (f32)(buf_len(state.files) + 1);
+            target_s = old_s + (req->target - old_m)*(req->target - target_m);
+
+            printf("Added %s %s %.2fx: %.2f\n", SkillsetNames[req->skillset], title.buf, (f64)req->rate, (f64)req->target);
+
+            added_count++;
+skip:;
+        }
+    }
+
+    b32 all_done = true;
+    for (isize i = 0; i < buf_len(loader->requested_files); i++) {
+        if (loader->requested_files[i].loaded == false) {
+            all_done = false;
+            break;
+        }
+    }
+
+    if (all_done) {
+give_up:
+        loader->workin = false;
+        free(loader->xml.buf);
+        loader->xml = (Buffer) {0};
+        buf_clear(loader->requested_files);
+    }
+
+    loader->mean = target_m;
+    loader->unscaled_variance = target_s;
+
+    f32 target_var = target_s / (f32)(buf_len(state.files) - 1);
     state.target.msd_mean = target_m;
     state.target.msd_sd = sqrtf(target_var);
 
-    submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
-
-    state.loss_window = true;
-
-    return 0;
+    return added_count > 0;
 }
 
 enum {
@@ -886,7 +995,7 @@ void setup_optimizer(void)
     }
     i32 n_params = pack_opt_parameters(&state.info, state.ps.params, normalization_factors, state.opt_cfg.enabled, initial_x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
     i32 n_samples = (i32)buf_len(state.files);
-    state.opt = optimize(n_params, initial_x, n_samples);
+    optimize(&state.opt, n_params, initial_x, n_samples);
     state.opt_cfg.normalization_factors = normalization_factors;
     // some parameters can blow up the calc
     buf_pushn(state.opt_cfg.bounds, state.ps.num_params);
@@ -983,9 +1092,7 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
 
 void init(void)
 {
-    isize bignumber = 100*1024*1024;
-    scratch_stack = stack_make(malloc(bignumber), bignumber);
-    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
+    setup_allocators();
 
     push_allocator(scratch);
     Buffer font = read_file("web/NotoSansCJKjp-Regular.otf");
@@ -1050,8 +1157,9 @@ void init(void)
     // todo: use handles instead
     buf_reserve(state.files, 1024);
 
-    high_prio_work_queue.lock = make_lock();
-    low_prio_work_queue.lock = make_lock();
+    calc_sem = sem_create();
+    high_prio_work_queue.lock = lock_create();
+    low_prio_work_queue.lock = lock_create();
 
     isize n_threads = maxs(1, got_any_cores() - 1);
     for (isize i = 0; i < n_threads; i++) {
@@ -1111,14 +1219,14 @@ void init(void)
     if (db_path) {
         Buffer db = read_file_malloc(db_path);
         if (db.buf) {
-            buf_push(state.pending_files, db);
+            buf_push(state.dropped_files, db);
         }
     }
 
     if (test_list_path) {
         Buffer list = read_file_malloc(test_list_path);
         if (list.buf) {
-            buf_push(state.pending_files, list);
+            buf_push(state.dropped_files, list);
         }
     }
 
@@ -1133,26 +1241,31 @@ void frame(void)
     reset_scratch();
     finish_work();
 
-    while (buf_len(state.pending_files) > 0) {
-        Buffer b = buf_pop(state.pending_files);
+    for (isize i = buf_len(state.dropped_files) - 1; i >= 0; i--) {
+        Buffer *b = &state.dropped_files[i];
 
-        if (buffer_begins_with(&b, S("SQLite format 3\0"))) {
+        if (buffer_begins_with(b, S("SQLite format 3\0"))) {
             // Assume sqlite database
-            db_init(b);
-            // Don't free, db_init takes ownership to avoid a potentially large double-copy
-        } else if (buffer_first_nonwhitespace_char(&b) == '<') {
+            db_use(*b);
+            buf_remove_unsorted(state.dropped_files, b);
+        } else if (buffer_first_nonwhitespace_char(b) == '<') {
             // Assume CalcTestList.xml
-            if (db_ready()) {
-                add_target_files(b);
+            if (db_ready() && buf_len(state.loader.requested_files) == 0) {
+                load_target_files(&state.loader, *b);
+                buf_remove_unsorted(state.dropped_files, b);
             }
-            free(b.buf);
-        } else if ((buffer_first_nonwhitespace_char(&b) == '/') || (buffer_first_nonwhitespace_char(&b) == '#')) {
+        } else if ((buffer_first_nonwhitespace_char(b) == '/') || (buffer_first_nonwhitespace_char(b) == '#')) {
             // Assume .sm
-            free(b.buf);
+            free(b->buf);
         } else {
+            free(b->buf);
+            buf_remove_unsorted(state.dropped_files, b);
             printf("Bad dropped file\n");
         }
     }
+
+    DBResult *db_results = db_pump();
+    state.reset_optimizer_flag = process_target_files(&state.loader, db_results);
 
     i32 width = sapp_width();
     i32 height = sapp_height();
@@ -1447,7 +1560,7 @@ void frame(void)
 
         if (state.optimizing) {
             static u32 last_generation = 1;
-            if (last_generation != state.generation) {
+            if (last_generation != state.generation || state.reset_optimizer_flag) {
                 // Some parameter has been messed with, or turned off
                 // This invalidates the optimizer state either way, so just recreate the whole thing
                 buf_clear(state.opt_evaluations);
@@ -1459,11 +1572,20 @@ void frame(void)
 
                 i32 n_params = pack_opt_parameters(&state.info, state.ps.params, state.opt_cfg.normalization_factors, state.opt_cfg.enabled, x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
                 i32 iter = state.opt.iter - 1;
-                state.opt = optimize(n_params, x, (i32)buf_len(state.files));
+                optimize(&state.opt, n_params, x, (i32)buf_len(state.files));
                 state.opt.iter = iter;
 
                 last_generation = state.generation;
                 state.opt_pending_evals = 0;
+
+                for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                    if ((state.generation - sfi->effects_generation) > 1024) {
+                        sfi->num_effects_computed = 0;
+                        calculate_effects(&state.high_prio_work, &state.info, sfi, true, state.generation);
+                    }
+                }
+
+                state.reset_optimizer_flag = false;
             }
 
             if (state.opt_pending_evals == 0) {
@@ -1539,11 +1661,6 @@ void frame(void)
                             submitted++;
 
                             submitted += params_submitted;
-                        }
-
-                        if (buf_len(state.high_prio_work) == 0 && (sfi->num_effects_computed == 0 || ((state.generation - sfi->effects_generation) > 1024))) {
-                            sfi->num_effects_computed = 0;
-                            calculate_effects(&state.high_prio_work, &state.info, sfi, true, state.generation);
                         }
                     }
 
@@ -1830,7 +1947,7 @@ void cleanup(void)
 #if defined(__EMSCRIPTEN__)
 static void emsc_load_callback(const sapp_html5_fetch_response *response) {
     if (response->succeeded) {
-        buf_push(state.pending_files, (Buffer) {
+        buf_push(state.dropped_files, (Buffer) {
             .buf = response->buffer_ptr,
             .len = response->fetched_size,
             .cap = response->buffer_size
@@ -1857,7 +1974,7 @@ void input(const sapp_event* event)
             });
 #else
             char const *path = sapp_get_dropped_file_path(i);
-            buf_push(state.pending_files, read_file_malloc(path));
+            buf_push(state.dropped_files, read_file_malloc(path));
 #endif
         }
     }
