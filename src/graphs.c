@@ -723,7 +723,7 @@ i32 calc_thread(void *userdata)
             }
         }
 
-        sem_wait(calc_sem);
+        thread_wait(calc_sem);
     }
 
     return 0;
@@ -749,7 +749,7 @@ void submit_work(WorkQueue *q, CalcWork work[], u32 generation)
 
     memory_barrier();
     q->write += n;
-    sem_notify(calc_sem);
+    thread_notify(calc_sem);
 
     debug_counters.requested += n;
 

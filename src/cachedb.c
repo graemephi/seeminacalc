@@ -12,7 +12,6 @@
 
 #define SQLITE3
 #include "sqlite3.h"
-#include "cachedb_vfs.c"
 
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -338,7 +337,7 @@ DBResult *db_pump(void)
     pop_allocator();
 
     if (notify) {
-        sem_notify(db_sem);
+        thread_notify(db_sem);
     }
 
     return results;
@@ -347,7 +346,7 @@ DBResult *db_pump(void)
 b32 db_next(DBRequest *req)
 {
     while (db_request_queue.read == db_request_queue.write) {
-        sem_wait(db_sem);
+        thread_wait(db_sem);
     }
     usize read = db_request_queue.read;
     memory_barrier();
@@ -360,7 +359,7 @@ b32 db_next(DBRequest *req)
 void db_respond(DBResult *result)
 {
     while (db_result_queue.write == db_result_queue.read + (DBResultQueueSize - 1)) {
-        sem_wait(db_sem);
+        thread_wait(db_sem);
     }
     usize write = db_result_queue.write;
     memory_barrier();
@@ -404,7 +403,6 @@ b32 dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
 i32 db_thread(void *userdata)
 {
     Buffer db_buffer = *(Buffer *)userdata;
-    cachedb_vfs_register(db_buffer.buf, db_buffer.len);
 
     isize mb = 8*1024*1024;
     Stack stack = stack_make(malloc(mb), mb);
@@ -413,7 +411,12 @@ i32 db_thread(void *userdata)
     sqlite3 *db = 0;
     sqlite3_stmt *file_stmt = 0;
 
-    int rc = sqlite3_open_v2("vfs db", &db, SQLITE_OPEN_READONLY, 0);
+    int rc = sqlite3_open_v2(":memory:", &db, SQLITE_OPEN_READONLY, 0);
+    if (rc) {
+        goto err;
+    }
+
+    rc = sqlite3_deserialize(db, "main", db_buffer.buf, db_buffer.len, db_buffer.len, SQLITE_DESERIALIZE_READONLY);
     if (rc) {
         goto err;
     }
@@ -428,7 +431,12 @@ i32 db_thread(void *userdata)
     while (db_next(&req)) {
         switch (req.type) {
             case DBRequest_UseDB: {
-                cachedb_vfs_register(req.db.buf, req.db.len);
+                free(db_buffer.buf);
+                db_buffer = req.db;
+                rc = sqlite3_deserialize(db, "main", db_buffer.buf, db_buffer.len, db_buffer.len, SQLITE_DESERIALIZE_READONLY);
+                if (rc) {
+                    goto err;
+                }
             } break;
             case DBRequest_File: {
                 sqlite3_bind_text(file_stmt, 1, req.query.buf, req.query.len, 0);

@@ -50,13 +50,13 @@ BadSem sem_create(void)
     return n;
 }
 
-void sem_wait(BadSem sem)
+void thread_wait(BadSem sem)
 {
     std::unique_lock<std::mutex> lock(*sem_mut[sem]);
     sem_cond[sem]->wait(lock);
 }
 
-void sem_notify(BadSem sem)
+void thread_notify(BadSem sem)
 {
     std::lock_guard<std::mutex> lock(*sem_mut[sem]);
     sem_cond[sem]->notify_all();
