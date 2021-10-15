@@ -1,5 +1,8 @@
 
 #include "./imgui/imgui.h"
+#ifdef CIMGUI_FREETYPE
+#include "./imgui/misc/freetype/imgui_freetype.h"
+#endif
 #include "./imgui/imgui_internal.h"
 #include "cimgui.h"
 
@@ -30,6 +33,11 @@ CIMGUI_API void ImGuiTextBuffer_appendf(struct ImGuiTextBuffer *buffer, const ch
 CIMGUI_API float igGET_FLT_MAX()
 {
     return FLT_MAX;
+}
+
+CIMGUI_API float igGET_FLT_MIN()
+{
+    return FLT_MIN;
 }
 
 

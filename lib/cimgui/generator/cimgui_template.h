@@ -8,9 +8,6 @@
     #else
         #define API __declspec(dllexport)
     #endif
-    #ifndef __GNUC__
-    #define snprintf sprintf_s
-    #endif
 #else
     #ifdef __GNUC__
         #define API  __attribute__((__visibility__("default")))
@@ -55,6 +52,8 @@ CIMGUI_API void igLogText(CONST char *fmt, ...);
 CIMGUI_API void ImGuiTextBuffer_appendf(struct ImGuiTextBuffer *buffer, const char *fmt, ...);
 //for getting FLT_MAX in bindings
 CIMGUI_API float igGET_FLT_MAX();
+//for getting FLT_MIN in bindings
+CIMGUI_API float igGET_FLT_MIN();
 
 
 CIMGUI_API ImVector_ImWchar* ImVector_ImWchar_create();
