@@ -87,7 +87,6 @@ typedef struct SimFileInfo
 
     bool open;
     bool stops;
-    bool fullscreen_window;
     u64 frame_last_focused;
 } SimFileInfo;
 
@@ -191,7 +190,6 @@ typedef struct State
 
     int update_index;
     struct {
-        i32 num_open_windows;
         f32 left_width;
         f32 centre_width;
         f32 right_width;
@@ -398,7 +396,7 @@ static bool BeginPlotDefaultsOptimizer(const char* title_id, const char* x_label
 static ImVec4 GetColormapColor(int index)
 {
     ImVec4 result;
-    ImPlot_GetColormapColor(&result, index, -1);
+    ImPlot_GetColormapColor(&result, index, 3);
     return result;
 }
 
@@ -1281,7 +1279,6 @@ void frame(void)
     DBResultsByType db_results = db_pump();
     state.reset_optimizer_flag = process_target_files(&state.loader, db_results.of[DBRequest_File]);
 
-#if 0
     // Search stuff
     buf_reserve(state.search.results, 1024);
     for (isize i = 0; i < buf_len(db_results.of[DBRequest_Search]); i++) {
@@ -1290,7 +1287,6 @@ void frame(void)
             buf_push(state.search.results, r->file);
         }
     }
-#endif
 
     // Optimization stuff
     static char const *optimizer_error_message = 0;
@@ -1434,6 +1430,9 @@ void frame(void)
     SimFileInfo *active = state.active;
 
     f32 right_width = 400.0f;
+    f32 left_width = 302.0f;
+    f32 centre_width = ds.x - left_width - right_width;
+
     igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Files", 0, fixed_window)) {
@@ -1524,7 +1523,6 @@ void frame(void)
 
     ParamSliderChange changed_param = {0};
 
-    f32 left_width = 302.0f;
     igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always,  V2Zero);
     igSetNextWindowSize(V2(left_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Mod Parameters", 0, fixed_window)) {
@@ -1596,131 +1594,23 @@ void frame(void)
         buf_clear(state.low_prio_work);
     }
 
-    // MSD graph windows
-    i32 num_open_windows = 0;
-    f32 centre_width = ds.x - left_width - right_width;
-    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-        if (sfi->open) {
-            // Window placement
-            ImGuiWindowFlags window_flags = ImGuiWindowFlags_None;
-            if ((state.last_frame.num_open_windows == 0 && centre_width >= 450.0f) || sfi->fullscreen_window) {
-                sfi->fullscreen_window = true;
-                window_flags = ImGuiWindowFlags_NoResize;
-                igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
-                igSetNextWindowSize(V2(centre_width, ds.y), ImGuiCond_Always);
-            } else {
-                sfi->fullscreen_window = false;
-                ImVec2 sz = V2(clamp_high(ds.x, 750.0f), clamp(300.0f, ds.y, ds.y * 0.33f * (f32)buf_len(sfi->graphs)));
-                ImVec2 pos = V2(left_width + rngf() * (ds.x - left_width - sz.x), rngf() * (ds.y - sz.y));
-                igSetNextWindowPos(pos, ImGuiCond_Once, V2Zero);
-                igSetNextWindowSize(sz, ImGuiCond_Once);
-            }
-            if (igBegin(sfi->id.buf, &sfi->open, window_flags)) {
-                calculate_effects(sfi == active ? &state.high_prio_work : &state.low_prio_work, &state.info, sfi, false, state.generation);
-
-                if (igIsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
-                    next_active = sfi;
-                }
-
-                // Unset fullscreen window on drag
-                if (igIsWindowHovered(ImGuiHoveredFlags_RootWindow) && igIsMouseDragging(0, -1.f)) {
-                    sfi->fullscreen_window = false;
-                }
-
-                // File difficulty + chartkey text
-                igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
-                igSameLine(0, 4);
-                igText("(Want %g at %gx)", (f64)sfi->target.want_msd, (f64)sfi->target.rate);
-                igSameLine(clamp_low(GetContentRegionAvailWidth() - 235.f, 100), 0);
-                igText(sfi->chartkey.buf);
-
-                igSetNextItemWidth(36.0f);
-                igDragFloat("Target MSD Bias", &sfi->target.msd_bias, 0.05f, -sfi->target.want_msd, 40.0f - sfi->target.want_msd, "%g", 1.0f);
-                igSetNextItemWidth(36.0f);
-                igDragFloat("Target Weight", &sfi->target.weight, 0.05f, 0.0f, 10000.0f, "%g", 1.0f);
-
-                // Plots. Weird rendering order: first 0, then backwards from the end
-                FnGraph *fng = &state.graphs[sfi->graphs[0]];
-                i32 zoomable = fng->initialised && fng->zoomable_once ? ImGuiCond_Once : ImGuiCond_Always;
-                if (fng->initialised && !fng->zoomable_once) {
-                    fng->zoomable_once = true;
-                }
-                ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, zoomable);
-                if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
-                    calculate_file_graph(&state.high_prio_work, sfi, fng, state.generation);
-                    for (i32 ss = 0; ss < NumSkillsets; ss++) {
-                        skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
-                    }
-                    ImPlot_EndPlot();
-                }
-                igSameLine(0, 4);
-                ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->relative_min - 0.05, 1.05, zoomable);
-                if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
-                    for (i32 ss = 1; ss < NumSkillsets; ss++) {
-                        skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
-                    }
-                    ImPlot_EndPlot();
-                }
-
-                for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
-                    fng = &state.graphs[sfi->graphs[fungi]];
-                    zoomable = fng->initialised && fng->zoomable_once ? ImGuiCond_Once : ImGuiCond_Always;
-                    if (fng->initialised && !fng->zoomable_once) {
-                        fng->zoomable_once = true;
-                    }
-                    if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
-                        calculate_parameter_graph_force(&state.high_prio_work, sfi, fng, state.generation);
-                        zoomable = ImGuiCond_Always;
-                    }
-
-                    i32 mp = fng->param;
-                    ParamInfo *p = &state.info.params[mp];
-                    u8 full_name[64] = {0};
-                    snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
-                    igPushID_Str(full_name);
-                    ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, zoomable);
-                    if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
-                        calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
-                        for (i32 ss = 0; ss < NumSkillsets; ss++) {
-                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
-                        }
-                        ImPlot_EndPlot();
-                    }
-                    igSameLine(0, 4);
-                    ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->relative_min - 0.05, (f64)1.05, zoomable);
-                    if (BeginPlotDefaults("##Relative AA", full_name, 0)) {
-                        for (i32 ss = 1; ss < NumSkillsets; ss++) {
-                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
-                        }
-                        ImPlot_EndPlot();
-                    }
-                    igPopID();
-                }
-            }
-            igEnd();
-            num_open_windows++;
-        }
-    }
-
     // Main, center window
-    igSetNextWindowPos(V2(left_width, 0), ImGuiCond_Always, V2Zero);
-    igSetNextWindowSize(V2(centre_width, ds.y - 50.f), ImGuiCond_Always);
+    igSetNextWindowPos(V2(left_width + 2.0f, 2.0f), ImGuiCond_Always, V2Zero);
+    igSetNextWindowSize(V2(centre_width - 4.0f, ds.y - 52.0f), ImGuiCond_Always);
     if (igBegin("SeeMinaCalc", 0, ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoResize)) {
-        num_open_windows++;
-
         if (igBeginTabBar("main", ImGuiTabBarFlags_None)) {
             if (igBeginTabItem("Halp", 0,0)) {
-                igTextWrapped("There are two ways to get files into this thing: drag and drop simfiles directly, or drag and drop a cache.db and use the search tab.");
-                igTextWrapped("You can also drag on a CalcTestList.xml once cache.db is loaded.\n\n");
-                igTextWrapped("Alternatively for the native binary only:");
-                igTextWrapped("Place the .exe next to a cache.db and CalcTestList.xml, or run on the command line like:\n\n");
-                igTextWrapped("    seeminacalc db=/etterna/Cache/cache.db list=/path/to/CalcTestList.xml\n\n");
-                igTextWrapped("For any given file, most parameters (on the left) will do nothing. So by default parameters that do not affect the active skillsets (top left) of the most recently selected file are filtered out.\n\n");
-                igTextWrapped("The problem the optimizer tries to solve is uh \"ill-posed\" so it does not having a stopping criteria. Have fun");
+                igTextWrapped("There are two ways to get files into this thing: drag and drop simfiles, or drag and drop a cache.db and use the search tab. You can also drag on a CalcTestList.xml once cache.db is loaded.\n\n"
+                    "Alternatively for the native binary only:\n"
+                    "Place the .exe next to a cache.db and CalcTestList.xml, or run on the command line like:\n\n"
+                    "    seeminacalc db=/etterna/Cache/cache.db list=/path/to/CalcTestList.xml\n\n"
+                    "For any given file, most parameters (on the left) will do nothing. So, by default, parameters that do not effect the active skillsets (top left) of the most recently selected file are filtered out.\n\n"
+                    "You can set the ratings you want files to have for particular skillsets and the optimizer will fiddle with numerical values in the calc and try to make it happen.\n\n"
+                    "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun");
 
 #ifdef NO_SSE
                 igTextColored((ImVec4) { 1, 0, 0, 1.0f}, "No SSE available");
-                igTextWrapped("If you are on an x64 machine, turn on SIMD support in about:flags if you want the calc to be exactly the same as in game (this is a numerical precision thing, not a speed thing)");
+                igTextWrapped("If you are on an x64 machine, turn on SIMD support in about:flags if you want the calc to be the same as in game (this is a numerical precision thing, not a speed thing)");
 #endif
                 igEndTabItem();
             }
@@ -1728,26 +1618,133 @@ void frame(void)
                 igEndTabItem();
             }
             if (igBeginTabItem("Search", 0,0)) {
-                #if 0
-                igTextUnformatted("Search", 0);
                 if (db_ready()) {
                     static char q[512] = "";
-                    if (igInputText("#Search", q, 512, 0,0,0)) {
-                        buf_clear(state.search.results);
-                        db_search((String) { q, strlen(q) });
+                    static bool have_query = false;
+                    bool have_new_query = false;
+                    if (igInputText("##Search", q, 512, 0,0,0)) {
+                        have_query = (q[0] != 0);
+                        if (have_query) {
+                            state.search.id = db_search((String) { q, strlen(q) });
+                            have_new_query = true;
+                        }
                     }
-                    for (isize i = 0; i < buf_len(state.search.results); i++) {
+                    if (have_query) {
+                        igSameLine(0, 4);
+                        igText("%lld matches", buf_len(state.search.results));
+                    }
+                    if (igBeginTable("Search Results", 8, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
+                        igTableSetupColumn("Diff", 0, 1, 0);
+                        igTableSetupColumn("Author", 0, 2, 0);
+                        igTableSetupColumn("Title", ImGuiTableFlags_SizingStretchProp, 5, 0);
+                        igTableSetupColumn("Subtitle", ImGuiTableFlags_SizingStretchProp, 3, 0);
+                        igTableSetupColumn("Artist", 0, 2, 0);
+                        igTableSetupColumn("MSD", 0, 0, 0);
+                        igTableSetupColumn("Skillset", 0, 0, 0);
+                        igTableSetupColumn("", 0, 2, 0);
+                        igTableHeadersRow();
+                        ImGuiListClipper clip = {0};
+                        ImGuiListClipper_Begin(&clip, buf_len(state.search.results), 0.0f);
+                        while (ImGuiListClipper_Step(&clip)) {
+                            for (isize i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
+                                DBFile *f = &state.search.results[i];
+                                igTableNextRow(0, 0);
+                                igTableSetColumnIndex(0);
+                                igTextUnformatted(SmDifficultyStrings[f->difficulty].buf, SmDifficultyStrings[f->difficulty].buf + SmDifficultyStrings[f->difficulty].len);
+                                igTableSetColumnIndex(1);
+                                igTextUnformatted(f->author.buf, f->author.buf + f->author.len);
+                                igTableSetColumnIndex(2);
+                                igTextUnformatted(f->title.buf, f->title.buf + f->title.len);
+                                igTableSetColumnIndex(3);
+                                igTextUnformatted(f->subtitle.buf, f->subtitle.buf + f->subtitle.len);
+                                igTableSetColumnIndex(4);
+                                igTextUnformatted(f->artist.buf, f->artist.buf + f->artist.len);
+                                igTableSetColumnIndex(5);
+                                igText("%.4f", (f64)f->rating);
+                                igTableSetColumnIndex(6);
+                                igText("%s", SkillsetNames[f->skillset]);
+                            }
+                        }
 
+                        igEndTable();
+                    }
+                    if (have_new_query) {
+                        // Delaying clearing the old search's results one frame looks a bit nicer
+                        buf_clear(state.search.results);
                     }
                 } else {
                     igTextWrapped("No cache.db :(");
                 }
-                #endif
                 igEndTabItem();
             }
-            if (igBeginTabItem("Optimizer", 0,0))
-            {
+            if (igBeginTabItem("Graphs", 0,0)) {
+                if (buf_len(state.files) == 0) {
+                    igTextWrapped("No files to graph :(");
+                } else if (active == null_sfi) {
+                    next_active = state.files;
+                    next_active->open = true;
+                } else {
+                    SimFileInfo *sfi = active;
 
+                    // File difficulty + chartkey text
+                    igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
+                    igSameLine(clamp_low(GetContentRegionAvailWidth() - 240.f, 100), 0);
+                    igText(sfi->chartkey.buf);
+
+                    // Plots. Weird rendering order: first 0, then backwards from the end
+                    FnGraph *fng = &state.graphs[sfi->graphs[0]];
+                    ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+                    if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
+                        calculate_file_graph(&state.high_prio_work, sfi, fng, state.generation);
+                        for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
+                        }
+                        ImPlot_EndPlot();
+                    }
+                    igSameLine(0, 4);
+                    ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->relative_min - 0.05, 1.05, ImGuiCond_Always);
+                    if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
+                        for (i32 ss = 1; ss < NumSkillsets; ss++) {
+                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
+                        }
+                        ImPlot_EndPlot();
+                    }
+
+                    for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
+                        fng = &state.graphs[sfi->graphs[fungi]];
+                        if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
+                            calculate_parameter_graph_force(&state.high_prio_work, sfi, fng, state.generation);
+                        }
+
+                        i32 mp = fng->param;
+                        ParamInfo *p = &state.info.params[mp];
+                        u8 full_name[64] = {0};
+                        snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
+                        igPushID_Str(full_name);
+                        ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+                        if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
+                            calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
+                            for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                                skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
+                            }
+                            ImPlot_EndPlot();
+                        }
+                        igSameLine(0, 4);
+                        ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->relative_min - 0.05, (f64)1.05, ImGuiCond_Always);
+                        if (BeginPlotDefaults("##Relative AA", full_name, 0)) {
+                            for (i32 ss = 1; ss < NumSkillsets; ss++) {
+                                skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
+                            }
+                            ImPlot_EndPlot();
+                        }
+                        igPopID();
+                    }
+                }
+
+                igEndTabItem();
+            }
+
+            if (igBeginTabItem("Optimizer", 0,0)) {
                 f32 err_lim = 2.0f;
                 f32 loss_lim = FLT_MIN;
                 for (isize i = 0; i < NumGraphSamples; i++) {
@@ -1794,11 +1791,11 @@ void frame(void)
                     tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
                     igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
                     tooltip("weights higher MSDs heavier automatically");
-        #if 0
+#if 0
                     igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
                     tooltip("be more accepting of files that come under their target ssr than over");
                     NegativeEpsilon = UnderratedDeadZone / state.target.msd_sd;
-        #endif
+#endif
                     igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", ImGuiSliderFlags_Logarithmic);
                     tooltip("penalise moving parameters very far away from the defaults");
                     igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
@@ -1823,7 +1820,7 @@ void frame(void)
                 }
                 igEndChild();
 
-        #if 0
+#if 0
                 for (isize i = 1; i < NumSkillsets; i++) {
                     igPushIDInt((i32)i);
                     igText("%s Bias", SkillsetNames[i]);
@@ -1842,7 +1839,7 @@ void frame(void)
                     igSliderFloat("##%", &state.opt_cfg.goals[i], 0.9f, 0.965f, "%f", 1.0f);
                     igPopID();
                 }
-        #endif
+#endif
                 igEndTabItem();
             }
             igEndTabBar();
@@ -1866,7 +1863,7 @@ void frame(void)
         }
         time = 1000. * time / (f64)buf_len(state.threads);
 
-        igSetNextWindowSize(V2(centre_width - 5.0f, 0), 0);
+        igSetNextWindowSize(V2(centre_width - 4.0f, 0), 0);
         igSetNextWindowPos(V2(left_width + 2.f, ds.y - 2.f), 0, V2(0, 1));
         igBegin("Debug", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
 
@@ -1893,7 +1890,6 @@ void frame(void)
     sg_end_pass();
     sg_commit();
 
-    state.last_frame.num_open_windows = num_open_windows;
     state.last_frame.left_width = left_width;
     state.last_frame.centre_width = centre_width;
     state.last_frame.right_width = right_width;
@@ -1916,6 +1912,7 @@ void frame(void)
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
         calculate_file_graphs(&state.high_prio_work, state.active, state.generation);
+        calculate_effects(&state.high_prio_work, &state.info, state.active, false, state.generation);
     }
 
     if (changed_param.type) {

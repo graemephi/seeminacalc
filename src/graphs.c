@@ -179,7 +179,6 @@ struct FnGraph
     b8 active;
     b8 have_ys;
     b8 initialised;
-    b8 zoomable_once;
     b32 is_param;
     i32 param;
     i32 len;

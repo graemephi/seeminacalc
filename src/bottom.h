@@ -132,11 +132,6 @@ static f32 absolute_value(f32 v)
     return (v < 0) ? -v : v;
 }
 
-static b32 is_finite(f32 v)
-{
-    return absolute_value(v) <= FLT_MAX;
-}
-
 typedef struct Stack
 {
     u8 *buf;
