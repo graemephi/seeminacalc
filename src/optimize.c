@@ -86,7 +86,7 @@ f32 loss(f32 delta, f32 barrier)
     // losses cluster at the edges rather than push them as high in the flat
     // region as possible. Also, it's not obvious what scale it is on.
     //
-    // Barrier, for postiive x, switches from x^2 to x^barrier loss at the point
+    // Barrier, for positive x, switches from x^2 to x^barrier loss at the point
     // their derivatives are equal. So, as far as I can tell, this should be
     // well behaved for the optimizer. But it's hard to reason about so yeeting
     // it.
@@ -170,7 +170,7 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
         pop_allocator();
 
         f32 h2 = 2 * H;
-        f32 hsq = square(H);
+        f32 hsq = H*H;
         for (isize i = 0; i < opt->n_params; i++) {
             if (param_evals[i].samples) {
                 f32 regularisation_l1 = 0;
@@ -185,6 +185,8 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                     loss_xh += loss(xh->delta, xh->barrier);
                     regularisation_l1 += clamp(-H, H, 2 * xh->value_difference_from_initial - H);
                     regularisation_l2 += h2 * xh->value_difference_from_initial;
+
+                    n_losses += 1.0f;
                 }
 
                 f32 penalty = Regularisation * lerp(regularisation_l1, regularisation_l2, RegularisationAlpha);
@@ -200,7 +202,6 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                 opt->x[i] = opt->x[i] - StepSize * m / (sqrtf(v) + 1e-8f);
 
                 opt->loss += loss_x + penalty;
-                n_losses += 1.0f;
             } else {
                 opt->m[i] = lerp(0, opt->m[i], MDecay);
                 opt->v[i] = lerp(0, opt->v[i], VDecay);

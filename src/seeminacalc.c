@@ -388,9 +388,9 @@ static bool BeginPlotDefaults(const char* title_id, const char* x_label, const c
 {
     return ImPlot_BeginPlot(title_id, x_label, y_label, (ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_NoLegend, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, 0, 0);
 }
-static bool BeginPlotDefaultsOptimizer(const char* title_id, const char* x_label, const char* y_label)
+static bool BeginPlotOptimizer(const char* title_id)
 {
-    return ImPlot_BeginPlot(title_id, x_label, y_label, (ImVec2){igGetWindowWidth() - 8.0f, 0}, ImPlotFlags_NoLegend, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, 0, 0);
+    return ImPlot_BeginPlot(title_id, "", "Average Error", (ImVec2){-1, 0}, ImPlotFlags_YAxis2, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_None, ImPlotAxisFlags_None, ImPlotAxisFlags_None, "Loss", 0);
 }
 
 static ImVec4 GetColormapColor(int index)
@@ -1325,7 +1325,13 @@ void frame(void)
                 state.reset_optimizer_flag = false;
             }
 
-            if (state.opt_pending_evals == 0) {
+            if (state.opt.n_params == 0) {
+                optimizer_error_message = "No parameters are enabled for optimizing.";
+                state.optimizing = false;
+            } else if (state.opt.n_samples == 0) {
+                optimizer_error_message = "No files to optimize.";
+                state.optimizing = false;
+            } else if (state.opt_pending_evals == 0) {
                 state.generation++;
                 last_generation = state.generation;
 
@@ -1403,15 +1409,7 @@ void frame(void)
 
                     state.opt_pending_evals = submitted;
 
-                    static u64 t = 0;
-                    if (stm_sec(stm_since(t)) > 1.0) {
-                        t = stm_now();
-
-                        for (isize i = 0; i < buf_len(state.files); i++) {
-                            calculate_skillsets(&state.high_prio_work, &state.files[i], false, state.generation);
-                        }
-                    }
-
+                    calculate_skillsets(&state.high_prio_work, &state.files[state.opt.iter % buf_len(state.files)], false, state.generation);
                     state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
                     state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
                 }
@@ -1430,7 +1428,7 @@ void frame(void)
     SimFileInfo *active = state.active;
 
     f32 right_width = 400.0f;
-    f32 left_width = 302.0f;
+    f32 left_width = 322.0f;
     f32 centre_width = ds.x - left_width - right_width;
 
     igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
@@ -1531,7 +1529,7 @@ void frame(void)
         igPushID_Str(active->id.buf);
 
         // Skillset filters
-        f32 selectable_width_factor = 4.0f;
+        f32 selectable_width_factor = 4.2f;
         for (isize i = 0; i < NumSkillsets; i++) {
             igPushStyleColor_U32(ImGuiCol_Header, state.skillset_colors_selectable[i]);
             igPushStyleColor_U32(ImGuiCol_HeaderHovered, state.skillset_colors[i]);
@@ -1604,7 +1602,7 @@ void frame(void)
                     "Alternatively for the native binary only:\n"
                     "Place the .exe next to a cache.db and CalcTestList.xml, or run on the command line like:\n\n"
                     "    seeminacalc db=/etterna/Cache/cache.db list=/path/to/CalcTestList.xml\n\n"
-                    "For any given file, most parameters (on the left) will do nothing. So, by default, parameters that do not effect the active skillsets (top left) of the most recently selected file are filtered out.\n\n"
+                    "For any given file, most parameters (on the left) will do nothing. So, by default, parameters that have no effect on the rating of the most recently selected file are filtered out.\n\n"
                     "You can set the ratings you want files to have for particular skillsets and the optimizer will fiddle with numerical values in the calc and try to make it happen.\n\n"
                     "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun");
 
@@ -1660,7 +1658,7 @@ void frame(void)
                                 igTableSetColumnIndex(4);
                                 igTextUnformatted(f->artist.buf, f->artist.buf + f->artist.len);
                                 igTableSetColumnIndex(5);
-                                igText("%.4f", (f64)f->rating);
+                                igTextColored(msd_color(f->rating), "%.2f", (f64)f->rating);
                                 igTableSetColumnIndex(6);
                                 igText("%s", SkillsetNames[f->skillset]);
                             }
@@ -1688,10 +1686,12 @@ void frame(void)
 
                     // File difficulty + chartkey text
                     igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
-                    igSameLine(clamp_low(GetContentRegionAvailWidth() - 240.f, 100), 0);
+                    igSameLine(0, 8);
+                    igSelectable_Bool(sfi->id.buf, false, ImGuiSelectableFlags_Disabled, V2Zero);
+                    igSameLine(clamp_low(GetContentRegionAvailWidth() - 275.f, 100), 0);
                     igText(sfi->chartkey.buf);
 
-                    // Plots. Weird rendering order: first 0, then backwards from the end
+                    // Plots. Weird rendering order: first 0, then backwards from the end. This keeps the main graph at the top and the rest most-to-least recent.
                     FnGraph *fng = &state.graphs[sfi->graphs[0]];
                     ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
                     if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
@@ -1745,29 +1745,26 @@ void frame(void)
             }
 
             if (igBeginTabItem("Optimizer", 0,0)) {
-                f32 err_lim = 2.0f;
-                f32 loss_lim = FLT_MIN;
+                f32 err_lim = 2.5f;
+                f32 loss_lim = 1.0f;
                 for (isize i = 0; i < NumGraphSamples; i++) {
                     err_lim = max(err_lim, state.optimization_graph->ys[0][i]);
                     loss_lim = max(loss_lim, state.optimization_graph->ys[1][i]);
                 }
-                ImPlot_PushStyleColor_U32(ImPlotCol_Line, state.skillset_colors[0]);
-                ImPlot_SetNextPlotLimits(0, NumGraphSamples, 0, (f64)err_lim, ImGuiCond_Always);
-                if (BeginPlotDefaultsOptimizer("##Average Error", "", "Average Error")) {
-                    ImPlot_PlotLine_FloatPtrInt("Error", state.optimization_graph->ys[0], state.optimization_graph->len, 0, 1, 0, sizeof(float));
+                ImPlot_SetNextPlotLimitsX(state.opt.iter - NumGraphSamples, state.opt.iter, ImGuiCond_Always);
+                ImPlot_SetNextPlotLimitsY(0, (f64)err_lim * 1.1, ImGuiCond_Always, 0);
+                ImPlot_SetNextPlotLimitsY(0, (f64)loss_lim * 1.1, ImGuiCond_Always, 1);
+                if (BeginPlotOptimizer("##OptGraph")) {
+                    ImPlot_PlotLine_FloatPtrInt("Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
+                    ImPlot_SetPlotYAxis(ImPlotYAxis_2);
+                    ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[1], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
                     ImPlot_EndPlot();
                 }
-                ImPlot_SetNextPlotLimits(0, NumGraphSamples, 0, (f64)loss_lim, ImGuiCond_Always);
-                if (BeginPlotDefaultsOptimizer("##Loss", "Iteration", "Loss")) {
-                    ImPlot_PushStyleColor_U32(ImPlotCol_Line, state.skillset_colors[0]);
-                    ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[1], state.optimization_graph->len, 0, 1, 0, sizeof(float));
-                    ImPlot_EndPlot();
-                }
-                ImPlot_PopStyleColor(1);
 
                 if (igButton(state.optimizing ? "Stop" : "Start", V2Zero)) {
                     state.optimizing = !state.optimizing;
-                } igSameLine(0, 4);
+                }
+                igSameLine(0, 4);
                 if (igButton("Checkpoint", V2Zero)) {
                     checkpoint();
                 }
@@ -1781,9 +1778,9 @@ void frame(void)
                     tooltip("coarseness of the derivative approximation\n\nfinite differences baybee");
                     igSliderFloat("Step Size", &StepSize, 1.0e-8f, 0.1f, "%g", ImGuiSliderFlags_None);
                     tooltip("how fast to change parameters. large values can be erratic");
-                    igSliderInt("Sample Batch Size", &SampleBatchSize, 1, state.opt.n_samples, "%d", ImGuiSliderFlags_None);
+                    igSliderInt("Sample Batch Size", &SampleBatchSize, 1, maxs(1, state.opt.n_samples), "%d", ImGuiSliderFlags_None);
                     tooltip("random sample of n files for each step");
-                    igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, state.opt.n_params, "%d", ImGuiSliderFlags_None);
+                    igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, maxs(1, state.opt.n_params), "%d", ImGuiSliderFlags_None);
                     tooltip("random sample of n parameters for each step");
                     igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
                     tooltip("0 = train only on skillset\n1 = train only on overall");
