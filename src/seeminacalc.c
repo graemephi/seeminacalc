@@ -390,7 +390,7 @@ static bool BeginPlotDefaults(const char* title_id, const char* x_label, const c
 }
 static bool BeginPlotOptimizer(const char* title_id)
 {
-    return ImPlot_BeginPlot(title_id, "", "Average Error", (ImVec2){-1, 0}, ImPlotFlags_YAxis2, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_None, ImPlotAxisFlags_None, ImPlotAxisFlags_None, "Loss", 0);
+    return ImPlot_BeginPlot(title_id, "", "Error", (ImVec2){-1, 0}, ImPlotFlags_YAxis2, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_None, ImPlotAxisFlags_None, ImPlotAxisFlags_None, "Loss", 0);
 }
 
 static ImVec4 GetColormapColor(int index)
@@ -719,13 +719,15 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
             String author = file->author;
             String diff = SmDifficultyStrings[file->difficulty];
             String id = {0};
-            id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s%g.%d",
-                title.len, title.buf,
+            id.len = buf_printf(id.buf, "%.*s ", title.len, title.buf);
+            if (req->rate != 1.0f) {
+                id.len += buf_printf(id.buf, "%.1f ", (f64)req->rate);
+            }
+            id.len += buf_printf(id.buf, "(%.*s%.*s%.*s)##%.*s.%d",
                 author.len, author.buf,
                 author.len == 0 ? 0 : 2, ", ",
                 diff.len, diff.buf,
                 ck.len, ck.buf,
-                (f64)req->rate,
                 req->skillset
             );
             pop_allocator();
@@ -813,6 +815,14 @@ typedef struct ParamSliderChange
 static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
 {
     if (state.info.params[param_idx].fake) {
+        return;
+    }
+    if (param_idx == 0) {
+        // Stupid hack to not show the slider for rate, but it can still be graphed
+        if (igCheckbox("##graph", &state.parameter_graphs_enabled[param_idx])) {
+            out->type = ParamSlider_GraphToggled;
+            out->param = param_idx;
+        } tooltip("graph this parameter");
         return;
     }
     assert(out);
@@ -1350,7 +1360,7 @@ void frame(void)
                 // Do this even if we have NaNs so that they propagate to the UI.
                 for (isize i = 0; i < state.opt.n_params; i++) {
                     isize p = state.opt_cfg.map.to_ps[i];
-                    // Apply bounds. This is a kind of a hack so it lives out here and not in the optimizer :)
+                    // Apply bounds. This is a hack so it lives out here and not in the optimizer :)
                     state.opt.x[i] = clamp(state.opt_cfg.bounds[p].low, state.opt_cfg.bounds[p].high, state.opt.x[i]);
                     // Copy x into the calc parameters
                     state.ps.params[p] = state.opt.x[i] * state.opt_cfg.normalization_factors[p];
@@ -1409,9 +1419,13 @@ void frame(void)
 
                     state.opt_pending_evals = submitted;
 
-                    calculate_skillsets(&state.high_prio_work, &state.files[state.opt.iter % buf_len(state.files)], false, state.generation);
+                    if (rngf() < 0.25f) {
+                        calculate_skillsets(&state.high_prio_work, &state.files[state.opt.iter % buf_len(state.files)], false, state.generation);
+                    }
+
                     state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
                     state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
+                    state.optimization_graph->ys[2][state.opt.iter % NumGraphSamples] = state.target.max_delta;
                 }
             }
         }
@@ -1745,17 +1759,19 @@ void frame(void)
             }
 
             if (igBeginTabItem("Optimizer", 0,0)) {
-                f32 err_lim = 2.5f;
-                f32 loss_lim = 1.0f;
+                f32 err_limit = 2.5f;
+                f32 loss_limit = 1.0f;
                 for (isize i = 0; i < NumGraphSamples; i++) {
-                    err_lim = max(err_lim, state.optimization_graph->ys[0][i]);
-                    loss_lim = max(loss_lim, state.optimization_graph->ys[1][i]);
+                    err_limit = max(err_limit, state.optimization_graph->ys[0][i]);
+                    err_limit = max(err_limit, state.optimization_graph->ys[2][i]);
+                    loss_limit = max(loss_limit, state.optimization_graph->ys[1][i]);
                 }
                 ImPlot_SetNextPlotLimitsX(state.opt.iter - NumGraphSamples, state.opt.iter, ImGuiCond_Always);
-                ImPlot_SetNextPlotLimitsY(0, (f64)err_lim * 1.1, ImGuiCond_Always, 0);
-                ImPlot_SetNextPlotLimitsY(0, (f64)loss_lim * 1.1, ImGuiCond_Always, 1);
+                ImPlot_SetNextPlotLimitsY(0, (f64)err_limit * 1.1, ImGuiCond_Always, 0);
+                ImPlot_SetNextPlotLimitsY(0, (f64)loss_limit * 1.1, ImGuiCond_Always, 1);
                 if (BeginPlotOptimizer("##OptGraph")) {
-                    ImPlot_PlotLine_FloatPtrInt("Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
+                    ImPlot_PlotLine_FloatPtrInt("Avg Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
+                    ImPlot_PlotLine_FloatPtrInt("Max Positive Error", state.optimization_graph->ys[2], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
                     ImPlot_SetPlotYAxis(ImPlotYAxis_2);
                     ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[1], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
                     ImPlot_EndPlot();

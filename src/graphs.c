@@ -553,13 +553,6 @@ void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, b32 initialisation,
         .skillsets.initialisation = initialisation,
         .generation = generation,
     });
-    if (sfi->target.want_msd != 0.0f) {
-        buf_push(*work, (CalcWork) {
-            .sfi = sfi,
-            .type = Work_Target,
-            .generation = generation,
-        });
-    }
 }
 
 void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
@@ -686,7 +679,7 @@ i32 calc_thread(void *userdata)
                 } break;
                 case Work_Wife: {
                     then = stm_now();
-                    ssr = calc_go(&calc, ps, work.sfi->notes, work.wife.goal);
+                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, work.wife.goal, 0, work.sfi->target.rate);
                     now = stm_now();
                 } break;
                 case Work_Effects: {
@@ -697,12 +690,7 @@ i32 calc_thread(void *userdata)
                 } break;
                 case Work_Skillsets: {
                     then = stm_now();
-                    ssr = calc_go(&calc, ps, work.sfi->notes, WifeXs[work.x_index]);
-                    now = stm_now();
-                } break;
-                case Work_Target: {
-                    then = stm_now();
-                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, WifeXs[work.x_index], 0, work.sfi->target.rate);
                     now = stm_now();
                 } break;
                 default: assert_unreachable();
@@ -791,6 +779,11 @@ void finish_work(void)
                 }
                 void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr);
                 optimizer_skulduggery(sfi, done.work.parameter_loss, done.ssr);
+
+                sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
+                sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
+                sfi->aa_rating = done.ssr.overall;
+                targets_updated = true;
                 continue;
             } break;
             case Work_Effects: {
@@ -817,16 +810,13 @@ void finish_work(void)
                             sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
                         }
                     }
+                    sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
+                    sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
+                    targets_updated = true;
                 } else {
                     assert(done.work.x_index == Wife965Index);
                     sfi->max_rating = done.ssr.overall;
                 }
-                continue;
-            } break;
-            case Work_Target: {
-                targets_updated = true;
-                sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
-                sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
                 continue;
             } break;
             default: assert_unreachable();
