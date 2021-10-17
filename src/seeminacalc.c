@@ -1465,19 +1465,10 @@ void frame(void)
                 igSameLine(0, 12.0f);
             }
         }
-        igSameLine(igGetWindowWidth() - 36.0f, 4);
-        b32 skillsets = false;
-        igPushStyleColor_U32(ImGuiCol_HeaderHovered, 0);
-        igPushStyleColor_U32(ImGuiCol_HeaderActive, 0);
-        if (igTreeNodeEx_Str("##skillsets toggle", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
-            skillsets = true;
-        } tooltip("Skillsets");
-        igPopStyleColor(2);
         igSeparator();
 
         // Open file list
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-            FnGraph *g = &state.graphs[sfi->graphs[0]];
             f32 wife93 = sfi->aa_rating;
             f32 wife965 = sfi->max_rating;
             if (sfi->target.want_msd) {
@@ -1508,24 +1499,6 @@ void frame(void)
                 igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
                 tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
                         "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
-            }
-            if (skillsets) {
-                for (isize ss = 0; ss < NumSkillsets; ss++) {
-                    char r[32] = {0};
-                    snprintf(r, sizeof(r), "%2.2f##%d", (f64)g->ys[ss][Wife930Index], (i32)ss);
-                    igPushStyleColor_U32(ImGuiCol_Header, state.skillset_colors_selectable[ss]);
-                    igPushStyleColor_U32(ImGuiCol_HeaderHovered, state.skillset_colors[ss]);
-                    igSelectable_Bool(r, sfi->display_skillsets[ss], ImGuiSelectableFlags_None, V2(300.0f / NumSkillsets, 0));
-                    tooltip("%s", SkillsetNames[ss]);
-                    if (igIsItemHovered(0)) {
-                        ss_highlight[ss] = 1;
-                    }
-                    igPopStyleColor(2);
-                    igSameLine(0, 4);
-                    igDummy(V2(4,0));
-                    igSameLine(0, 4);
-                }
-                igNewLine();
             }
             igPopID();
             igSeparator();
