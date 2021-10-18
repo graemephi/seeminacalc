@@ -981,9 +981,8 @@ i32 pack_opt_parameters(CalcInfo *info, f32 *params, f32 *normalization_factors,
 }
 
 static f32 SkillsetOverallBalance = 0.35f;
-static f32 ExpScale = 0.5f;
-static f32 Scale = 1.0f;
-static f32 Misclass = 1.0f;
+static f32 ExpScale = 0.0f;
+static f32 Misclass = 0.0f;
 #if 0
 static f32 UnderratedDeadZone = 0.5f;
 #endif
@@ -1077,19 +1076,20 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
     i32 ss = sfi->target.skillset;
     f32 mean = state.target.msd_mean;
     f32 target = (work.msd - mean) / state.target.msd_sd;
-    target = lerp(target, expf(target), ExpScale);
+    if (ExpScale) target = lerp(target, expf(target), ExpScale);
     f32 skillset = (ssr.E[ss] - mean) / state.target.msd_sd;
-    skillset = lerp(skillset, expf(skillset), ExpScale);
+    if (ExpScale) skillset = lerp(skillset, expf(skillset), ExpScale);
     f32 overall = (ssr.overall - mean) / state.target.msd_sd;
-    overall = lerp(overall, expf(overall), ExpScale);
+    if (ExpScale) overall = lerp(overall, expf(overall), ExpScale);
     f32 delta_skillset = skillset - target;
     f32 delta_overall = overall - target;
     f32 ssr_largest = 0;
     for (isize i = 1; i < NumSkillsets; i++) {
         ssr_largest = max(ssr_largest, ssr.E[i]);
     }
-    f32 misclass = Misclass * expf(ssr_largest / ssr.E[ss] - 1.0f);
-    f32 delta = sfi->target.weight * Scale * misclass * lerp(delta_skillset, delta_overall, SkillsetOverallBalance);
+    f32 misclass = 1.0f;
+    if (Misclass) misclass = expf(Misclass * (ssr_largest / ssr.E[ss] - 1.0f));
+    f32 delta = sfi->target.weight * misclass * lerp(delta_skillset, delta_overall, SkillsetOverallBalance);
     i32 opt_param = state.opt_cfg.map.to_opt[work.param];
     f32 difference = 0.0f;
     if (work.param != Param_None) {
@@ -1776,7 +1776,7 @@ void frame(void)
                     igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", ImGuiSliderFlags_None);
                     tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
                     igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
-                    tooltip("weights higher MSDs heavier automatically");
+                    tooltip("weights higher MSDs heavier automatically\n0 = train on msd\n1 = train on exp(msd)\n\nmsd is zero centered and normalized so dw about it");
 #if 0
                     igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
                     tooltip("be more accepting of files that come under their target ssr than over");

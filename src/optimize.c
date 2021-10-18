@@ -214,7 +214,7 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
 
     opt->iter++;
 
-    opt->loss /= n_losses;
+    opt->loss *= (f32)(opt->n_samples * opt->n_params) / n_losses;
 
     random_sequence(opt->active.samples, opt->focus);
     random_sequence(opt->active.parameters, 0);
