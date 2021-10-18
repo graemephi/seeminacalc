@@ -750,6 +750,11 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 }
             }
 
+            if (buf_len(state.files) == buf_cap(state.files)) {
+                printf("please.. no more files");
+                goto give_up;
+            }
+
             id = copy_string(id);
             String display_id = (String) { id.buf, display_id_len };
             SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
