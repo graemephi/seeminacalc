@@ -269,6 +269,14 @@ static f32 rating_floor(f32 v)
     return (f32)((i32)(v * 100.0f)) / 100.f;
 }
 
+static SkillsetRatings rating_floor_skillsets(SkillsetRatings ssr)
+{
+    for (isize ss = 0; ss < array_length(ssr.E); ss++) {
+        ssr.E[ss] = rating_floor(ssr.E[ss]);
+    }
+    return ssr;
+}
+
 void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, ParamSet *ps, NoteData *note_data, i32 param, EffectMasks *out)
 {
     i32 p = param;
@@ -782,7 +790,7 @@ void finish_work(void)
 
                 sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
                 sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
-                sfi->aa_rating = done.ssr.overall;
+                sfi->aa_rating = rating_floor_skillsets(done.ssr);
                 targets_updated = true;
                 continue;
             } break;
@@ -798,15 +806,14 @@ void finish_work(void)
                 }
 
                 if (done.work.x_index == Wife930Index) {
-                    sfi->aa_rating = done.ssr.overall;
+                    sfi->aa_rating = rating_floor_skillsets(done.ssr);
                     for (isize ss = 0; ss < NumSkillsets; ss++) {
                         sfi->display_skillsets[ss] = 0.9f <= (done.ssr.E[ss] / done.ssr.overall);
                     }
 
                     if (done.work.skillsets.initialisation) {
-                        sfi->default_ratings = done.ssr;
+                        sfi->default_ratings = rating_floor_skillsets(done.ssr);
                         for (isize ss = 0; ss < NumSkillsets; ss++) {
-                            sfi->default_ratings.E[ss] = rating_floor(sfi->default_ratings.E[ss]);
                             sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
                         }
                     }
@@ -815,7 +822,7 @@ void finish_work(void)
                     targets_updated = true;
                 } else {
                     assert(done.work.x_index == Wife965Index);
-                    sfi->max_rating = done.ssr.overall;
+                    sfi->max_rating = rating_floor_skillsets(done.ssr);
                 }
                 continue;
             } break;
@@ -847,8 +854,8 @@ void finish_work(void)
         }
 
         if (fng->is_param == false) {
-            sfi->aa_rating = rating_floor(fng->ys[0][Wife930Index]);
-            sfi->max_rating = fng->ys[0][Wife965Index];
+            // sfi->aa_rating.E[0] = rating_floor(fng->ys[0][Wife930Index]);
+            // sfi->max_rating.E[0] = fng->ys[0][Wife965Index];
 
             if (fng->resident_count == array_length(fng->resident)) {
                 for (isize ss = 1; ss < NumSkillsets; ss++) {

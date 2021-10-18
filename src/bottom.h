@@ -150,6 +150,16 @@ Stack stack_make(u8 *buf, isize buf_size)
     return (Stack) { buf, buf, buf + buf_size };
 }
 
+isize stack_space_remaining(Stack *stack)
+{
+    return stack->end - stack->ptr;
+}
+
+void stack_reset(Stack *stack)
+{
+    stack->ptr = stack->buf;
+}
+
 StackMark stack_mark(Stack *stack)
 {
     return (StackMark) { .stack = stack, .mark = stack->ptr };

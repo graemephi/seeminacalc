@@ -57,9 +57,10 @@ typedef struct SimFileInfo
     String diff;
     String chartkey;
     String id;
+    String display_id;
 
-    f32 aa_rating;
-    f32 max_rating;
+    SkillsetRatings aa_rating;
+    SkillsetRatings max_rating;
 
     NoteData *notes;
     i32 n_rows;
@@ -71,7 +72,7 @@ typedef struct SimFileInfo
         f32 rate;
         i32 skillset;
 
-        f32 msd_bias;
+        f32 last_user_set_weight;
         f32 weight;
 
         f32 got_msd;
@@ -188,10 +189,8 @@ typedef struct State
     u32 skillset_colors[NumSkillsets];
     u32 skillset_colors_selectable[NumSkillsets];
 
-    int update_index;
     struct {
         f32 left_width;
-        f32 centre_width;
         f32 right_width;
     } last_frame;
 
@@ -414,6 +413,18 @@ static f32 GetContentRegionAvailWidth(void)
     ImVec2 cr;
     igGetContentRegionAvail(&cr);
     return cr.x;
+}
+
+static void TextString(String s)
+{
+    igTextUnformatted(s.buf, s.buf + s.len);
+}
+
+static f32 WindowWidth()
+{
+    ImVec2 v = {0};
+    igGetWindowSize(&v);
+    return v.x;
 }
 
 static void tooltip(const char *fmt, ...)
@@ -723,13 +734,14 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
             if (req->rate != 1.0f) {
                 id.len += buf_printf(id.buf, "%.1f ", (f64)req->rate);
             }
-            id.len += buf_printf(id.buf, "(%.*s%.*s%.*s)##%.*s.%d",
+            id.len += buf_printf(id.buf, "(%.*s%.*s%.*s)",
                 author.len, author.buf,
                 author.len == 0 ? 0 : 2, ", ",
-                diff.len, diff.buf,
+                diff.len, diff.buf);
+            isize display_id_len = id.len;
+            id.len += buf_printf(id.buf, "##%.*s.%d",
                 ck.len, ck.buf,
-                req->skillset
-            );
+                req->skillset);
             pop_allocator();
 
             for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
@@ -738,15 +750,19 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 }
             }
 
+            id = copy_string(id);
+            String display_id = (String) { id.buf, display_id_len };
             SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
                 .title = copy_string(title),
                 .diff = diff,
                 .chartkey = copy_string(ck),
-                .id = copy_string(id),
+                .id = id,
+                .display_id = display_id,
                 .target.want_msd = req->target,
                 .target.rate = req->rate,
                 .target.skillset = req->skillset,
                 .target.weight = req->weight,
+                .target.last_user_set_weight = req->weight,
                 .notes = file->note_data,
                 .n_rows = file->n_rows,
                 .selected_skillsets[0] = true,
@@ -763,7 +779,7 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
             target_m = old_m + (req->target - old_m) / (f32)(buf_len(state.files) + 1);
             target_s = old_s + (req->target - old_m)*(req->target - target_m);
 
-            printf("Added %s %s %.2fx: %.2f\n", SkillsetNames[req->skillset], title.buf, (f64)req->rate, (f64)req->target);
+            printf("Added %s %s %02.2fx: %02.2f\n", SkillsetNames[req->skillset], title.buf, (f64)req->rate, (f64)req->target);
 
             added_count++;
 skip:;
@@ -830,13 +846,12 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
     f32 value = 0.0f;
     i32 mp = param_idx;
     igPushID_Int(mp);
+    igBeginDisabled(!state.info.params[mp].optimizable);
     if (igCheckbox("##opt", &state.opt_cfg.enabled[mp])) {
-        if (state.info.params[mp].optimizable) {
-            type = ParamSlider_OptimizingToggled;
-        } else {
-            state.opt_cfg.enabled[mp] = false;
-        }
+        assert(state.info.params[mp].optimizable);
+        type = ParamSlider_OptimizingToggled;
     } tooltip("optimize this parameter");
+    igEndDisabled();
     igSameLine(0, 4);
     if (igCheckbox("##graph", &state.parameter_graphs_enabled[mp])) {
         type = ParamSlider_GraphToggled;
@@ -848,13 +863,14 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
         i32 value_int = (i32)state.ps.params[mp];
         i32 low = (i32)state.ps.min[mp];
         i32 high = (i32)state.ps.max[mp];
+        igSetNextItemWidth(-FLT_MIN);
         if (igSliderInt(slider_id, &value_int, low, high, "%d", ImGuiSliderFlags_None)) {
             state.ps.params[mp] = (f32)value_int;
             type = ParamSlider_ValueChanged;
             value = (f32)value_int;
         }
     } else {
-        igSetNextItemWidth(igGetFontSize() * 16.5f);
+        igSetNextItemWidth(-FLT_MIN);
         if (igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f)) {
             type = ParamSlider_ValueChanged;
             value = state.ps.params[mp];
@@ -1174,6 +1190,9 @@ void init(void)
     // todo: use handles instead
     buf_reserve(state.files, 1024);
 
+    state.last_frame.right_width = 438.0f;
+    state.last_frame.left_width = 322.0f;
+
     calc_sem = sem_create();
     high_prio_work_queue.lock = lock_create();
     low_prio_work_queue.lock = lock_create();
@@ -1386,7 +1405,7 @@ void frame(void)
 
                         i32 ss = sfi->target.skillset;
                         f32 goal = state.opt_cfg.goals[ss];
-                        f32 msd = (sfi->target.want_msd + sfi->target.msd_bias + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
+                        f32 msd = (sfi->target.want_msd + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
 
                         i32 params_submitted = 0;
                         for (isize j = 0; j < state.opt.n_params; j++) {
@@ -1419,13 +1438,14 @@ void frame(void)
 
                     state.opt_pending_evals = submitted;
 
-                    if (rngf() < 0.25f) {
+                    if (rngf() < 0.125f) {
                         calculate_skillsets(&state.high_prio_work, &state.files[state.opt.iter % buf_len(state.files)], false, state.generation);
                     }
 
-                    state.optimization_graph->ys[0][state.opt.iter % NumGraphSamples] = fabsf(state.target.average_delta.E[0]);
-                    state.optimization_graph->ys[1][state.opt.iter % NumGraphSamples] = state.opt.loss;
-                    state.optimization_graph->ys[2][state.opt.iter % NumGraphSamples] = state.target.max_delta;
+                    isize x = state.opt.iter % NumGraphSamples;
+                    state.optimization_graph->ys[0][x] = fabsf(state.target.average_delta.E[0]);
+                    state.optimization_graph->ys[1][x] = state.target.max_delta;
+                    state.optimization_graph->ys[2][x] = state.opt.loss;
                 }
             }
         }
@@ -1437,80 +1457,20 @@ void frame(void)
     ImGuiIO *io = igGetIO();
     ImVec2 ds = io->DisplaySize;
 
-    ImGuiWindowFlags fixed_window = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar;
-
     SimFileInfo *active = state.active;
 
-    f32 right_width = 400.0f;
-    f32 left_width = 322.0f;
+    f32 right_width = state.last_frame.right_width;
+    f32 left_width = state.last_frame.left_width;
     f32 centre_width = ds.x - left_width - right_width;
 
-    igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
-    igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
-    if (igBegin("Files", 0, fixed_window)) {
-        // Header + arrow drop down fake thing
-        if (state.target.average_delta.E[0] != 0.0f) {
-            for (isize i = 0; i < NumSkillsets; i++) {
-                igTextColored(msd_color(fabsf(state.target.average_delta.E[i]) * 3.0f), "%02.2f", (f64)state.target.average_delta.E[i]);
-                tooltip("CalcTestList: %s abs delta", SkillsetNames[i]);
-                if (i == 0) {
-                    igSameLine(0, 0); igTextUnformatted(" (", 0); igSameLine(0, 0);
-                    igTextColored(msd_color(fabsf(state.target.min_delta) * 3.0f), "%02.2f", (f64)state.target.min_delta);
-                    tooltip("CalcTestList: min abs delta");
-                    igSameLine(0, 0); igTextUnformatted(", ", 0); igSameLine(0, 0);
-                    igTextColored(msd_color(fabsf(state.target.max_delta) * 3.0f), "%02.2f", (f64)state.target.max_delta);
-                    tooltip("CalcTestList: max abs delta");
-                    igSameLine(0, 0); igTextUnformatted(")", 0);
-                }
-                igSameLine(0, 12.0f);
-            }
-        }
-        igSeparator();
-
-        // Open file list
-        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-            f32 wife93 = sfi->aa_rating;
-            f32 wife965 = sfi->max_rating;
-            if (sfi->target.want_msd) {
-                igTextColored(msd_color(fabsf(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
-                tooltip("CalcTestList: %.2f %s, want %.2f at %.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
-            }
-            igTextColored(msd_color(wife93), "%2.2f", (f64)wife93);
-            tooltip("Overall at AA"); igSameLine(0, 7.0f);
-            igTextColored(msd_color(wife965), "%2.2f", (f64)wife965);
-            tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
-            igPushID_Str(sfi->id.buf);
-            if (sfi == active) {
-                igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating));
-            }
-            if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
-                if (sfi->open) {
-                    sfi->open = false;
-                } else {
-                    sfi->open = true;
-                    next_active = sfi;
-                }
-            }
-            if (sfi == active) {
-                igPopStyleColor(1);
-            }
-            if (sfi->stops) {
-                igSameLine(igGetWindowWidth() - 30.f, 4);
-                igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
-                tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
-                        "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
-            }
-            igPopID();
-            igSeparator();
-        }
-    }
-    igEnd();
-
     ParamSliderChange changed_param = {0};
-
-    igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always,  V2Zero);
+    igSetNextWindowSizeConstraints(V2(0, -1), V2(FLT_MAX, -1), 0, 0);
+    igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(left_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
-    if (igBegin("Mod Parameters", 0, fixed_window)) {
+    if (igBegin("Mod Parameters", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar)) {
+        ImVec2 window_size = {0};
+        igGetWindowSize(&window_size);
+        left_width = window_size.x - 1.0f;
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
         igPushID_Str(active->id.buf);
@@ -1580,9 +1540,11 @@ void frame(void)
     }
 
     // Main, center window
+    igSetNextWindowSizeConstraints(V2(0, -1), V2(FLT_MAX, -1), 0, 0);
     igSetNextWindowPos(V2(left_width + 2.0f, 2.0f), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(centre_width - 4.0f, ds.y - 52.0f), ImGuiCond_Always);
-    if (igBegin("SeeMinaCalc", 0, ImGuiWindowFlags_NoBringToFrontOnFocus|ImGuiWindowFlags_NoResize)) {
+    if (igBegin("SeeMinaCalc", 0, ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoMove)) {
+        centre_width = WindowWidth() + 4.0f;
         if (igBeginTabBar("main", ImGuiTabBarFlags_None)) {
             if (igBeginTabItem("Halp", 0,0)) {
                 igTextWrapped("There are two ways to get files into this thing: drag and drop simfiles, or drag and drop a cache.db and use the search tab. You can also drag on a CalcTestList.xml once cache.db is loaded.\n\n"
@@ -1599,9 +1561,108 @@ void frame(void)
 #endif
                 igEndTabItem();
             }
+
             if (igBeginTabItem("Files", 0,0)) {
+                if (igBeginTable("Search Results", 7, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
+                    igTableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 20.0f, 0);
+                    igTableSetupColumn("File", 0, 1.0f, 0);
+                    igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 105.0f, 0);
+                    igTableSetupColumn("Rate", ImGuiTableColumnFlags_WidthFixed, 56.0f, 0);
+                    igTableSetupColumn("WantMSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+                    igTableSetupColumn("Meight", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+                    igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, -FLT_MIN, 0);
+                    ImGuiListClipper clip = {0};
+                    ImGuiListClipper_Begin(&clip, buf_len(state.files), 0.0f);
+                    while (ImGuiListClipper_Step(&clip)) {
+                        for (i32 sfi_index = clip.DisplayStart; sfi_index < clip.DisplayEnd; sfi_index++) {
+                            SimFileInfo *sfi = state.files + sfi_index;
+                            if (sfi == active) {
+                                igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
+                            }
+                            igPushID_Int(sfi_index);
+                            igTableNextRow(0, 0);
+
+                            igTableSetColumnIndex(0);
+                            igBeginDisabled(sfi->target.last_user_set_weight == 0.0f);
+                            b8 enabled = (sfi->target.weight != 0.0f);
+                            if (igCheckbox("##enabled", &enabled)) {
+                                sfi->target.weight = enabled ? sfi->target.last_user_set_weight : 0.0f;
+                            }
+                            tooltip("optimize this file");
+                            igEndDisabled();
+
+                            igTableSetColumnIndex(1);
+                            if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+                                if (sfi->open) {
+                                    sfi->open = false;
+                                } else {
+                                    sfi->open = true;
+                                    next_active = sfi;
+                                }
+                            }
+
+                            igTableSetColumnIndex(2);
+                            igPushItemWidth(-FLT_MIN);
+                            if (igBeginCombo("##Skillset", SkillsetNames[sfi->target.skillset], 0)) {
+                                for (isize ss = 1; ss < NumSkillsets; ss++) {
+                                    b32 is_selected = (ss == sfi->target.skillset);
+                                    igSelectable_Bool(SkillsetNames[ss], is_selected, 0, V2Zero);
+                                    if (is_selected) {
+                                        igSetItemDefaultFocus();
+                                    }
+                                }
+                                igEndCombo();
+                            }
+                            igSameLine(0,4);
+
+                            igTableSetColumnIndex(3);
+                            igPushItemWidth(-FLT_MIN);
+                            static char const *rates[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2.0" };
+                            static float rates_f[] = { 0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f, 1.8f, 1.9f, 2.0f };
+                            for (isize r_find_selected = 0; r_find_selected < array_length(rates); r_find_selected++) {
+                                if ((fabsf(rates_f[r_find_selected] - sfi->target.rate) < 0.05f)
+                                 && igBeginCombo("##Rate", rates[r_find_selected], 0)) {
+                                    for (isize r = 0; r < array_length(rates); r++) {
+                                        b32 is_selected = (fabsf(rates_f[r] - sfi->target.rate) < 0.05f);
+                                        igSelectable_Bool(rates[r], is_selected, 0, V2Zero);
+                                        if (is_selected) {
+                                            igSetItemDefaultFocus();
+                                        }
+                                    }
+                                    igEndCombo();
+                                }
+                            }
+
+                            igTableSetColumnIndex(4);
+                            igPushItemWidth(-FLT_MIN);
+                            igDragFloat("##target", &sfi->target.want_msd, 0.1f, 0.0f, 40.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp);
+                            tooltip("target msd for skillset");
+
+                            igTableSetColumnIndex(5);
+                            igPushItemWidth(-FLT_MIN);
+                            if (igDragFloat("##weight", &sfi->target.weight, 0.1f, 0.0f, 20.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp)) {
+                                sfi->target.last_user_set_weight = sfi->target.weight;
+                            }
+                            tooltip("weight");
+
+                            igTableSetColumnIndex(6);
+                            for (isize ss = 0; ss < NumSkillsets; ss++) {
+                                igTextColored(msd_color(sfi->aa_rating.E[ss]), "%s%02.2f", sfi->aa_rating.E[ss] < 10.f ? "0" : "", (f64)sfi->aa_rating.E[ss]);
+                                tooltip(SkillsetNames[ss]);
+                                igSameLine(0, 4);
+                            }
+
+                            if (sfi == active) {
+                                igPopStyleColor(1);
+                            }
+                            igPopID();
+                        }
+                    }
+                    igEndTable();
+                }
                 igEndTabItem();
             }
+
             if (igBeginTabItem("Search", 0,0)) {
                 if (db_ready()) {
                     static char q[512] = "";
@@ -1619,13 +1680,13 @@ void frame(void)
                         igText("%lld matches", buf_len(state.search.results));
                     }
                     if (igBeginTable("Search Results", 8, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
-                        igTableSetupColumn("Diff", 0, 1, 0);
+                        igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 60.0f, 0);
                         igTableSetupColumn("Author", 0, 2, 0);
-                        igTableSetupColumn("Title", ImGuiTableFlags_SizingStretchProp, 5, 0);
-                        igTableSetupColumn("Subtitle", ImGuiTableFlags_SizingStretchProp, 3, 0);
+                        igTableSetupColumn("Title", 0, 5, 0);
+                        igTableSetupColumn("Subtitle", 0, 3, 0);
                         igTableSetupColumn("Artist", 0, 2, 0);
-                        igTableSetupColumn("MSD", 0, 0, 0);
-                        igTableSetupColumn("Skillset", 0, 0, 0);
+                        igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+                        igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 70.0f, 0);
                         igTableSetupColumn("", 0, 2, 0);
                         igTableHeadersRow();
                         ImGuiListClipper clip = {0};
@@ -1633,19 +1694,20 @@ void frame(void)
                         while (ImGuiListClipper_Step(&clip)) {
                             for (isize i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
                                 DBFile *f = &state.search.results[i];
+                                dbfile_set_skillset_and_rating_from_all_msds(f);
                                 igTableNextRow(0, 0);
                                 igTableSetColumnIndex(0);
-                                igTextUnformatted(SmDifficultyStrings[f->difficulty].buf, SmDifficultyStrings[f->difficulty].buf + SmDifficultyStrings[f->difficulty].len);
+                                TextString(SmDifficultyStrings[f->difficulty]);
                                 igTableSetColumnIndex(1);
-                                igTextUnformatted(f->author.buf, f->author.buf + f->author.len);
+                                TextString(f->author);
                                 igTableSetColumnIndex(2);
-                                igTextUnformatted(f->title.buf, f->title.buf + f->title.len);
+                                TextString(f->title);
                                 igTableSetColumnIndex(3);
-                                igTextUnformatted(f->subtitle.buf, f->subtitle.buf + f->subtitle.len);
+                                TextString(f->subtitle);
                                 igTableSetColumnIndex(4);
-                                igTextUnformatted(f->artist.buf, f->artist.buf + f->artist.len);
+                                TextString(f->artist);
                                 igTableSetColumnIndex(5);
-                                igTextColored(msd_color(f->rating), "%.2f", (f64)f->rating);
+                                igTextColored(msd_color(f->rating), "%02.2f", (f64)f->rating);
                                 igTableSetColumnIndex(6);
                                 igText("%s", SkillsetNames[f->skillset]);
                             }
@@ -1662,6 +1724,7 @@ void frame(void)
                 }
                 igEndTabItem();
             }
+
             if (igBeginTabItem("Graphs", 0,0)) {
                 if (buf_len(state.files) == 0) {
                     igTextWrapped("No files to graph :(");
@@ -1672,7 +1735,7 @@ void frame(void)
                     SimFileInfo *sfi = active;
 
                     // File difficulty + chartkey text
-                    igTextColored(msd_color(sfi->aa_rating), "%.2f", (f64)sfi->aa_rating);
+                    igTextColored(msd_color(sfi->aa_rating.overall), "%02.2f", (f64)sfi->aa_rating.overall);
                     igSameLine(0, 8);
                     igSelectable_Bool(sfi->id.buf, false, ImGuiSelectableFlags_Disabled, V2Zero);
                     igSameLine(clamp_low(GetContentRegionAvailWidth() - 275.f, 100), 0);
@@ -1731,22 +1794,22 @@ void frame(void)
                 igEndTabItem();
             }
 
-            if (igBeginTabItem("Optimizer", 0,0)) {
+            if (igBeginTabItem("Optimize", 0,0)) {
                 f32 err_limit = 2.5f;
-                f32 loss_limit = 1.0f;
+                f32 loss_limit = 1e-4f;
                 for (isize i = 0; i < NumGraphSamples; i++) {
                     err_limit = max(err_limit, state.optimization_graph->ys[0][i]);
-                    err_limit = max(err_limit, state.optimization_graph->ys[2][i]);
-                    loss_limit = max(loss_limit, state.optimization_graph->ys[1][i]);
+                    err_limit = max(err_limit, state.optimization_graph->ys[1][i]);
+                    loss_limit = max(loss_limit, state.optimization_graph->ys[2][i]);
                 }
                 ImPlot_SetNextPlotLimitsX(state.opt.iter - NumGraphSamples, state.opt.iter, ImGuiCond_Always);
                 ImPlot_SetNextPlotLimitsY(0, (f64)err_limit * 1.1, ImGuiCond_Always, 0);
                 ImPlot_SetNextPlotLimitsY(0, (f64)loss_limit * 1.1, ImGuiCond_Always, 1);
                 if (BeginPlotOptimizer("##OptGraph")) {
-                    ImPlot_PlotLine_FloatPtrInt("Avg Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
-                    ImPlot_PlotLine_FloatPtrInt("Max Positive Error", state.optimization_graph->ys[2], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
+                    ImPlot_PlotLine_FloatPtrInt("Avg Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
+                    ImPlot_PlotLine_FloatPtrInt("Max Positive Error", state.optimization_graph->ys[1], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
                     ImPlot_SetPlotYAxis(ImPlotYAxis_2);
-                    ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[1], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter % NumGraphSamples, sizeof(float));
+                    ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[2], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
                     ImPlot_EndPlot();
                 }
 
@@ -1813,7 +1876,7 @@ void frame(void)
                     tooltip("+ offsets the target MSD for this skillset\n* multiplies\n%% sets the target wife%%");
                     igSameLine(0, 4);
                     igSetCursorPosX(116.f);
-                    igTextUnformatted("+", 0);
+                    TextString("+", 0));
                     igSameLine(0,4);
                     igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
                     igSliderFloat("*##+", &state.opt_cfg.bias[i].add, -5.0f, 5.0f, "%f", 1.0f);
@@ -1831,7 +1894,74 @@ void frame(void)
             igEndTabBar();
         }
     }
+    igEnd();
 
+    // Active files list
+    right_width = ds.x - (left_width + centre_width);
+    igSetNextWindowSizeConstraints(V2(0, -1), V2(FLT_MAX, -1), 0, 0);
+    igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
+    igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
+    if (igBegin("Files", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize)) {
+        // Header + arrow drop down fake thing
+        if (state.target.average_delta.E[0] != 0.0f) {
+            for (isize i = 0; i < NumSkillsets; i++) {
+                igTextColored(msd_color(fabsf(state.target.average_delta.E[i]) * 3.0f), "%02.2f", (f64)state.target.average_delta.E[i]);
+                tooltip("Optimizer: %s abs delta", SkillsetNames[i]);
+                if (i == 0) {
+                    igSameLine(0, 0); TextString(S(" (")); igSameLine(0, 0);
+                    igTextColored(msd_color(fabsf(state.target.min_delta) * 3.0f), "%02.2f", (f64)state.target.min_delta);
+                    tooltip("Optimizer: min abs delta");
+                    igSameLine(0, 0); TextString(S(", ")); igSameLine(0 ,0);
+                    igTextColored(msd_color(fabsf(state.target.max_delta) * 3.0f), "%02.2f", (f64)state.target.max_delta);
+                    tooltip("Optimizer: max abs delta");
+                    igSameLine(0, 0); TextString(S(")")); igSameLine(0, 0);
+                }
+                if (i != (NumSkillsets - 1)) {
+                    igSameLine(0, 12.0f);
+                }
+            }
+        }
+        igSeparator();
+
+        // Open file list
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            if (sfi->target.weight > 0) {
+                f32 wife93 = sfi->aa_rating.overall;
+                f32 wife965 = sfi->max_rating.overall;
+                if (sfi->target.want_msd) {
+                    igTextColored(msd_color(fabsf(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
+                    tooltip("Optimizer: %02.2f %s, want %02.2f at %02.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
+                }
+                igTextColored(msd_color(wife93), "%02.2f", (f64)wife93);
+                tooltip("Overall at AA"); igSameLine(0, 7.0f);
+                igTextColored(msd_color(wife965), "%02.2f", (f64)wife965);
+                tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
+                igPushID_Str(sfi->id.buf);
+                if (sfi == active) {
+                    igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
+                }
+                if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+                    if (sfi->open) {
+                        sfi->open = false;
+                    } else {
+                        sfi->open = true;
+                        next_active = sfi;
+                    }
+                }
+                if (sfi == active) {
+                    igPopStyleColor(1);
+                }
+                if (sfi->stops) {
+                    igSameLine(igGetWindowWidth() - 30.f, 4);
+                    igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
+                    tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
+                            "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
+                }
+                igPopID();
+                igSeparator();
+            }
+        }
+    }
     igEnd();
 
     // Debug window
@@ -1866,7 +1996,7 @@ void frame(void)
         igBeginGroup(); igText("done"); igText("%_$d", debug_counters.done); igEndGroup(); igSameLine(0, 4);
         igBeginGroup(); igText("pending"); igText("%_$d", debug_counters.requested - (debug_counters.done + debug_counters.skipped)); igEndGroup(); igSameLine(0, 4);
         igSameLine(0, 45.f);
-        igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%.2fms", time); igEndGroup();
+        igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%02.2fms", time); igEndGroup();
 
         igEnd();
     }
@@ -1877,7 +2007,6 @@ void frame(void)
     sg_commit();
 
     state.last_frame.left_width = left_width;
-    state.last_frame.centre_width = centre_width;
     state.last_frame.right_width = right_width;
 
     // Restore last interacted-with window on close

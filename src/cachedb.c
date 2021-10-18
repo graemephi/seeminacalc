@@ -196,18 +196,62 @@ typedef struct DBFile
     String artist;
     String author;
     String chartkey;
+    String all_msds;
     i32 skillset;
-    float rating;
+    f32 rating;
     NoteData *note_data;
     usize n_rows;
 } DBFile;
 
+void dbfile_set_skillset_and_rating_from_all_msds(DBFile *f)
+{
+    if (f->skillset != 0) {
+        return;
+    }
+
+    u8 const *p = f->all_msds.buf;
+    u8 *end = f->all_msds.buf + f->all_msds.len;
+    for (isize i = 0; i < 3; i++) {
+        while (p < end && *p && *p++ != ':') {
+            ;
+        }
+    }
+    if (ALWAYS(p < end)) {
+        float msd[NumSkillsets] = {0};
+        sscanf(p, "%f,%f,%f,%f,%f,%f,%f,%f",
+            msd + 0,
+            msd + 1,
+            msd + 2,
+            msd + 3,
+            msd + 4,
+            msd + 5,
+            msd + 6,
+            msd + 7
+        );
+        float top = msd[1];
+        i32 ss = 1;
+        for (i32 i = 2; i < NumSkillsets; i++) {
+            if (msd[i] > top) {
+                top = msd[i];
+                ss = i;
+            }
+        }
+        f->skillset = ss;
+        f->rating = msd[0];
+    }
+}
+
 enum {
     DBRequestQueueSize = 64,
+    DBRequestQueueCapacity = DBRequestQueueSize - 1,
     DBRequestQueueMask = DBRequestQueueSize - 1,
-    DBResultQueueSize = 1024,
+    DBResultQueueSize = 4096,
+    DBResultQueueCapacity = DBResultQueueSize - 1,
     DBResultQueueMask = DBResultQueueSize - 1
 };
+
+static_assert((DBRequestQueueSize & (DBRequestQueueSize - 1)) == 0);
+static_assert((DBResultQueueSize & (DBResultQueueSize - 1)) == 0);
 
 typedef enum DBRequestType
 {
@@ -223,7 +267,6 @@ typedef struct DBRequest
     u64 id;
     union {
         Buffer db;
-        Buffer xml;
         String query;
     };
 } DBRequest;
@@ -258,13 +301,28 @@ typedef struct DBResultQueue
 alignas(64) volatile u64 db_last_search_id = 0;
 DBRequestQueue db_request_queue = {0};
 DBResultQueue db_result_queue = {0};
-BadSem db_sem = {0};
+BadSem db_request_sem = {0};
+BadSem db_result_sem = {0};
+u8 query_buffer[4096] = {0};
+Stack query_stack = {0};
 DBRequest *db_pending_requests = 0;
 u64 db_request_id = 1;
 
 u64 db_next_id(void)
 {
     return db_request_id++;
+}
+
+void db_init(Buffer db)
+{
+    db_request_sem = sem_create();
+    db_result_sem = sem_create();
+    query_stack = stack_make(query_buffer, sizeof(query_buffer));
+    buf_reserve(db_pending_requests, 1024);
+    Buffer *eh = 0;
+    buf_push(eh, db);
+    int db_thread(void*);
+    make_thread(db_thread, eh);
 }
 
 b32 db_ready(void)
@@ -275,12 +333,7 @@ b32 db_ready(void)
 void db_use(Buffer db)
 {
     if (!db_ready()) {
-        db_sem = sem_create();
-        buf_reserve(db_pending_requests, 1024);
-        Buffer *eh = 0;
-        buf_push(eh, db);
-        int db_thread(void*);
-        make_thread(db_thread, eh);
+        db_init(db);
     } else {
         buf_push(db_pending_requests, (DBRequest) {
             .type = DBRequest_UseDB,
@@ -302,68 +355,89 @@ u64 db_get(String key)
 
 u64 db_search(String query)
 {
+    push_allocator(&query_stack);
+    assert(query.len < 512);
+    if (stack_space_remaining(&query_stack) < query.len) {
+        stack_reset(&query_stack);
+    }
+    query = copy_string(query);
+    pop_allocator();
     u64 id = db_next_id();
-    buf_push(db_pending_requests, (DBRequest) {
+    db_last_search_id = id;
+
+    DBRequest req = (DBRequest) {
         .type = DBRequest_Search,
         .id = id,
         .query = query
-    });
-    db_last_search_id = id;
+    };
+
+    // Part of the idea was to funnel everything thru db_pump
+    // but doing sending and receiving from one place results
+    // in one (1) frame of lag which turned out make the
+    // search Less Nice
+    usize read = db_request_queue.read;
+    usize write = db_request_queue.write;
+    memory_barrier();
+    usize queue_capacity = DBRequestQueueCapacity - (write - read);
+    if (queue_capacity > 0) {
+        db_request_queue.entries[write & DBRequestQueueMask] = req;
+        memory_barrier();
+        db_request_queue.write = write + 1;
+        thread_notify(db_request_sem);
+    } else {
+        buf_push(db_pending_requests, req);
+    }
+
     return id;
 }
 
 DBResultsByType db_pump(void)
 {
-    b32 notify = false;
-
     // Submit requests
     {
-        isize read = db_request_queue.read;
-        isize write = db_request_queue.write;
+        usize read = db_request_queue.read;
+        usize write = db_request_queue.write;
         memory_barrier();
-        isize queue_capacity = (DBRequestQueueSize - 1) - (write - read);
-        isize n = mins(queue_capacity, buf_len(db_pending_requests));
-        for (isize i = 0; i < n; i++) {
-            db_request_queue.entries[(write + i) & DBRequestQueueMask] = db_pending_requests[i];
+        usize queue_capacity = DBRequestQueueCapacity - (write - read);
+        usize n = mins(queue_capacity, buf_len(db_pending_requests));
+        if (n > 0) {
+            for (usize i = 0; i < n; i++) {
+                db_request_queue.entries[(write + i) & DBRequestQueueMask] = db_pending_requests[i];
+            }
+            memory_barrier();
+            db_request_queue.write = write + n;
+            buf_remove_first_n(db_pending_requests, n);
+            thread_notify(db_request_sem);
         }
-        memory_barrier();
-        db_request_queue.write = write + n;
-
-        buf_remove_first_n(db_pending_requests, n);
-
-        notify = (n > 0);
     }
 
     // Read results
     DBResultsByType results = {0};
     push_allocator(scratch);
     {
-        isize read = db_result_queue.read;
-        isize write = db_result_queue.write;
+        usize read = db_result_queue.read;
+        usize write = db_result_queue.write;
         memory_barrier();
-        isize n = write - read;
-        for (isize i = 0; i < n; i++) {
-            DBResult r = db_result_queue.entries[(read + i) & DBResultQueueMask];
-            buf_push(results.of[r.type], r);
+        usize n = write - read;
+        if (n > 0) {
+            for (usize i = 0; i < n; i++) {
+                DBResult r = db_result_queue.entries[(read + i) & DBResultQueueMask];
+                buf_push(results.of[r.type], r);
+            }
+            memory_barrier();
+            db_result_queue.read = read + n;
+            thread_notify(db_result_sem);
         }
-        memory_barrier();
-        db_result_queue.read = read + n;
-
-        notify = notify || (n == (DBResultQueueSize - 1));
     }
     pop_allocator();
-
-    if (notify) {
-        thread_notify(db_sem);
-    }
 
     return results;
 }
 
 b32 db_next(DBRequest *req)
 {
-    while (db_request_queue.read == db_request_queue.write) {
-        thread_wait(db_sem);
+    if (db_request_queue.read == db_request_queue.write) {
+        thread_wait(db_request_sem);
     }
     usize read = db_request_queue.read;
     memory_barrier();
@@ -376,7 +450,7 @@ b32 db_next(DBRequest *req)
 void db_respond(DBResult *result)
 {
     while (db_result_queue.write == db_result_queue.read + (DBResultQueueSize - 1)) {
-        thread_wait(db_sem);
+        thread_wait(db_result_sem);
     }
     usize write = db_result_queue.write;
     memory_barrier();
@@ -420,40 +494,10 @@ b32 dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
     out->artist.len = buf_printf(out->artist.buf, "%.*s", artist_len, artist);
     out->chartkey.len = buf_printf(out->chartkey.buf, "%.*s", ck_len, ck);
     out->author.len = buf_printf(out->author.buf, "%.*s", author_len, author);
+    out->all_msds.len = buf_printf(out->all_msds.buf, "%.*s", msd_len, msd);
     if (nd_len > 0) {
         out->note_data = frobble_serialized_note_data(nd, nd_len);
         out->n_rows = note_data_rows(out->note_data);
-    }
-    if (msd_len > 0) {
-        u8 const *p = msd;
-        for (isize i = 0; i < 3; i++) {
-            while (*p && *p++ != ':') {
-                ;
-            }
-        }
-        if (*p) {
-            float msd[NumSkillsets] = {0};
-            sscanf(p, "%f,%f,%f,%f,%f,%f,%f,%f",
-                msd + 0,
-                msd + 1,
-                msd + 2,
-                msd + 3,
-                msd + 4,
-                msd + 5,
-                msd + 6,
-                msd + 7
-            );
-            float top = msd[1];
-            i32 ss = 1;
-            for (i32 i = 2; i < NumSkillsets; i++) {
-                if (msd[i] > top) {
-                    top = msd[i];
-                    ss = i;
-                }
-            }
-            out->skillset = ss;
-            out->rating = msd[0];
-        }
     }
     out->ok = (ck_len > 0);
     return stmt_can_continue;
@@ -466,7 +510,6 @@ i32 db_thread(void *userdata)
     isize mb = 64*1024*1024;
     Stack file_stack = stack_make(malloc(mb), mb);
     Stack search_stack = stack_make(malloc(mb), mb);
-    StackMark search_mark = stack_mark(&search_stack);
 
     sqlite3 *db = 0;
     sqlite3_stmt *file_stmt = 0;
@@ -527,12 +570,13 @@ i32 db_thread(void *userdata)
             case DBRequest_Search: {
                 if (req.id >= db_last_search_id) {
                     current_allocator = &search_stack;
-                    stack_release(search_mark);
-                    String query = copy_string(req.query);
+                    stack_reset(&search_stack);
+
                     for (isize i = 0; i < req.query.len; i++) {
-                        query.buf[i] = (query.buf[i] >= 'A' && query.buf[i] <= 'Z') ? (query.buf[i] + ('a' - 'A')) : query.buf[i];
+                        req.query.buf[i] = (req.query.buf[i] >= 'A' && req.query.buf[i] <= 'Z') ? (req.query.buf[i] + ('a' - 'A')) : req.query.buf[i];
                     }
-                    sqlite3_bind_text(search_stmt, 1, query.buf, query.len, 0);
+
+                    sqlite3_bind_text(search_stmt, 1, req.query.buf, req.query.len, 0);
 
                     DBFile file = {0};
                     while (dbfile_from_stmt(search_stmt, &file)) {
@@ -543,6 +587,7 @@ i32 db_thread(void *userdata)
                             .file = file
                         });
                     }
+
                     sqlite3_reset(search_stmt);
                 }
             } break;
