@@ -525,10 +525,10 @@ i32 db_thread(void *userdata)
         goto err;
     }
 
-    static const char file_query[]   = "select songs.title, songs.title, songs.artist, songs.credit, steps.difficulty, steps.msd, steps.chartkey, steps.serializednotedata from steps inner join songs on songs.id = steps.songid where chartkey=?";
+    static const char file_query[]   = "select songs.title, songs.title, songs.artist, songs.credit, steps.difficulty, steps.msd, steps.chartkey, steps.serializednotedata from steps inner join songs on songs.id = steps.songid where chartkey=? and stepstype='dance-single'";
     static const char search_query[] = "select songs.title, songs.subtitle, songs.artist, songs.credit, steps.difficulty, steps.msd, steps.chartkey "
         "from steps inner join songs on songs.id = steps.songid "
-        "where chartkey=?1 or instr(lower(songs.title), ?1) or instr(lower(songs.subtitle), ?1) or instr(lower(songs.titletranslit), ?1) or instr(lower(songs.credit), ?1) or instr(lower(songs.artist), ?1);";
+        "where chartkey=?1 or instr(lower(songs.title), ?1) or instr(lower(songs.subtitle), ?1) or instr(lower(songs.titletranslit), ?1) or instr(lower(songs.credit), ?1) or instr(lower(songs.artist), ?1) and stepstype='dance-single';";
 
     rc = sqlite3_prepare_v2(db, file_query, sizeof(file_query), &file_stmt, 0);
     if (rc) {
