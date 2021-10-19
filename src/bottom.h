@@ -73,6 +73,16 @@ static isize clamps(isize a, isize b, isize t)
     return maxs(a, mins(b, t));
 }
 
+static isize clamp_lows(isize a, isize b)
+{
+    return (a > b) ? a : b;
+}
+
+static isize clamp_highs(isize a, isize b)
+{
+    return (a <= b) ? a : b;
+}
+
 static b32 is_power_of_two_or_zero(i32 x)
 {
     return (x & (x - 1)) == 0;

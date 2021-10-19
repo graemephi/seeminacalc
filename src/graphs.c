@@ -551,26 +551,31 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
 
 void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, b32 initialisation, u32 generation)
 {
-    buf_push(*work, (CalcWork) {
-        .sfi = sfi,
-        .type = Work_Skillsets,
-        .x_index = Wife930Index,
-        .skillsets.initialisation = initialisation,
-        .generation = generation,
-    });
-    buf_push(*work, (CalcWork) {
-        .sfi = sfi,
-        .type = Work_Skillsets,
-        .x_index = Wife965Index,
-        .skillsets.initialisation = initialisation,
-        .generation = generation,
-    });
+    if (sfi->skillsets_generation < generation) {
+        sfi->skillsets_generation = generation;
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_Skillsets,
+            .x_index = Wife930Index,
+            .skillsets.initialisation = initialisation,
+            .generation = generation,
+        });
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_Skillsets,
+            .x_index = Wife965Index,
+            .skillsets.initialisation = initialisation,
+            .generation = generation,
+        });
+    }
 }
 
 void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
 {
     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-        calculate_skillsets(work, sfi, false, generation);
+        if (sfi_visible_in_right_pane(sfi)) {
+            calculate_skillsets(work, sfi, false, generation);
+        }
     }
 }
 
@@ -848,7 +853,6 @@ void finish_work(void)
                 if (done.work.generation >= done.work.sfi->debug_generation) {
                     assert(done.work.generation == done.work.sfi->debug_generation);
                     done.work.sfi->debug_info = done.debug_info;
-                    done.work.sfi->debug_generation = done.work.generation;
                 } else {
                     debuginfo_free(&done.debug_info);
                 }
