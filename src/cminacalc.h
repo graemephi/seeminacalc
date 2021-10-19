@@ -4,6 +4,8 @@
 typedef struct NoteData NoteData;
 typedef struct TheGreatBazoinkazoinkInTheSky TheGreatBazoinkazoinkInTheSky;
 
+#include "Etterna/Models/NoteData/NoteDataStructures.h"
+
 #ifdef __cplusplus
 class Calc;
 #else
@@ -11,7 +13,7 @@ typedef struct Calc Calc;
 #endif
 
 enum {
-    NumSkillsets = 8
+    NumSkillsets = NUM_Skillset
 };
 
 typedef union SkillsetRatings
@@ -40,13 +42,7 @@ static const char *SkillsetNames[] = {
     "Technical",
 };
 
-#ifndef __NDSTRUCTS__
-typedef struct NoteInfo
-{
-    int notes;
-    float rowTime;
-} NoteInfo;
-#endif
+typedef struct NoteInfo NoteInfo;
 
 typedef struct ParamSet
 {
@@ -75,6 +71,33 @@ typedef struct ParamInfo
     bool optimizable;
     bool fake;
 } ParamInfo;
+
+typedef struct DebugBuffers DebugBuffers;
+
+typedef struct JackDebugInfo
+{
+    float row_time;
+    float jack_diff;
+    float jack_stam;
+    float jack_loss;
+} JackDebugInfo;
+
+typedef struct DebugInfo
+{
+    struct {
+        float *pmod[NUM_CalcPatternMod];
+        float *diff[NUM_CalcDiffValue];
+        float *misc[NUM_CalcDebugMisc];
+        ptrdiff_t length;
+    } interval_hand[2];
+    struct {
+        JackDebugInfo *jank;
+        ptrdiff_t length;
+    } jack_hand[2];
+    float *interval_times;
+    ptrdiff_t n_intervals;
+    DebugBuffers *buffers;
+} DebugInfo;
 
 typedef struct SeeCalc
 {
@@ -109,15 +132,21 @@ NoteData *frobble_serialized_note_data(char const *note_data, size_t length);
 NoteData *frobble_note_data(NoteInfo *note_data, size_t length);
 void free_note_data(NoteData *note_data);
 
-isize note_data_rows(NoteData *note_data);
+isize note_data_row_count(NoteData *note_data);
+NoteInfo const *note_data_rows(NoteData *note_data);
 
 CalcInfo calc_info(void);
+
 const char *file_for_param(CalcInfo *info, size_t param_index);
 InlineConstantInfo *info_for_inline_constant(CalcInfo *info, size_t param_index);
+
 SeeCalc calc_init(CalcInfo *info);
 SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal);
 SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, int param, float value);
 SkillsetRatings calc_go_with_rate_and_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, float rate, int param, float value);
+DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate);
+
+void debuginfo_free(DebugInfo *debug_info);
 
 void nddump(NoteData *nd, NoteData *nd2);
 

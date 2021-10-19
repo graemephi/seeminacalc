@@ -86,6 +86,9 @@ typedef struct SimFileInfo
     bool selected_skillsets[NumSkillsets];
     bool display_skillsets[NumSkillsets];
 
+    DebugInfo debug_info;
+    u32 debug_generation;
+
     bool open;
     bool stops;
     u64 frame_last_focused;
@@ -385,7 +388,7 @@ static const ImVec2 V2Zero = {0};
 
 static bool BeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
 {
-    return ImPlot_BeginPlot(title_id, x_label, y_label, (ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_NoLegend, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, 0, 0);
+    return ImPlot_BeginPlot(title_id, x_label, y_label, (ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_NoLegend|ImPlotFlags_NoChild, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, 0, 0);
 }
 static bool BeginPlotOptimizer(const char* title_id)
 {
@@ -1158,7 +1161,7 @@ void init(void)
     igPushStyleColor_Vec4(ImGuiCol_WindowBg, bg);
     igPushStyleVar_Float(ImGuiStyleVar_ScrollbarSize, 4.f);
     igPushStyleVar_Float(ImGuiStyleVar_WindowRounding, 1.0f);
-    igPushStyleVar_Vec2(ImGuiStyleVar_FramePadding, V2(8.0f, 4.0f));
+    // igPushStyleVar_Vec2(ImGuiStyleVar_FramePadding, V2(8.0f, 4.0f));
 
     if (font.buf) {
         ImGuiIO* io = igGetIO();
@@ -1190,7 +1193,7 @@ void init(void)
     state.calc = calc_init(&state.info);
     state.ps = copy_param_set(&state.info.defaults);
     buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
-    buf_reserve(state.graphs, 128);
+    buf_reserve(state.graphs, 1024);
 
     // todo: use handles instead
     buf_reserve(state.files, 1024);
@@ -1457,7 +1460,7 @@ void frame(void)
     }
 
     bool ss_highlight[NumSkillsets] = {0};
-    SimFileInfo *next_active = 0;
+    SimFileInfo *next_active = null_sfi;
 
     ImGuiIO *io = igGetIO();
     ImVec2 ds = io->DisplaySize;
@@ -1568,7 +1571,7 @@ void frame(void)
             }
 
             if (igBeginTabItem("Files", 0,0)) {
-                if (igBeginTable("Search Results", 7, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
+                if (igBeginTable("FileTable", 7, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
                     igTableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 20.0f, 0);
                     igTableSetupColumn("File", 0, 1.0f, 0);
                     igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 105.0f, 0);
@@ -1684,15 +1687,14 @@ void frame(void)
                         igSameLine(0, 4);
                         igText("%lld matches", buf_len(state.search.results));
                     }
-                    if (igBeginTable("Search Results", 8, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
-                        igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 60.0f, 0);
+                    if (igBeginTable("Search Results", 7, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
+                        igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 65.0f, 0);
                         igTableSetupColumn("Author", 0, 2, 0);
                         igTableSetupColumn("Title", 0, 5, 0);
                         igTableSetupColumn("Subtitle", 0, 3, 0);
                         igTableSetupColumn("Artist", 0, 2, 0);
                         igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
-                        igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 70.0f, 0);
-                        igTableSetupColumn("", 0, 2, 0);
+                        igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 75.0f, 0);
                         igTableHeadersRow();
                         ImGuiListClipper clip = {0};
                         ImGuiListClipper_Begin(&clip, buf_len(state.search.results), 0.0f);
@@ -1793,6 +1795,79 @@ void frame(void)
                             ImPlot_EndPlot();
                         }
                         igPopID();
+                    }
+                }
+
+                igEndTabItem();
+            }
+
+            if (igBeginTabItem("Song Preview", 0,0)) {
+                if (buf_len(state.files) == 0) {
+                    igTextWrapped("No files to preview :(");
+                } else if (active == null_sfi) {
+                    next_active = state.files;
+                    next_active->open = true;
+                } else {
+                    static float x = 100, y = 1000;
+                    igSliderFloat("x", &x, 0, 200, "%f", 0);
+                    igSliderFloat("y", &y, 0, 2000, "%f", 0);
+                    ImTextureID my_tex_id = io->Fonts->TexID;
+                    float my_tex_w = 50;
+                    float my_tex_h = 80;
+                    ImVec2 uv_min = V2(0.0f, 0.0f);
+                    ImVec2 uv_max = V2(50.f / (float)io->Fonts->TexWidth, 80.0f / (float)io->Fonts->TexHeight);
+                    ImVec4 tint_col = (ImVec4) {1.0f, 1.0f, 1.0f, 1.0f };
+                    ImVec4 border_col = (ImVec4) {0};
+
+                    if (ALWAYS(active->notes)) {
+                        calculate_debug_graphs(&state.high_prio_work, active, state.generation);
+
+                        if (active->debug_generation == state.generation) {
+                            DebugInfo *d = &active->debug_info;
+                            isize n_rows = note_data_row_count(active->notes);
+                            NoteInfo const *rows = note_data_rows(active->notes);
+                            f32 last_row_time = rows[n_rows - 1].rowTime;
+                            f32 y_scale = y * active->target.rate;
+                            ImVec2 pos = {0};
+                            igSetNextWindowSize(V2(-1, last_row_time * y_scale), ImGuiCond_Always);
+                            if (igBeginChild_Str("##Preview", V2Zero, false, 0)) {
+                                igGetCursorPos(&pos);
+                                for (isize i = 0; i < n_rows; i++) {
+                                    if (rows[i].notes & 1) {
+                                        igSetCursorPos(V2(1.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                    }
+                                    if (rows[i].notes & 2) {
+                                        igSetCursorPos(V2(2.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                    }
+                                    if (rows[i].notes & 4) {
+                                        igSetCursorPos(V2(3.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                    }
+                                    if (rows[i].notes & 8) {
+                                        igSetCursorPos(V2(4.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                    }
+                                }
+                                igSetCursorPos(pos);
+                                ImPlot_PushColormap_PlotColormap(3);
+                                ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
+                                ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
+                                ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
+                                ImPlot_SetNextPlotLimitsY(0, (f64)last_row_time, ImGuiCond_Always, 0);
+                                if (ImPlot_BeginPlot("idk", "p", "t", V2(0,last_row_time * y),
+                                  (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & ~ImPlotFlags_NoLegend,
+                                  ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
+                                  ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
+                                    ImPlot_PlotStairs_FloatPtrFloatPtr("a", d->interval_hand[0].pmod[0], d->interval_times, d->n_intervals, 0, sizeof(float));
+                                    ImPlot_EndPlot();
+                                }
+                                ImPlot_PopStyleColor(3);
+                                ImPlot_PopColormap(1);
+                            }
+                            igEndChild();
+                        }
                     }
                 }
 
@@ -2014,7 +2089,7 @@ void frame(void)
     state.last_frame.left_width = left_width;
     state.last_frame.right_width = right_width;
 
-    // Restore last interacted-with window on close
+    // Restore last interacted-with file on close
     if (active->open == false) {
         next_active = null_sfi;
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
@@ -2022,12 +2097,30 @@ void frame(void)
                 next_active = sfi;
             }
         }
-        if (next_active == null_sfi) {
-            next_active = 0;
-        }
     }
 
-    if (next_active) {
+    if (next_active != null_sfi) {
+        // Allow one file to be open "in the background", and don't free its
+        // graphs. For for any older files, free all their parameter graphs.
+        // Combined with the file restore above, this lets you to A/B between
+        // two files.
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            if (sfi->open && sfi != active && sfi != next_active) {
+                sfi->open = false;
+                if (buf_len(sfi->graphs) > 1) {
+                    for (isize i = 1; i < buf_len(sfi->graphs); i++) {
+                        free_graph(sfi->graphs[i]);
+                    }
+                    buf_set_len(sfi->graphs, 1);
+                }
+            }
+        }
+        if (buf_len(next_active->graphs) == 1) {
+            for (isize i = 1; i < buf_len(active->graphs); i++) {
+                assert(i <= buf_len(state.parameter_graph_order));
+                buf_push(next_active->graphs, make_parameter_graph(state.parameter_graph_order[i-1]));
+            }
+        }
         assert(next_active->open);
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
@@ -2035,13 +2128,14 @@ void frame(void)
         calculate_effects(&state.high_prio_work, &state.info, state.active, false, state.generation);
     }
 
+
     if (changed_param.type) {
         switch (changed_param.type) {
             case ParamSlider_GraphToggled: {
                 if (state.parameter_graphs_enabled[changed_param.param]) {
                     buf_push(state.parameter_graph_order, changed_param.param);
-                    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                        buf_push(sfi->graphs, make_parameter_graph(changed_param.param));
+                    if (state.active) {
+                        buf_push(state.active->graphs, make_parameter_graph(changed_param.param));
                     }
                 } else {
                     for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {

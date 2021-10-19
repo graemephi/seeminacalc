@@ -497,7 +497,7 @@ b32 dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
     out->all_msds.len = buf_printf(out->all_msds.buf, "%.*s", msd_len, msd);
     if (nd_len > 0) {
         out->note_data = frobble_serialized_note_data(nd, nd_len);
-        out->n_rows = note_data_rows(out->note_data);
+        out->n_rows = note_data_row_count(out->note_data);
     }
     out->ok = (ck_len > 0);
     return stmt_can_continue;

@@ -124,35 +124,35 @@ static b32 str_eq(char const *a, char const *b)
 struct {
     const char *name;
     const char *file;
+    CalcPatternMod id;
 } Mods[] = {
     { "Rate",                       0 },
-    { "StreamMod",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h" },
-    { "JSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h" },
-    { "HSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h" },
-    { "CJMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h" },
-    { "CJDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h" },
-    { "HSDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HSDensity.h" },
-    { "OHJumpModGuyThing",          "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHJ.h" },
-    { "CJOHJumpMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h" },
-    { "RollMod",                    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h" },
-    { "BalanceMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h" },
-    { "OHTrillMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h" },
-    { "VOHTrillMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h" },
-    { "ChaosMod",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h" },
-    { "CJOHAnchorMod (Chain)",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHAnchor.h" },
-    { "RunningManMod",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h" },
-    { "WideRangeBalanceMod",        "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h" },
-    { "WideRangeRollMod",           "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h" },
-    { "WideRangeJumptrillMod",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h" },
-    { "WideRangeAnchorMod",         "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h" },
-    { "FlamJamMod",                 "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h" },
-    { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h" },
-    { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h" },
-    { "BaseScalers",                0 },
-    { "Globals",                    0 },
-    { "InlineConstants",            0 },
+    { "StreamMod",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h", Stream },
+    { "JSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h", JS },
+    { "HSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h", HS },
+    { "CJMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h", CJ },
+    { "CJDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h", CJDensity },
+    { "HSDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HSDensity.h", HSDensity },
+    { "OHJumpModGuyThing",          "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHJ.h", OHJumpMod },
+    { "CJOHJumpMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h", CJOHJump },
+    { "RollMod",                    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h", Roll },
+    { "BalanceMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h", Balance },
+    { "OHTrillMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h", OHTrill, },
+    { "VOHTrillMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h", VOHTrill },
+    { "ChaosMod",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h", Chaos },
+    { "CJOHAnchorMod",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHAnchor.h", CJOHAnchor },
+    { "RunningManMod",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h", RanMan },
+    { "WideRangeBalanceMod",        "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h", WideRangeBalance },
+    { "WideRangeRollMod",           "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h", WideRangeRoll },
+    { "WideRangeJumptrillMod",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h", WideRangeJumptrill },
+    { "WideRangeAnchorMod",         "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h", WideRangeAnchor },
+    { "FlamJamMod",                 "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h", FlamJam,  },
+    { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing },
+    { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing2},
+    { "BaseScalers",                0, CalcPatternMod_Invalid },
+    { "Globals",                    0, CalcPatternMod_Invalid },
+    { "InlineConstants",            0, CalcPatternMod_Invalid },
 };
-
 const char *BaseScalersFile = "etterna/Etterna/MinaCalc/UlbuAcolytes.h";
 
 const char *GlobalFiles[] = {
@@ -177,6 +177,13 @@ enum
     NumMods = sizeof(Mods) / sizeof(Mods[0])
 };
 
+struct DebugBuffers
+{
+    std::vector<std::vector<std::vector<float>>> handInfo[2];
+    std::vector<JackDebugInfo> jackInfo[2];
+    std::vector<float> interval_times;
+};
+
 struct NoteData
 {
     const vector<NoteInfo> ref;
@@ -184,7 +191,6 @@ struct NoteData
 
 static float RateParam = 1.0f;
 static const ParamJunk RateMod{{ "rate", (float *)&RateParam }};
-
 
 NoteData *frobble_serialized_note_data(char const *note_data, size_t length)
 {
@@ -196,9 +202,14 @@ NoteData *frobble_note_data(NoteInfo *note_data, size_t length)
     return frobble_serialized_note_data((char *)note_data, length * sizeof(NoteInfo));
 }
 
-isize note_data_rows(NoteData *note_data)
+isize note_data_row_count(NoteData *note_data)
 {
     return (isize)note_data->ref.size();
+}
+
+NoteInfo const *note_data_rows(NoteData *note_data)
+{
+    return &note_data->ref[0];
 }
 
 void free_note_data(NoteData *note_data)
@@ -437,8 +448,9 @@ CMinaCalc_MinaSDCalc(const std::vector<NoteInfo>& note_info,
 	}
     goal = std::clamp(goal, 0.8f, 0.965f);
 	calc->ssr = (goal != 0.93f);
+    auto result = calc->CalcMain(note_info, musicrate, min(goal, ssr_goal_cap));
 	calc->debugmode = false;
-    return calc->CalcMain(note_info, musicrate, min(goal, ssr_goal_cap));
+    return result;
 }
 
 SeeCalc calc_init(CalcInfo *info)
@@ -485,6 +497,61 @@ SkillsetRatings calc_go_with_rate_and_param(SeeCalc *calc, ParamSet *params, Not
         result.E[i] = ratings[i];
     }
     return result;
+}
+
+DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate)
+{
+    DebugInfo result = {};
+    result.buffers = new DebugBuffers;
+    calc->handle->debugmode = true;
+    CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, rate), 0.93f, calc->handle);
+
+    for (ptrdiff_t h = 0; h < 2; h++) {
+        result.buffers->handInfo[h] = std::move(calc->handle->debugValues[h]);
+
+        size_t length = result.buffers->handInfo[h][0][0].size();
+        for (ptrdiff_t i = 0; i < NUM_CalcPatternMod; i++) {
+            result.interval_hand[h].pmod[i] = result.buffers->handInfo[h][0][i].data();
+            assert(length == result.buffers->handInfo[h][0][i].size());
+        }
+        for (ptrdiff_t i = 0; i < NUM_CalcDiffValue; i++) {
+            result.interval_hand[h].diff[i] = result.buffers->handInfo[h][1][i].data();
+            assert(length == result.buffers->handInfo[h][1][i].size());
+        }
+        for (ptrdiff_t i = 0; i < NUM_CalcDebugMisc; i++) {
+            result.interval_hand[h].misc[i] = result.buffers->handInfo[h][2][i].data();
+            assert(length == result.buffers->handInfo[h][2][i].size());
+        }
+
+        result.interval_hand[h].length = ptrdiff_t(length);
+
+        result.buffers->jackInfo[h].resize(calc->handle->jack_diff[h].size());
+        for (ptrdiff_t i = 0; i < calc->handle->jack_diff[h].size(); i++) {
+            result.buffers->jackInfo[h][i] = {
+                calc->handle->jack_diff[h][i].first,
+                calc->handle->jack_diff[h][i].second,
+                (i < calc->handle->jack_stam_stuff[h].size()) ? calc->handle->jack_stam_stuff[h][i] : 0.0f,
+                (i < calc->handle->jack_loss[h].size())       ? calc->handle->jack_loss[h][i] : 0.0f
+            };
+        }
+
+        result.jack_hand[h].jank = result.buffers->jackInfo[h].data();
+        result.jack_hand[h].length = ptrdiff_t(result.buffers->jackInfo[h].size());
+
+        result.buffers->interval_times.resize(length);
+        for (ptrdiff_t i = 0; i < length; i++) {
+            result.buffers->interval_times[i] = float(i) * 0.5f;
+        }
+        result.interval_times = result.buffers->interval_times.data();
+        result.n_intervals = result.buffers->interval_times.size();
+    }
+    assert(result.interval_hand[0].length == result.interval_hand[1].length);
+    return result;
+}
+
+void debuginfo_free(DebugInfo *info)
+{
+    info->buffers = {};
 }
 
 void nddump(NoteData *nd, NoteData *nd2)

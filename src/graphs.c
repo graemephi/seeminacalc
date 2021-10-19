@@ -209,6 +209,7 @@ typedef enum {
     Work_Effects,
     Work_Skillsets,
     Work_Target,
+    Work_DebugGraphs,
 } WorkType;
 
 typedef struct DoneQueue DoneQueue;
@@ -338,7 +339,10 @@ typedef struct DoneWork
 {
     usize id;
     CalcWork work;
-    SkillsetRatings ssr;
+    union {
+        SkillsetRatings ssr;
+        DebugInfo debug_info;
+    };
 } DoneWork;
 
 enum {
@@ -591,6 +595,18 @@ void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, b32 s
     }
 }
 
+void calculate_debug_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
+{
+    if (sfi->debug_generation < generation) {
+        sfi->debug_generation = generation;
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_DebugGraphs,
+            .generation = generation,
+        });
+    }
+}
+
 b32 get_done_work(DoneWork *out)
 {
     static isize next_queue_to_read = 0;
@@ -666,28 +682,28 @@ i32 calc_thread(void *userdata)
     while (true) {
         CalcWork work = {0};
         while (get_work(ct, &high_prio_work_queue, &work) || get_work(ct, &low_prio_work_queue, &work)) {
-            SkillsetRatings ssr = {0};
+            DoneWork result = (DoneWork) { .work = work };
             u64 then = 0;
             u64 now = 0;
             switch (work.type) {
                 case Work_Parameter: {
                     if (work.parameter.lower_bound != ps->min[work.parameter.param]
                      || work.parameter.upper_bound != ps->max[work.parameter.param]) {
-                         ct->debug_counters.skipped++;
+                        ct->debug_counters.skipped++;
                         continue;
                     }
                     then = stm_now();
-                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 0.93f, work.parameter.param, work.parameter.value);
+                    result.ssr = calc_go_with_param(&calc, ps, work.sfi->notes, 0.93f, work.parameter.param, work.parameter.value);
                     now = stm_now();
                 } break;
                 case Work_ParameterLoss: {
                     then = stm_now();
-                    ssr = calc_go_with_rate_and_param(&calc, ps, work.sfi->notes, work.parameter_loss.goal, work.sfi->target.rate, work.parameter_loss.param, work.parameter_loss.value);
+                    result.ssr = calc_go_with_rate_and_param(&calc, ps, work.sfi->notes, work.parameter_loss.goal, work.sfi->target.rate, work.parameter_loss.param, work.parameter_loss.value);
                     now = stm_now();
                 } break;
                 case Work_Wife: {
                     then = stm_now();
-                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, work.wife.goal, 0, work.sfi->target.rate);
+                    result.ssr = calc_go_with_param(&calc, ps, work.sfi->notes, work.wife.goal, 0, work.sfi->target.rate);
                     now = stm_now();
                 } break;
                 case Work_Effects: {
@@ -698,16 +714,18 @@ i32 calc_thread(void *userdata)
                 } break;
                 case Work_Skillsets: {
                     then = stm_now();
-                    ssr = calc_go_with_param(&calc, ps, work.sfi->notes, WifeXs[work.x_index], 0, work.sfi->target.rate);
+                    result.ssr = calc_go_with_param(&calc, ps, work.sfi->notes, WifeXs[work.x_index], 0, work.sfi->target.rate);
+                    now = stm_now();
+                } break;
+                case Work_DebugGraphs: {
+                    then = stm_now();
+                    result.debug_info = calc_go_debuginfo(&calc, ps, work.sfi->notes, work.sfi->target.rate);
                     now = stm_now();
                 } break;
                 default: assert_unreachable();
             }
 
-            done->entries[done->write & DoneQueueMask] = (DoneWork) {
-                .work = work,
-                .ssr = ssr
-            };
+            done->entries[done->write & DoneQueueMask] = result;
             memory_barrier();
             done->write++;
 
@@ -826,6 +844,16 @@ void finish_work(void)
                 }
                 continue;
             } break;
+            case Work_DebugGraphs: {
+                if (done.work.generation >= done.work.sfi->debug_generation) {
+                    assert(done.work.generation == done.work.sfi->debug_generation);
+                    done.work.sfi->debug_info = done.debug_info;
+                    done.work.sfi->debug_generation = done.work.generation;
+                } else {
+                    debuginfo_free(&done.debug_info);
+                }
+                continue;
+            } break;
             default: assert_unreachable();
         }
 
@@ -854,12 +882,19 @@ void finish_work(void)
         }
 
         if (fng->is_param == false) {
-            // sfi->aa_rating.E[0] = rating_floor(fng->ys[0][Wife930Index]);
-            // sfi->max_rating.E[0] = fng->ys[0][Wife965Index];
-
+            if (done.work.x_index == Wife930Index) {
+                for (isize ss = 0; ss < NumSkillsets; ss++) {
+                    sfi->aa_rating.E[ss] = rating_floor(fng->ys[ss][Wife930Index]);
+                }
+            }
+            if (done.work.x_index == Wife965Index) {
+                for (isize ss = 0; ss < NumSkillsets; ss++) {
+                    sfi->max_rating.E[ss] = rating_floor(fng->ys[ss][Wife965Index]);
+                }
+            }
             if (fng->resident_count == array_length(fng->resident)) {
                 for (isize ss = 1; ss < NumSkillsets; ss++) {
-                    sfi->display_skillsets[ss] = (0.9f <= (fng->incoming_ys[ss][Wife930Index] / fng->incoming_ys[0][Wife930Index]));
+                    sfi->display_skillsets[ss] = (0.9f <= (fng->incoming_ys[ss][Wife930Index] / fng->incoming_ys[ss][Wife930Index]));
                 }
             }
         }
