@@ -1826,41 +1826,52 @@ void frame(void)
                             DebugInfo *d = &active->debug_info;
                             isize n_rows = note_data_row_count(active->notes);
                             NoteInfo const *rows = note_data_rows(active->notes);
-                            f32 last_row_time = rows[n_rows - 1].rowTime;
-                            f32 y_scale = y * active->target.rate;
+                            f32 last_row_time = rows[n_rows - 1].rowTime / active->target.rate;
                             ImVec2 pos = {0};
                             igSetNextWindowSize(V2(-1, last_row_time * y_scale), ImGuiCond_Always);
                             if (igBeginChild_Str("##Preview", V2Zero, false, 0)) {
                                 igGetCursorPos(&pos);
+                                f32 y_scale_rate = y_scale / active->target.rate;
                                 for (isize i = 0; i < n_rows; i++) {
                                     if (rows[i].notes & 1) {
-                                        igSetCursorPos(V2(1.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igSetCursorPos(V2(1.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
                                         igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
                                     }
                                     if (rows[i].notes & 2) {
-                                        igSetCursorPos(V2(2.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igSetCursorPos(V2(2.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
                                         igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
                                     }
                                     if (rows[i].notes & 4) {
-                                        igSetCursorPos(V2(3.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igSetCursorPos(V2(3.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
                                         igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
                                     }
                                     if (rows[i].notes & 8) {
-                                        igSetCursorPos(V2(4.0f * x, rows[i].rowTime * y_scale - my_tex_h/2));
+                                        igSetCursorPos(V2(4.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
                                         igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
                                     }
                                 }
-                                igSetCursorPos(pos);
+                                f32 scroll_y = igGetScrollY();
+                                f32 scroll_y_time_lo = (scroll_y / y_scale) - 1.0f;
+                                f32 scroll_y_time_hi = clamp_high(last_row_time + 1.0f, ((scroll_y + igGetWindowHeight()) / y_scale) + 1.0f);
+                                isize scroll_y_interval_index_lo = (isize)(scroll_y_time_lo * 2.0f);
+                                isize scroll_y_interval_index_hi = (isize)(scroll_y_time_hi * 2.0f);
+                                isize interval_offset = clamps(0, d->n_intervals, scroll_y_interval_index_lo);
+                                isize n_intervals = clamps(0, d->n_intervals - interval_offset, scroll_y_interval_index_hi - scroll_y_interval_index_lo);
+                                assert(interval_offset >= 0);
+                                assert(interval_offset + n_intervals <= d->n_intervals);
+                                igSetCursorPos(V2(pos.x, scroll_y - 1.0f * y_scale));
                                 ImPlot_PushColormap_PlotColormap(3);
                                 ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
                                 ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
                                 ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                                ImPlot_SetNextPlotLimitsY(0, (f64)last_row_time, ImGuiCond_Always, 0);
-                                if (ImPlot_BeginPlot("idk", "p", "t", V2(0,last_row_time * y),
+                                ImPlot_SetNextPlotLimitsX(0, 1, 0);
+                                ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
+                                // ImPlot_SetLegendLocation(ImPlotLocation_East, ImPlotOrientation_Horizontal);
+                                if (ImPlot_BeginPlot("idk", "p", "t", V2(0,(scroll_y_time_hi - scroll_y_time_lo) * y_scale),
                                   (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & ~ImPlotFlags_NoLegend,
                                   ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
                                   ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
-                                    ImPlot_PlotStairs_FloatPtrFloatPtr("a", d->interval_hand[0].pmod[0], d->interval_times, d->n_intervals, 0, sizeof(float));
+                                     ImPlot_PlotStairs_FloatPtrFloatPtr("a", d->interval_hand[0].pmod[0] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
                                     ImPlot_EndPlot();
                                 }
                                 ImPlot_PopStyleColor(3);
