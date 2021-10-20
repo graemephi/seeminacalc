@@ -454,7 +454,7 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 	// ulbu calculates everything needed for the block below
 	// (mostly patternmods)
 	thread_local TheGreatBazoinkazoinkInTheSky ulbu_that_which_consumes_all(
-	  *this); stupud_hack(&ulbu_that_which_consumes_all, mod_params + 1);
+	  *this); ulbu_that_which_consumes_all._calc = *this; stupud_hack(&ulbu_that_which_consumes_all, mod_params + 1);
 
 	// if debug, force params to load
 	if (debugmode || loadparams)
