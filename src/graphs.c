@@ -256,7 +256,6 @@ typedef struct CalcWork
         struct {
             i32 start;
             i32 end;
-            i32 for_display;
         } effects;
         struct {
             b32 initialisation;
@@ -538,46 +537,18 @@ void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
     }
 }
 
-void calculate_effects_for_optimizer(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, u32 generation)
-{
-    for (i32 i = 0; i < info->num_params; i++) {
-        b32 active = false;
-        if (state.opt_cfg.enabled[i]) {
-            if ((sfi->effects.generation[i] > 0 && (generation - sfi->effects.generation[i]) < 1024)
-            || ((sfi->effects_generation - generation) < 1024)) {
-                // Recent enough to not bother
-            } else {
-                active = true;
-            }
-        }
-        b32 already_positive = sfi->effects.masks[i];
-        if (active && !already_positive) {
-            sfi->effects.generation[i] = generation;
-            buf_push(*work, (CalcWork) {
-                .sfi = sfi,
-                .type = Work_Effects,
-                .effects.start = i,
-                .effects.end =  i + 1,
-                .generation = generation,
-            });
-        }
-    }
-}
-
-void calculate_effects_for_display(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi,  u32 generation)
+void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi,  u32 generation)
 {
     if (sfi->effects_generation != generation && sfi->num_effects_computed < info->num_params) {
         sfi->effects_generation = generation;
         for (i32 i = 0; i < info->num_params; i++) {
             b32 already_positive = sfi->effects.masks[i];
             if (!already_positive) {
-                sfi->effects.generation[i] = generation;
                 buf_push(*work, (CalcWork) {
                     .sfi = sfi,
                     .type = Work_Effects,
                     .effects.start = i,
                     .effects.end = i + 1,
-                    .effects.for_display = true,
                     .generation = generation,
                 });
             }
@@ -805,9 +776,7 @@ void finish_work(void)
                 continue;
             } break;
             case Work_Effects: {
-                if (done.work.effects.for_display) {
-                    sfi->num_effects_computed += done.work.effects.end - done.work.effects.start;
-                }
+                sfi->num_effects_computed += done.work.effects.end - done.work.effects.start;
                 continue;
             } break;
             case Work_Skillsets: {

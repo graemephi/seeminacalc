@@ -48,7 +48,6 @@ typedef struct {
 typedef struct EffectMasks
 {
     u8 *masks;
-    u32 *generation;
 } EffectMasks;
 
 typedef struct SimFileInfo
@@ -784,7 +783,6 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
 
             buf_push(sfi->graphs, make_skillsets_graph());
             buf_reserve(sfi->effects.masks, state.info.num_params);
-            buf_reserve(sfi->effects.generation, state.info.num_params);
 
             calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
             calculate_debug_graphs(&state.low_prio_work, sfi, state.generation);
@@ -1354,7 +1352,6 @@ void frame(void)
                 for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                     if (sfi->target.weight > 0.0f) {
                         buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
-                        calculate_effects_for_optimizer(&state.high_prio_work, &state.info, sfi, state.generation);
                     }
                 }
             }
@@ -1409,7 +1406,6 @@ void frame(void)
                     }
                     optimizer_error_message = 0;
 
-                    i32 submitted = 0;
                     for (isize i = 0; i < req.n_samples; i++) {
                         i32 sample = state.opt.active.samples[i];
                         assert((u32)sample < buf_len(state.opt_cfg.map.to_file));
@@ -1422,36 +1418,26 @@ void frame(void)
                         f32 goal = state.opt_cfg.goals[ss];
                         f32 msd = (sfi->target.want_msd + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
 
-                        i32 params_submitted = 0;
-                        for (isize j = 0; j < state.opt.n_params; j++) {
+                        calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork ) {
+                            .sample = sample,
+                            .goal = goal,
+                            .msd = msd
+                        }, state.generation);
+
+                        for (isize j = 0; j < req.n_parameters; j++) {
                             i32 param = state.opt.active.parameters[j];
                             i32 p = state.opt_cfg.map.to_ps[param];
-                            if (sfi->effects.masks[p]) {
-                                calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
-                                    .sample = sample,
-                                    .param = p,
-                                    .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
-                                    .goal = goal,
-                                    .msd = msd
-                                }, state.generation);
-                                params_submitted++;
-                            }
-
-                            if (params_submitted == req.n_parameters) {
-                                break;
-                            }
-                        }
-
-                        if (params_submitted > 0) {
-                            ParameterLossWork plw_x = { .sample = sample, .goal = goal, .msd = msd };
-                            calculate_parameter_loss(&state.low_prio_work, sfi, plw_x, state.generation);
-                            submitted++;
-
-                            submitted += params_submitted;
+                            calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
+                                .sample = sample,
+                                .goal = goal,
+                                .msd = msd,
+                                .param = p,
+                                .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
+                            }, state.generation);
                         }
                     }
 
-                    state.opt_pending_evals = submitted;
+                    state.opt_pending_evals = (req.n_parameters + 1) * req.n_samples;
 
                     isize x = state.opt.iter % NumGraphSamples;
                     state.optimization_graph->ys[0][x] = absolute_value(state.target.average_delta.E[0]);
@@ -2157,7 +2143,7 @@ void frame(void)
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
         calculate_file_graphs(&state.high_prio_work, state.active, state.generation);
-        calculate_effects_for_display(&state.high_prio_work, &state.info, state.active, state.generation);
+        calculate_effects(&state.high_prio_work, &state.info, state.active, state.generation);
     }
 
     if (changed_param.type) {

@@ -2,6 +2,7 @@ static f32 H = 0.0001f;
 static f32 StepSize = 0.0016f;
 static f32 MDecay = 0.9f;
 static f32 VDecay = 0.999f;
+static f32 VVDecay = 0.99f;
 static i32 SampleBatchSize = 16;
 static i32 ParameterBatchSize = 16;
 static f32 NegativeEpsilon = 0.0f;
@@ -11,6 +12,36 @@ static f32 RegularisationAlpha = 0.15f;
 enum {
     Param_None = -1
 };
+
+typedef struct {
+    i32 param;
+    f32 order;
+} SworExp;
+
+int sworexp_sort(void const *av, void const *bv)
+{
+    SworExp const *a = av;
+    SworExp const *b = bv;
+    return (a->order < b->order) ? -1 : 1;
+}
+
+// https://timvieira.github.io/blog/post/2019/09/16/algorithms-for-sampling-without-replacement/
+void random_sequence_weighted(i32 arr[], f32 weights[])
+{
+    assert(buf_len(arr) == buf_len(weights));
+    push_allocator(scratch);
+    SworExp *g = 0;
+    buf_pushn(g, buf_len(arr));
+    for (i32 i = 0; i < buf_len(g); i++) {
+        g[i].param = i;
+        g[i].order = -logf(rngf()) / weights[i];
+    }
+    qsort(g, buf_len(g), sizeof(SworExp), sworexp_sort);
+    for (i32 i = 0; i < buf_len(arr); i++) {
+        arr[i] = g[i].param;
+    }
+    pop_allocator();
+}
 
 void swap(i32 *a, i32 *b)
 {
@@ -44,11 +75,13 @@ typedef struct {
     // Current parameter vector
     f32 *x;
 
-    // ADAM state vectors
+    // AMSGrad state vectors
     f32 *v;
-    f32 *v_correction;
+    f32 *vv;
     f32 *m;
-    f32 *m_correction;
+
+    // My own special juice
+    f32 *w;
 
     // Estimate of the loss at x
     f32 loss;
@@ -77,34 +110,7 @@ typedef struct {
 
 f32 loss(f32 delta, f32 barrier)
 {
-    // The complicated loss function is from before regularisation was added
-    // which was more effective keeping the optimizer away from 'obviously' bad
-    // solutions than these. So, disabled them.
-    //
-    // NegativeEpsilon adds a flat region to the base of the loss curve, on the
-    // negative side of the origin. I think this is not a good idea, it will let
-    // losses cluster at the edges rather than push them as high in the flat
-    // region as possible. Also, it's not obvious what scale it is on.
-    //
-    // Barrier, for positive x, switches from x^2 to x^barrier loss at the point
-    // their derivatives are equal. So, as far as I can tell, this should be
-    // well behaved for the optimizer. But it's hard to reason about so yeeting
-    // it.
-#if 0
-    f32 x = delta;
-    f32 a = barrier;
-    if (x < -NegativeEpsilon) {
-        return square(x + NegativeEpsilon);
-    } else if (x < 0.0f) {
-        return 0.0f;
-    } else if (x < 1.0f) {
-        return x*x;
-    } else {
-        return (2.0f / a) * (powf(x, a) - 1.0f) + 1.0f;
-    }
-#else
     return delta*delta;
-#endif
 }
 
 void optimize(OptimizationContext *opt, i32 n_params, f32 *initial_x, i32 n_samples)
@@ -114,16 +120,15 @@ void optimize(OptimizationContext *opt, i32 n_params, f32 *initial_x, i32 n_samp
     opt->loss = 0.0f;
     buf_zeros(opt->x, n_params);
     buf_zeros(opt->v, n_params);
-    buf_zeros(opt->v_correction, n_params);
+    buf_zeros(opt->vv, n_params);
     buf_zeros(opt->m, n_params);
-    buf_zeros(opt->m_correction, n_params);
+    buf_zeros(opt->w, n_params);
     buf_zeros(opt->active.samples, n_samples);
     buf_zeros(opt->active.parameters, n_params);
     for (isize i = 0; i < n_params; i++) {
         opt->x[i] = initial_x[i];
+        opt->w[i] = 1.0f / (f32)n_params;
         opt->active.parameters[i] = (i32)i;
-        opt->v_correction[i] = VDecay;
-        opt->m_correction[i] = MDecay;
     }
     for (isize i = 0; i < n_samples; i++) {
         opt->active.samples[i] = (i32)i;
@@ -149,7 +154,6 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
     f32 n_losses = 0.0f;
     if (buf_len(evals) > 0) {
         opt->loss = 0.0f;
-
         push_allocator(scratch);
         struct { i32 *samples; } *param_evals = 0;
         i32 *sample_evals = 0;
@@ -170,6 +174,7 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
 
         f32 h2 = 2 * H;
         f32 hsq = H*H;
+        f32 w_sum = 0.0f;
         for (isize i = 0; i < opt->n_params; i++) {
             if (param_evals[i].samples) {
                 f32 regularisation_l1 = 0;
@@ -191,32 +196,45 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                 f32 penalty = Regularisation * lerp(regularisation_l1, regularisation_l2, RegularisationAlpha);
 
                 f32 g = (penalty + loss_xh - loss_x) / H;
-                // ADAM: A Method For Stochastic Optimization (2015)
+                // AMSGrad. VVDecay is not in the paper but is an obvious extension. vv stops
+                // division by small v from blowing up the step size when it wobbles between
+                // small and large values. But otherwise we want it to be as small as possible
+                // when v is stable.
                 opt->m[i] = lerp(g, opt->m[i], MDecay);
                 opt->v[i] = lerp(g*g, opt->v[i], VDecay);
-                f32 m = opt->m[i] / (1.0f - opt->m_correction[i]);
-                f32 v = opt->v[i] / (1.0f - opt->v_correction[i]);
-                opt->m_correction[i] *= MDecay;
-                opt->v_correction[i] *= VDecay;
-                opt->x[i] = opt->x[i] - StepSize * m / (sqrtf(v) + 1e-8f);
+                opt->vv[i] = max(opt->vv[i] * VVDecay, opt->v[i]);
+                f32 m = opt->m[i];
+                f32 v = sqrtf(opt->vv[i] + 1e-8f);
+                opt->x[i] = opt->x[i] - StepSize * m / v;
+                opt->w[i] = lerp(opt->w[i] * expf(-0.5f / v),
+                                 1.0f / (f32)opt->n_params,
+                                 1e-5f);
 
                 opt->loss += loss_x + penalty;
             } else {
                 opt->m[i] = lerp(0, opt->m[i], MDecay);
                 opt->v[i] = lerp(0, opt->v[i], VDecay);
-                f32 m = opt->m[i] / (1.0f - opt->m_correction[i]);
-                f32 v = opt->v[i] / (1.0f - opt->v_correction[i]);
+                opt->vv[i] = max(opt->vv[i] * VVDecay, opt->v[i]);
+                f32 m = opt->m[i];
+                f32 v = opt->vv[i];
                 opt->x[i] = opt->x[i] - StepSize * m / (sqrtf(v) + 1e-8f);
             }
+
+            w_sum += opt->w[i];
+        }
+
+        for (isize i = 0; i < opt->n_params; i++) {
+            opt->w[i] /= w_sum;
         }
     }
+
 
     opt->iter++;
 
     opt->loss *= (f32)(opt->n_samples * opt->n_params) / n_losses;
 
     random_sequence(opt->active.samples, opt->focus);
-    random_sequence(opt->active.parameters, 0);
+    random_sequence_weighted(opt->active.parameters, opt->w);
 
     i32 sample_batch_size = (i32)clamps(0, opt->n_samples, SampleBatchSize);
     i32 parameter_batch_size = (i32)clamps(0, opt->n_params, ParameterBatchSize);
