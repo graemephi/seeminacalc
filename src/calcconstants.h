@@ -5,7 +5,7 @@
 // calcconstants.gen.h, along with some other information so the GUI can make
 // sense of it.
 //
-// If DUMP_CONSTANTS is 0, then calcconst ants.gen.h is included, and P expands
+// If DUMP_CONSTANTS is 0, then calcconstants.gen.h is included, and P expands
 // to `minacalc_constant[__COUNTER__]`. So, inline constants can be changed at
 // runtime, and the perf hit is there, but not too bad.
 #define DUMP_CONSTANTS 0

@@ -256,6 +256,7 @@ typedef struct CalcWork
         struct {
             i32 start;
             i32 end;
+            i32 for_display;
         } effects;
         struct {
             b32 initialisation;
@@ -278,59 +279,22 @@ static SkillsetRatings rating_floor_skillsets(SkillsetRatings ssr)
     return ssr;
 }
 
-void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, ParamSet *ps, NoteData *note_data, i32 param, EffectMasks *out)
+void calculate_effect_for_param(CalcInfo *info, SeeCalc *calc, ParamSet *ps, NoteData *note_data, f32 rate, i32 param, EffectMasks *out)
 {
-    i32 p = param;
+    SkillsetRatings default_ratings = rating_floor_skillsets(calc_go_with_param(calc, ps, note_data, 0.93f, 0, rate));
+    assert(info->params[param].max >= info->params[param].min);
 
-    if (out->weak[p]) {
-        // Optimisation for the optimizer. This means we only set effects, never unset them
-        return;
-    }
-
-    SkillsetRatings ratings = {0};
-    SkillsetRatings default_ratings = calc_go(calc, ps, note_data, 0.93f);
+    SkillsetRatings ratings = calc_go_with_rate_and_param(calc, ps, note_data, 0.93f, rate, param, info->params[param].max);
     for (i32 ss = 0; ss < NumSkillsets; ss++) {
-        default_ratings.E[ss] = rating_floor(default_ratings.E[ss]);
+        b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
+        out->masks[param] |= (changed << ss);
     }
 
-    // stronk. they react to small changes at 93%
-    {
-        f32 value = 0.0f;
-        if (info->params[p].default_value == 0) {
-            value = 1.0f;
-        } else if (info->params[p].default_value > info->params[p].min) {
-            value = info->params[p].default_value * 0.95f;
-        } else {
-            value = info->params[p].default_value * 1.05f;
-        }
-
-        ratings = calc_go_with_param(calc, ps, note_data, 0.93f, param, value);
-
+    if (out->masks[param] == 0) {
+        ratings = calc_go_with_rate_and_param(calc, ps, note_data, 0.93f, rate, param, info->params[param].min);
         for (i32 ss = 0; ss < NumSkillsets; ss++) {
             b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
-            out->strong[p] |= (changed << ss);
-        }
-    }
-
-    // weak. they react to big changes at 93%, and small changes at 93%
-    {
-        assert(info->params[p].max >= info->params[p].min);
-        f32 value = info->params[p].max;
-
-        ratings = calc_go_with_param(calc, ps, note_data, 0.93f, param, value);
-
-        out->weak[p] = out->strong[p];
-        for (i32 ss = 0; ss < NumSkillsets; ss++) {
-            b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
-            out->weak[p] |= (changed << ss);
-        }
-
-        if (out->weak[p] == 0) {
-            ratings = calc_go_with_param(calc, ps, note_data, 0.93f, param, info->params[p].min);
-            for (i32 ss = 0; ss < NumSkillsets; ss++) {
-                b32 changed = rating_floor(ratings.E[ss]) != default_ratings.E[ss];
-                out->weak[p] |= (changed << ss);
-            }
+            out->masks[param] |= (changed << ss);
         }
     }
 }
@@ -455,7 +419,7 @@ void calculate_parameter_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng,
     }
 }
 
-void calculate_parameter_loss_with_parameter_override(CalcWork *work[], SimFileInfo *sfi, ParameterLossWork pmw, u32 generation)
+void calculate_parameter_loss(CalcWork *work[], SimFileInfo *sfi, ParameterLossWork pmw, u32 generation)
 {
     assert(sfi->target.want_msd);
     buf_push(*work, (CalcWork) {
@@ -464,11 +428,6 @@ void calculate_parameter_loss_with_parameter_override(CalcWork *work[], SimFileI
         .parameter_loss = pmw,
         .generation = generation,
     });
-}
-
-void calculate_parameter_loss(CalcWork *work[], SimFileInfo *sfi, ParameterLossWork pmw, u32 generation)
-{
-    calculate_parameter_loss_with_parameter_override(work, sfi, pmw, generation);
 }
 
 void calculate_file_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
@@ -579,20 +538,46 @@ void calculate_skillsets_in_background(CalcWork *work[], u32 generation)
     }
 }
 
-void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, b32 skip_unopt, u32 generation)
+void calculate_effects_for_optimizer(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi, u32 generation)
 {
-    i32 stride = 1;
+    for (i32 i = 0; i < info->num_params; i++) {
+        b32 active = false;
+        if (state.opt_cfg.enabled[i]) {
+            if ((sfi->effects.generation[i] > 0 && (generation - sfi->effects.generation[i]) < 1024)
+            || ((sfi->effects_generation - generation) < 1024)) {
+                // Recent enough to not bother
+            } else {
+                active = true;
+            }
+        }
+        b32 already_positive = sfi->effects.masks[i];
+        if (active && !already_positive) {
+            sfi->effects.generation[i] = generation;
+            buf_push(*work, (CalcWork) {
+                .sfi = sfi,
+                .type = Work_Effects,
+                .effects.start = i,
+                .effects.end =  i + 1,
+                .generation = generation,
+            });
+        }
+    }
+}
+
+void calculate_effects_for_display(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi,  u32 generation)
+{
     if (sfi->effects_generation != generation && sfi->num_effects_computed < info->num_params) {
         sfi->effects_generation = generation;
-        for (i32 i = 0; i < info->num_params; i += stride) {
-            b32 active = !skip_unopt || state.opt_cfg.enabled[i];
-            b32 already_positive = sfi->effects.weak[i];
-            if (active && !already_positive) {
+        for (i32 i = 0; i < info->num_params; i++) {
+            b32 already_positive = sfi->effects.masks[i];
+            if (!already_positive) {
+                sfi->effects.generation[i] = generation;
                 buf_push(*work, (CalcWork) {
                     .sfi = sfi,
                     .type = Work_Effects,
                     .effects.start = i,
-                    .effects.end =  (i32)mins(i + stride, info->num_params),
+                    .effects.end = i + 1,
+                    .effects.for_display = true,
                     .generation = generation,
                 });
             }
@@ -714,7 +699,7 @@ i32 calc_thread(void *userdata)
                 case Work_Effects: {
                     for (i32 i = work.effects.start; i < work.effects.end; i++) {
                         // nb. modifies sfi->effects from this thread; it is otherwise read-only
-                        calculate_effect_for_param(ct->info, &calc, ps, work.sfi->notes, i, &work.sfi->effects);
+                        calculate_effect_for_param(ct->info, &calc, ps, work.sfi->notes, work.sfi->target.rate, i, &work.sfi->effects);
                     }
                 } break;
                 case Work_Skillsets: {
@@ -811,14 +796,18 @@ void finish_work(void)
                 void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr);
                 optimizer_skulduggery(sfi, done.work.parameter_loss, done.ssr);
 
-                sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
-                sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
-                sfi->aa_rating = rating_floor_skillsets(done.ssr);
-                targets_updated = true;
+                if (done.work.parameter_loss.param == 0) {
+                    sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
+                    sfi->target.delta = sfi->target.got_msd - sfi->target.want_msd;
+                    sfi->aa_rating = rating_floor_skillsets(done.ssr);
+                    targets_updated = true;
+                }
                 continue;
             } break;
             case Work_Effects: {
-                sfi->num_effects_computed += done.work.effects.end - done.work.effects.start;
+                if (done.work.effects.for_display) {
+                    sfi->num_effects_computed += done.work.effects.end - done.work.effects.start;
+                }
                 continue;
             } break;
             case Work_Skillsets: {

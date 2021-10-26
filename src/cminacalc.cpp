@@ -38,8 +38,9 @@ T clamp(T t, T a, T b)
 
 // Changes made to the calc source:
 //   - some constexpr globals changed to thread_local
-//   - flat params pointer added to MinaCalc and distributed to ulbu by calling stupud_hack
+//   - pointer to flat params array added to MinaCalc and distributed to ulbu by calling stupud_hack
 //   - float literals are marked up with macros to make them accessible at runtime
+//      - these are updated by writing into the same flat params array before calling the calc
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/Ulbu.h"
 static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor);
@@ -126,7 +127,7 @@ struct {
     const char *file;
     CalcPatternMod id;
 } Mods[] = {
-    { "Rate",                       0 },
+    { "Rate",                       0, CalcPatternMod_Invalid },
     { "StreamMod",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h", Stream },
     { "JSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h", JS },
     { "HSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h", HS },
@@ -337,8 +338,10 @@ CalcInfo calc_info()
 
     for (isize i = 0; i < num_params; i++) {
         if (param_info[i].constant &&
-            (  (str_eq((char *)param_info[i].name, "MinaCalc.cpp(76, 2)"))
-            || (str_eq((char *)param_info[i].name, "MinaCalc.cpp(94)")))) {
+            (  str_eq((char *)param_info[i].name, "MinaCalc.cpp(76, 2)")
+            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(94)")
+            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(183, 2)")
+            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(183, 4)"))) {
             // Hack to fix bad bad no good infinite loop causer
             // chisel P(10.24) and P(0.32). should add P_MIN(10.24, 0.1) or something
             param_info[i].min = 0.1f;

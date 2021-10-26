@@ -130,7 +130,6 @@ void optimize(OptimizationContext *opt, i32 n_params, f32 *initial_x, i32 n_samp
     }
     buf_reserve(opt->focus, 8);
     buf_clear(opt->focus);
-    opt->iter = 0;
 }
 
 void opt_focus(OptimizationContext *opt, i32 sample)

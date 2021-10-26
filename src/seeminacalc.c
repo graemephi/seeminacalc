@@ -47,8 +47,8 @@ typedef struct {
 
 typedef struct EffectMasks
 {
-    u8 *weak;
-    u8 *strong;
+    u8 *masks;
+    u32 *generation;
 } EffectMasks;
 
 typedef struct SimFileInfo
@@ -144,11 +144,11 @@ typedef struct State
     CalcThread *threads;
     u32 generation;
     CalcWork *debug_graph_work;
+    CalcWork *optimizer_effects_work;
     CalcWork *high_prio_work;
     CalcWork *low_prio_work;
 
     CalcInfo info;
-    SeeCalc calc;
     SimFileInfo *files;
     SimFileInfo *active;
 
@@ -783,10 +783,11 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
             });
 
             buf_push(sfi->graphs, make_skillsets_graph());
-            buf_reserve(sfi->effects.weak, state.info.num_params);
-            buf_reserve(sfi->effects.strong, state.info.num_params);
+            buf_reserve(sfi->effects.masks, state.info.num_params);
+            buf_reserve(sfi->effects.generation, state.info.num_params);
 
             calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
+            calculate_debug_graphs(&state.low_prio_work, sfi, state.generation);
 
             f32 old_m = target_m;
             f32 old_s = target_s;
@@ -864,7 +865,7 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
     if (igCheckbox("##opt", &state.opt_cfg.enabled[mp])) {
         assert(state.info.params[mp].optimizable);
         type = ParamSlider_OptimizingToggled;
-    } tooltip("optimize this parameter");
+    } tooltip("optimize on this parameter");
     igEndDisabled();
     igSameLine(0, 4);
     if (igCheckbox("##graph", &state.parameter_graphs_enabled[mp])) {
@@ -920,9 +921,7 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
                 if (igCheckbox("##opt_all", &state.opt_cfg.all_mod_enabled[mod_index])) {
                     for (i32 i = 0; i < mod->num_params; i++) {
                         i32 mp = mod->index + i;
-                        if (effects == 0 || (effects[mp] & effect_mask) != 0) {
-                            state.opt_cfg.enabled[mp] = state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
-                        }
+                        state.opt_cfg.enabled[mp] = state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
                     }
                     changed_param->type = ParamSlider_OptimizingToggled;
                 } tooltip("optimize visible");
@@ -1068,6 +1067,8 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(94)"))].low = 0.1f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148, 2)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(183, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(183, 4)"))].low = 0.1f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(536)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
@@ -1133,7 +1134,6 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
         .barrier = state.opt_cfg.barriers[ss]
     });
     state.opt_pending_evals--;
-    assert(state.opt_pending_evals >= 0);
 }
 
 void init(void)
@@ -1195,7 +1195,6 @@ void init(void)
 
     state.generation = 1;
     state.info = calc_info();
-    state.calc = calc_init(&state.info);
     state.ps = copy_param_set(&state.info.defaults);
     buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
     buf_reserve(state.graphs, 1024);
@@ -1319,7 +1318,7 @@ void frame(void)
     }
 
     DBResultsByType db_results = db_pump();
-    state.reset_optimizer_flag = process_target_files(&state.loader, db_results.of[DBRequest_File]);
+    state.reset_optimizer_flag |= process_target_files(&state.loader, db_results.of[DBRequest_File]);
 
     // Search stuff
     buf_reserve(state.search.results, 1024);
@@ -1348,24 +1347,25 @@ void frame(void)
             buf_pushn(x, state.ps.num_params);
             pop_allocator();
 
+            i32 n_params = pack_opt_parameters(&state.info, state.ps.params, state.opt_cfg.normalization_factors, state.opt_cfg.enabled, x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
+
             buf_clear(state.opt_cfg.map.to_file);
-            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                if (sfi->target.weight > 0.0f) {
-                    buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
-                    if ((state.generation - sfi->effects_generation) > 1024) {
-                        sfi->num_effects_computed = 0;
-                        calculate_effects(&state.high_prio_work, &state.info, sfi, true, state.generation);
+            if (n_params > 0) {
+                for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                    if (sfi->target.weight > 0.0f) {
+                        buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
+                        calculate_effects_for_optimizer(&state.high_prio_work, &state.info, sfi, state.generation);
                     }
                 }
             }
 
-            i32 n_params = pack_opt_parameters(&state.info, state.ps.params, state.opt_cfg.normalization_factors, state.opt_cfg.enabled, x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
-            i32 iter = state.opt.iter - 1;
             optimize(&state.opt, n_params, x, (i32)buf_len(state.opt_cfg.map.to_file));
-            state.opt.iter = iter;
 
             last_generation = state.generation;
-            state.opt_pending_evals = 0;
+            if (state.opt_pending_evals > 0) {
+                state.opt.iter--;
+                state.opt_pending_evals = 0;
+            }
 
             state.reset_optimizer_flag = false;
         }
@@ -1397,6 +1397,7 @@ void frame(void)
                 for (isize i = 0; i < state.opt.n_params; i++) {
                     isize p = state.opt_cfg.map.to_ps[i];
                     // Apply bounds. This is a hack so it lives out here and not in the optimizer :)
+                    // Since we have regularisation this is well behaved
                     state.opt.x[i] = clamp(state.opt_cfg.bounds[p].low, state.opt_cfg.bounds[p].high, state.opt.x[i]);
                     // Copy x into the calc parameters
                     state.ps.params[p] = state.opt.x[i] * state.opt_cfg.normalization_factors[p];
@@ -1425,11 +1426,11 @@ void frame(void)
                         for (isize j = 0; j < state.opt.n_params; j++) {
                             i32 param = state.opt.active.parameters[j];
                             i32 p = state.opt_cfg.map.to_ps[param];
-                            if (sfi->num_effects_computed == 0 || sfi->effects.weak[p]) {
+                            if (sfi->effects.masks[p]) {
                                 calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
                                     .sample = sample,
                                     .param = p,
-                                    .value = (state.opt.x[param] * state.opt_cfg.normalization_factors[p]) + req.h,
+                                    .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
                                     .goal = goal,
                                     .msd = msd
                                 }, state.generation);
@@ -1451,10 +1452,6 @@ void frame(void)
                     }
 
                     state.opt_pending_evals = submitted;
-
-                    if (rngf() < 0.125f) {
-                        calculate_skillsets(&state.high_prio_work, &state.files[state.opt.iter % buf_len(state.files)], false, state.generation);
-                    }
 
                     isize x = state.opt.iter % NumGraphSamples;
                     state.optimization_graph->ys[0][x] = absolute_value(state.target.average_delta.E[0]);
@@ -1516,21 +1513,13 @@ void frame(void)
         // Tabs for param strength filters
         if (igBeginTabBar("FilterTabs", ImGuiTabBarFlags_NoTooltip)) {
             if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
-                tooltip("More, plus some params that need more shoving");
+                tooltip("Parameters that affect the active file");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i, active->effects.weak, effect_mask, &changed_param);
+                    mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, &changed_param);
                 }
-                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.weak, effect_mask, &changed_param);
+                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, &changed_param);
                 igEndTabItem();
-            } else tooltip("More, plus some params that need more shoving");
-            if (igBeginTabItem("More Relevant", 0, ImGuiTabItemFlags_None)) {
-                tooltip("These will basically always change the MSD of the active file's selected skillsets");
-                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i,  active->effects.strong, effect_mask, &changed_param);
-                }
-                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.strong, effect_mask, &changed_param);
-                igEndTabItem();
-            } else tooltip("These will basically always change the MSD of the active file's selected skillsets");
+            } else tooltip("Parameters that affect the active file");
             if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
                 tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
@@ -1544,11 +1533,13 @@ void frame(void)
     }
     igEnd();
 
-    if (changed_param.type == ParamSlider_ValueChanged || changed_param.type == ParamSlider_OptimizingToggled) {
+    if (changed_param.type == ParamSlider_ValueChanged) {
         state.generation++;
         buf_clear(state.high_prio_work);
         buf_clear(state.low_prio_work);
     }
+
+    b32 update_visible_skillsets = (state.optimizing == false) || (changed_param.type == ParamSlider_ValueChanged);
 
     // Main, center window
     f32 centre_width = ds.x - left_width - right_width;
@@ -1590,7 +1581,7 @@ void frame(void)
                         for (i32 sfi_index = clip.DisplayStart; sfi_index < clip.DisplayEnd; sfi_index++) {
                             SimFileInfo *sfi = state.files + sfi_index;
                             f32 weight_before_user_interaction = sfi->target.weight;
-                            calculate_skillsets(&state.low_prio_work, sfi, false, state.generation);
+                            calculate_skillsets(update_visible_skillsets ? &state.high_prio_work : &state.low_prio_work, sfi, false, state.generation);
                             if (sfi == active) {
                                 igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
                             }
@@ -1603,7 +1594,7 @@ void frame(void)
                             if (igCheckbox("##enabled", &enabled)) {
                                 sfi->target.weight = enabled ? sfi->target.last_user_set_weight : 0.0f;
                             }
-                            tooltip("optimize this file");
+                            tooltip("optimize on this file");
                             igEndDisabled();
 
                             igTableSetColumnIndex(1);
@@ -1689,7 +1680,7 @@ void frame(void)
                             igPopID();
 
                             if (sfi->target.weight != weight_before_user_interaction) {
-                                state.generation++;
+                                state.reset_optimizer_flag = true;
                             }
                         }
                     }
@@ -2020,7 +2011,7 @@ void frame(void)
     igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
     if (igBegin("Files", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize)) {
-        // Header + arrow drop down fake thing
+        // Header
         if (state.target.average_delta.E[0] != 0.0f) {
             for (isize i = 0; i < NumSkillsets; i++) {
                 igTextColored(msd_color(absolute_value(state.target.average_delta.E[i]) * 3.0f), "%02.2f", (f64)state.target.average_delta.E[i]);
@@ -2041,9 +2032,12 @@ void frame(void)
         }
         igSeparator();
 
-        // Open file list
+        // Optimizing file list
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             if (sfi->target.weight > 0) {
+                if (update_visible_skillsets) {
+                    calculate_skillsets(&state.high_prio_work, sfi, false, state.generation);
+                }
                 f32 wife93 = sfi->aa_rating.overall;
                 f32 wife965 = sfi->max_rating.overall;
                 if (sfi->target.want_msd) {
@@ -2163,7 +2157,7 @@ void frame(void)
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
         calculate_file_graphs(&state.high_prio_work, state.active, state.generation);
-        calculate_effects(&state.high_prio_work, &state.info, state.active, false, state.generation);
+        calculate_effects_for_display(&state.high_prio_work, &state.info, state.active, state.generation);
     }
 
     if (changed_param.type) {
@@ -2193,6 +2187,9 @@ void frame(void)
                     }
                 }
             } break;
+            case ParamSlider_OptimizingToggled: {
+                state.generation++;
+            } break;
             default: {
                 // Nothing
             }
@@ -2208,9 +2205,17 @@ void frame(void)
         state.high_prio_work[idx] = temp;
     }
 
+    push_allocator(scratch);
+    CalcWork *pacer = 0;
+    for (isize i = 0; i < 1 && buf_len(state.optimizer_effects_work) > 0; i++) {
+        buf_push(pacer, buf_pop(state.optimizer_effects_work));
+    }
+    pop_allocator();
+
     submit_work(&high_prio_work_queue, state.debug_graph_work, state.generation);
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
     submit_work(&low_prio_work_queue, state.low_prio_work, state.generation);
+    submit_work(&low_prio_work_queue, pacer, state.generation);
     fflush(0);
 }
 
