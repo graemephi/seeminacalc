@@ -400,7 +400,7 @@ static const ImVec2 V2Zero = {0};
 
 static bool BeginPlotDefaults(const char* title_id, const char* x_label, const char* y_label)
 {
-    return ImPlot_BeginPlot(title_id, x_label, y_label, (ImVec2){igGetWindowWidth() / 2.0f - 8.0f, 0}, ImPlotFlags_NoLegend|ImPlotFlags_NoChild, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, 0, 0);
+    return ImPlot_BeginPlot(title_id, x_label, y_label, (ImVec2){-1, 0}, ImPlotFlags_NoLegend|ImPlotFlags_NoChild, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, ImPlotAxisFlags_Lock, 0, 0);
 }
 static bool BeginPlotOptimizer(const char* title_id)
 {
@@ -1010,9 +1010,6 @@ i32 pack_opt_parameters(CalcInfo *info, f32 *params, f32 *normalization_factors,
 static f32 SkillsetOverallBalance = 0.35f;
 static f32 ExpScale = 0.0f;
 static f32 Misclass = 0.0f;
-#if 0
-static f32 UnderratedDeadZone = 0.5f;
-#endif
 void setup_optimizer(void)
 {
     f32 *normalization_factors = 0;
@@ -1163,7 +1160,7 @@ void init(void)
     ImVec4 bg = *igGetStyleColorVec4(ImGuiCol_WindowBg);
     bg.w = 1.0f;
     igPushStyleColor_Vec4(ImGuiCol_WindowBg, bg);
-    igPushStyleVar_Float(ImGuiStyleVar_ScrollbarSize, 4.f);
+    igPushStyleVar_Float(ImGuiStyleVar_ScrollbarSize, 8.f);
     igPushStyleVar_Float(ImGuiStyleVar_WindowRounding, 1.0f);
 
     if (font.buf) {
@@ -1585,7 +1582,7 @@ void frame(void)
 
                             igTableSetColumnIndex(1);
                             if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
-                                if (sfi->open) {
+                                if (sfi->open && sfi == active) {
                                     sfi->open = false;
                                 } else {
                                     sfi->open = true;
@@ -1762,15 +1759,6 @@ void frame(void)
                         }
                         ImPlot_EndPlot();
                     }
-                    igSameLine(0, 4);
-                    ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->relative_min - 0.05, 1.05, ImGuiCond_Always);
-                    if (BeginPlotDefaults("Relative Rating", "Wife%", 0)) {
-                        for (i32 ss = 1; ss < NumSkillsets; ss++) {
-                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
-                        }
-                        ImPlot_EndPlot();
-                    }
-
                     for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
                         fng = &state.graphs[sfi->graphs[fungi]];
                         if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
@@ -1787,14 +1775,6 @@ void frame(void)
                             calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
                             for (i32 ss = 0; ss < NumSkillsets; ss++) {
                                 skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
-                            }
-                            ImPlot_EndPlot();
-                        }
-                        igSameLine(0, 4);
-                        ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->relative_min - 0.05, (f64)1.05, ImGuiCond_Always);
-                        if (BeginPlotDefaults("##Relative AA", full_name, 0)) {
-                            for (i32 ss = 1; ss < NumSkillsets; ss++) {
-                                skillset_line_plot(ss, ss_highlight[ss], fng, fng->relative_ys[ss]);
                             }
                             ImPlot_EndPlot();
                         }
@@ -1935,11 +1915,6 @@ void frame(void)
                     tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
                     igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
                     tooltip("weights higher MSDs heavier automatically\n0 = train on msd\n1 = train on exp(msd)\n\nmsd is zero centered and normalized so dw about it");
-#if 0
-                    igSliderFloat("Underrated dead zone", &NegativeEpsilon, 0.0f, 10.0f, "%f", 1.0f);
-                    tooltip("be more accepting of files that come under their target ssr than over");
-                    NegativeEpsilon = UnderratedDeadZone / state.target.msd_sd;
-#endif
                     igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", ImGuiSliderFlags_Logarithmic);
                     tooltip("penalise moving parameters very far away from the defaults");
                     igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
@@ -2039,7 +2014,7 @@ void frame(void)
                     igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
                 }
                 if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
-                    if (sfi->open) {
+                    if (sfi->open && sfi == active) {
                         sfi->open = false;
                     } else {
                         sfi->open = true;
@@ -2134,9 +2109,8 @@ void frame(void)
             }
         }
         if (buf_len(next_active->graphs) == 1) {
-            for (isize i = 1; i < buf_len(active->graphs); i++) {
-                assert(i <= buf_len(state.parameter_graph_order));
-                buf_push(next_active->graphs, make_parameter_graph(state.parameter_graph_order[i-1]));
+            for (isize i = 0; i < buf_len(state.parameter_graph_order); i++) {
+                buf_push(next_active->graphs, make_parameter_graph(state.parameter_graph_order[i]));
             }
         }
         assert(next_active->open);

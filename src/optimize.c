@@ -206,7 +206,7 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                 f32 m = opt->m[i];
                 f32 v = sqrtf(opt->vv[i] + 1e-8f);
                 opt->x[i] = opt->x[i] - StepSize * m / v;
-                opt->w[i] = lerp(opt->w[i] * expf(-0.5f / v),
+                opt->w[i] = lerp(opt->w[i] * expf(-1.0f / v),
                                  1.0f / (f32)opt->n_params,
                                  1e-5f);
 
@@ -227,7 +227,6 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
             opt->w[i] /= w_sum;
         }
     }
-
 
     opt->iter++;
 
