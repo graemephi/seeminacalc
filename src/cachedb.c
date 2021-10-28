@@ -270,6 +270,7 @@ typedef struct DBRequest
     union {
         Buffer db;
         String query;
+        ChartKey key;
     };
 } DBRequest;
 
@@ -344,13 +345,13 @@ void db_use(Buffer db)
     }
 }
 
-u64 db_get(String key)
+u64 db_get(ChartKey key)
 {
     u64 id = db_next_id();
     buf_push(db_pending_requests, (DBRequest) {
         .type = DBRequest_File,
         .id = id,
-        .query = key
+        .key = key
     });
     return id;
 }
@@ -565,7 +566,8 @@ i32 db_thread(void *userdata)
             } break;
             case DBRequest_File: {
                 current_allocator = &file_stack;
-                sqlite3_bind_text(file_stmt, 1, req.query.buf, req.query.len, 0);
+                String query = chartkey_to_string(req.key);
+                sqlite3_bind_text(file_stmt, 1, query.buf, query.len, 0);
 
                 DBFile file = {0};
                 dbfile_from_stmt(file_stmt, &file);
@@ -573,7 +575,7 @@ i32 db_thread(void *userdata)
                 db_respond(&(DBResult) {
                     .type = req.type,
                     .id = req.id,
-                    .query = req.query,
+                    .query = query,
                     .file = file
                 });
 

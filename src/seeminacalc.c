@@ -45,6 +45,50 @@
 #include "calcconstants.h"
 
 typedef struct {
+    u8 bytes[20];
+} ChartKey;
+
+ChartKey string_to_chartkey(String key)
+{
+    if (NEVER(key.buf[0] != 'X' || key.len != 41)) {
+        return (ChartKey) {0};
+    }
+    ChartKey result = {0};
+    for (isize i = 0; i < 40; i++) {
+        u8 c = key.buf[i+1];
+        if (c >= 'A' && c <= 'F') {
+            c -= 'A';
+            c += 10;
+        }
+        if (c >= 'a' && c <= 'f') {
+            c -= 'a';
+            c += 10;
+        }
+        if (c >= '0' && c <= '9') {
+            c -= '0';
+        }
+        if (c >= 0 && c < 16) {
+            result.bytes[i/2] += (i&1) ? c : (c << 4);
+        } else {
+            return (ChartKey) {0};
+        }
+    }
+    return result;
+}
+
+String chartkey_to_string(ChartKey ck)
+{
+    String result = {
+        .buf = buf_make((char) {'X'}),
+        .len = 41
+    };
+    for (isize i = 0; i < array_length(ck.bytes); i++) {
+        buf_printf(result.buf, "%02x", ck.bytes[i]);
+    }
+    return result;
+}
+
+typedef struct {
     u8 *name;
     f32 *params;
     u32 generation;
@@ -58,6 +102,7 @@ typedef struct EffectMasks
 typedef struct SimFileInfo
 {
     String title;
+    String author;
     String diff;
     String chartkey;
     String id;
@@ -193,26 +238,21 @@ isize sfi_row_at_time(SimFileInfo *sfi, f32 time)
 static SimFileInfo null_sfi_ = {0};
 static SimFileInfo *const null_sfi = &null_sfi_;
 
-typedef struct TargetFile
+typedef struct PendingFile
 {
     u64 id;
-    String key;
-    String author;
-    String title;
+    ChartKey key;
     i32 difficulty;
     i32 skillset;
     f32 rate;
     f32 target;
     f32 weight;
-    b32 loaded;
-} TargetFile;
+} PendingFile;
 
-typedef struct CalcTestListLoader {
-    b32 workin;
-    Buffer xml;
-    TargetFile *requested_files;
+typedef struct FileLoader {
+    PendingFile *requested_files;
     f32 mean, unscaled_variance;
-} CalcTestListLoader;
+} FileLoader;
 
 typedef struct DBFile DBFile;
 typedef struct Search {
@@ -299,7 +339,7 @@ typedef struct State
     } last_frame;
 
     Buffer *dropped_files;
-    CalcTestListLoader loader;
+    FileLoader loader;
     Search search;
 } State;
 static State state = {0};
@@ -737,7 +777,21 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
     return 0;
 }
 
-void load_target_files(CalcTestListLoader *loader, Buffer test_list_xml)
+void load_file(FileLoader *loader, String key, f32 rate, f32 target, i32 skillset)
+{
+    ChartKey ck = string_to_chartkey(key);
+    u64 id = db_get(ck);
+    buf_push(loader->requested_files, (PendingFile) {
+        .id = id,
+        .key = ck,
+        .rate = rate,
+        .target = target,
+        .skillset = skillset,
+        .weight = 1.0f,
+    });
+}
+
+void load_target_files(FileLoader *loader, Buffer test_list_xml)
 {
     buf_clear(loader->requested_files);
     XML xml = xml_begin(test_list_xml);
@@ -752,15 +806,7 @@ void load_target_files(CalcTestListLoader *loader, Buffer test_list_xml)
                 String target = xml_attr(&xml, S("cTarget"));
 
                 if (xml.ok) {
-                    u64 id = db_get(key);
-                    buf_push(loader->requested_files, (TargetFile) {
-                        .id = id,
-                        .key = key,
-                        .rate = string_to_f32(rate),
-                        .target = string_to_f32(target),
-                        .skillset = ss,
-                        .weight = 1.0f,
-                    });
+                    load_file(loader, key, string_to_f32(rate), string_to_f32(target), ss);
                 }
 
                 xml_close(&xml, S("Chart"));
@@ -772,53 +818,58 @@ void load_target_files(CalcTestListLoader *loader, Buffer test_list_xml)
         xml_close(&xml, S("CalcTestList"));
     }
 
-    if (buf_len(loader->requested_files) > 0) {
-        loader->workin = true;
-        loader->xml = test_list_xml;
-    } else {
-        free(test_list_xml.buf);
-    }
+    free(test_list_xml.buf);
 }
 
-b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
+String make_sfi_display_id(String *dest, String title, String author, String diff, f32 rate)
 {
-    if (loader->workin == false || buf_len(results) == 0) {
+    dest->len = buf_printf(dest->buf, "%.*s ", title.len, title.buf);
+    if (rate != 1.0f) {
+        dest->len += buf_printf(dest->buf, "%.1f ", (f64)rate);
+    }
+    dest->len += buf_printf(dest->buf, "(%.*s%.*s%.*s)",
+        author.len, author.buf,
+        author.len == 0 ? 0 : 2, ", ",
+        diff.len, diff.buf);
+    return *dest;
+}
+
+String make_sfi_id(String *dest, String chartkey, String title, String author, String diff, f32 rate, i32 skillset)
+{
+    make_sfi_display_id(dest, title, author, diff, rate);
+    dest->len += buf_printf(dest->buf, "##%.*s.%d",
+        chartkey.len, chartkey.buf,
+        skillset);
+    return *dest;
+}
+
+b32 process_target_files(FileLoader *loader, DBResult results[])
+{
+    if (buf_len(results) == 0) {
         return false;
     }
 
-    // Todo: move these off loader, they aren't tied to a single load
     f32 target_m = loader->mean;
     f32 target_s = loader->unscaled_variance;
 
     isize added_count = 0;
-    isize req_index = 0;
-    for (; req_index < buf_len(loader->requested_files); req_index++) {
-        if (loader->requested_files[req_index].loaded == false) {
-            break;
-        }
-    }
-
-    for (isize result_index = 0; result_index < buf_len(results); result_index++, req_index++) {
+    isize n_to_remove = 0;
+    for (isize result_index = 0, req_index = 0; result_index < buf_len(results); result_index++, req_index++) {
         assert(req_index < buf_len(loader->requested_files));
         if (results[result_index].type == DBRequest_File) {
             DBResult *result = &results[result_index];
             DBFile *file = &result->file;
-            TargetFile *req = &loader->requested_files[req_index];
+            PendingFile *req = &loader->requested_files[req_index];
 
+            // Invariant: results come back in the order they were submitted
             if (result->id != req->id) {
                 assert_unreachable();
                 goto give_up;
             }
 
-            if (req->loaded) {
-                assert_unreachable();
-                goto give_up;
-            }
-
-            req->loaded = true;
-
             if (result->file.ok == false)  {
-                continue;
+                // Oughta log here
+                goto skip;
             }
 
             push_allocator(scratch);
@@ -826,19 +877,8 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
             String title = file->title;
             String author = file->author;
             String diff = SmDifficultyStrings[file->difficulty];
-            String id = {0};
-            id.len = buf_printf(id.buf, "%.*s ", title.len, title.buf);
-            if (req->rate != 1.0f) {
-                id.len += buf_printf(id.buf, "%.1f ", (f64)req->rate);
-            }
-            id.len += buf_printf(id.buf, "(%.*s%.*s%.*s)",
-                author.len, author.buf,
-                author.len == 0 ? 0 : 2, ", ",
-                diff.len, diff.buf);
-            String display_id = id;
-            id.len += buf_printf(id.buf, "##%.*s.%d",
-                ck.len, ck.buf,
-                req->skillset);
+            String id = make_sfi_id(&(String){0}, ck, title, author, diff, req->rate, req->skillset);
+            String display_id = make_sfi_display_id(&(String){0}, title, author, diff, req->rate);
             pop_allocator();
 
             for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
@@ -852,20 +892,18 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 goto give_up;
             }
 
-            id = copy_string(id);
-            display_id = copy_string(display_id);
-
             NoteInfo const *rows = note_data_rows(file->note_data);
             f32 first_row_time = rows[0].rowTime;
             f32 last_row_time = rows[file->n_rows - 1].rowTime;
 
             SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
                 .title = copy_string(title),
+                .author = copy_string(author),
                 .diff = diff,
                 .chartkey = copy_string(ck),
-                .id = id,
+                .id = copy_string(id),
+                .display_id = copy_string(display_id),
                 .bpms = copy_string(file->bpms),
-                .display_id = display_id,
                 .target.want_msd = req->target,
                 .target.rate = req->rate,
                 .target.skillset = req->skillset,
@@ -892,22 +930,15 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
 
             added_count++;
 skip:;
+            n_to_remove++;
         }
     }
 
-    b32 all_done = true;
-    for (isize i = 0; i < buf_len(loader->requested_files); i++) {
-        if (loader->requested_files[i].loaded == false) {
-            all_done = false;
-            break;
-        }
-    }
+    buf_remove_first_n(loader->requested_files, n_to_remove);
 
-    if (all_done) {
+    if (0) {
 give_up:
-        loader->workin = false;
-        free(loader->xml.buf);
-        loader->xml = (Buffer) {0};
+        // Oughta log here too
         buf_clear(loader->requested_files);
     }
 
@@ -1463,7 +1494,7 @@ void frame(void)
             buf_remove_unsorted(state.dropped_files, b);
         } else if (buffer_first_nonwhitespace_char(b) == '<') {
             // Assume CalcTestList.xml
-            if (db_ready() && buf_len(state.loader.requested_files) == 0) {
+            if (db_ready()) {
                 load_target_files(&state.loader, *b);
                 buf_remove_unsorted(state.dropped_files, b);
             }
@@ -1760,7 +1791,14 @@ void frame(void)
                             if (igBeginCombo("##Skillset", SkillsetNames[sfi->target.skillset], 0)) {
                                 for (isize ss = 1; ss < NumSkillsets; ss++) {
                                     b32 is_selected = (ss == sfi->target.skillset);
-                                    igSelectable_Bool(SkillsetNames[ss], is_selected, 0, V2Zero);
+                                    if (igSelectable_Bool(SkillsetNames[ss], is_selected, 0, V2Zero)) {
+                                        sfi->target.skillset = ss;
+                                        buf_clear(sfi->id.buf);
+                                        sfi->id.len = 0;
+                                        make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
+                                        make_sfi_display_id(&sfi->id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                                        if (state.optimizing) state.generation++;
+                                    }
                                     if (is_selected) {
                                         igSetItemDefaultFocus();
                                     }
@@ -1778,7 +1816,14 @@ void frame(void)
                                  && igBeginCombo("##Rate", rates[r_find_selected], 0)) {
                                     for (isize r = 0; r < array_length(rates); r++) {
                                         b32 is_selected = (absolute_value(rates_f[r] - sfi->target.rate) < 0.05f);
-                                        igSelectable_Bool(rates[r], is_selected, 0, V2Zero);
+                                        if (igSelectable_Bool(rates[r], is_selected, 0, V2Zero)) {
+                                            sfi->target.rate = rates_f[r];
+                                            buf_clear(sfi->id.buf);
+                                            sfi->id.len = 0;
+                                            make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
+                                            make_sfi_display_id(&sfi->id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                                            state.generation++;
+                                        }
                                         if (is_selected) {
                                             igSetItemDefaultFocus();
                                         }
@@ -1802,16 +1847,14 @@ void frame(void)
                             igTableSetColumnIndex(6);
                             if (absolute_value(sfi->target.delta) > 5.0f) {
                                 igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "!");
-                                tooltip("calc is off by %02.02f, are these right for this file?", (f64)sfi->target.delta);
+                                tooltip("calc is off by %02.02f\n\nthis might not be the file you think it is", (f64)sfi->target.delta);
                                 igSameLine(0,4);
                             }
                             for (isize i = 1; i < NumSkillsets; i++) {
                                 if (sfi->aa_rating.E[i] * 0.9f > sfi->aa_rating.E[sfi->target.skillset]) {
-                                    if (absolute_value(sfi->target.delta) > 5.0f) {
-                                        igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "?");
-                                        tooltip("calc doesn't think this file is %s. is it?", SkillsetNames[sfi->target.skillset]);
-                                        break;
-                                    }
+                                    igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "?");
+                                    tooltip("calc doesn't think this file is %s\n\nthis might not be the file you think it is", SkillsetNames[sfi->target.skillset]);
+                                    break;
                                 }
                             }
 
@@ -1874,7 +1917,9 @@ void frame(void)
                                 igTableSetColumnIndex(1);
                                 TextString(f->author);
                                 igTableSetColumnIndex(2);
-                                TextString(f->title);
+                                if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
+                                    load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
+                                }
                                 igTableSetColumnIndex(3);
                                 TextString(f->subtitle);
                                 igTableSetColumnIndex(4);
@@ -1967,7 +2012,7 @@ void frame(void)
                     ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f };
                     ImVec4 border_col = (ImVec4) {0};
 
-                    static f32 last_scroll_y[2] = {0};
+                    static f32 last_scroll_y[2] = {0.0f, -1.0f};
                     static bool scroll_changed_last_frame = false;
                     static f32 scroll_difference = 0.0f;
                     static i32 scroll_control = 0;
@@ -1987,9 +2032,13 @@ void frame(void)
                                 NoteInfo const *rows = note_data_rows(sfi->notes);
                                 f32 last_row_time = rows[n_rows - 1].rowTime / sfi->target.rate;
                                 igPushID_Int(preview_index);
-                                if (link_scroll && scroll_changed_last_frame && preview_index != scroll_control) {
-                                    scroll_changed_last_frame = false;
-                                    igSetNextWindowScroll(V2(0, last_scroll_y[scroll_control] + scroll_difference));
+                                if (link_scroll) {
+                                    if (last_scroll_y[preview_index] == -1.0f) {
+                                        igSetNextWindowScroll(V2(0, last_scroll_y[0]));
+                                    } else if (scroll_changed_last_frame && preview_index != scroll_control) {
+                                       igSetNextWindowScroll(V2(0, last_scroll_y[scroll_control] + scroll_difference));
+                                       scroll_changed_last_frame = false;
+                                    }
                                 }
                                 igSetNextWindowSize(V2(-1.0f, last_row_time * y_scale), ImGuiCond_Always);
                                 if (igBeginChild_Str("##same id to keep the scroll", V2(450.0f, 0), true, ImGuiWindowFlags_MenuBar)) {
@@ -2000,9 +2049,13 @@ void frame(void)
                                     sfi_set_snaps_from_bpms(sfi);
 
                                     f32 scroll_y = igGetScrollY();
-                                    if (igIsWindowHovered(0) && io->MouseWheel && link_scroll) {
-                                        scroll_control = preview_index;
-                                        scroll_changed_last_frame = true;
+                                    if (link_scroll) {
+                                        ImGuiWindow *window = igGetCurrentWindow();
+                                        ImGuiID active_id = igGetActiveID();
+                                        if ((igIsWindowHovered(0) && io->MouseWheel) || (active_id == igGetWindowScrollbarID(window, ImGuiAxis_Y))) {
+                                            scroll_control = preview_index;
+                                            scroll_changed_last_frame = true;
+                                        }
                                     }
                                     last_scroll_y[preview_index] = scroll_y;
 
