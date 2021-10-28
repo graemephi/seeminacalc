@@ -70,7 +70,7 @@ typedef struct SimFileInfo
     NoteData *notes;
     u8 *snaps;
     i32 n_rows;
-    f32 rowtime_offset;
+    f32 length_in_seconds;
     EffectMasks effects;
     i32 *graphs;
 
@@ -156,7 +156,7 @@ void sfi_set_snaps_from_bpms(SimFileInfo *sfi)
     for (isize nerv_index = 0; nerv_index < n_rows; nerv_index++) {
         f32 nd_t = rows[nerv_index].rowTime;
         f32 row_t = mina_row_time(&g, current_bpm, row_number);
-        while (absolute_value(row_t - nd_t) > (0.5f / (48.0f * current_bpm->bps))) {
+        while (row_t - nd_t < -0.5f / (48.0f * current_bpm->bps)) {
             row_number += 1.0f;
             row_t = mina_row_time(&g, current_bpm, row_number);
         }
@@ -169,6 +169,25 @@ void sfi_set_snaps_from_bpms(SimFileInfo *sfi)
 
     // We might have left notes in the last bpm region incorrectly snapped due
     // to floating point error. Can't be bothered thinking it through
+}
+
+// Only good enough for rendering--this is for culling arrows outside the viewable region
+isize sfi_row_at_time(SimFileInfo *sfi, f32 time)
+{
+    assert(sfi->notes);
+    isize n_rows = sfi->n_rows;
+    NoteInfo const *rows = note_data_rows(sfi->notes);
+    isize result = clamps(0, n_rows - 1, (isize)((time / sfi->length_in_seconds) * (f32)n_rows));
+    if (rows[result].rowTime >= time) {
+        while (rows[result].rowTime > time && result > 0) {
+            result--;
+        }
+    } else {
+        while (rows[result].rowTime < time && result < n_rows) {
+            result++;
+        }
+    }
+    return result;
 }
 
 static SimFileInfo null_sfi_ = {0};
@@ -215,19 +234,20 @@ typedef struct State
     CalcThread *threads;
     u32 generation;
     CalcWork *debug_graph_work;
-    CalcWork *optimizer_effects_work;
     CalcWork *high_prio_work;
     CalcWork *low_prio_work;
 
     CalcInfo info;
     SimFileInfo *files;
     SimFileInfo *active;
+    SimFileInfo *previews[2];
 
     ModInfo *inline_mods;
 
     sg_image dbz_tex[array_length(dbz.luts)][4];
 
     ParamSet ps;
+    bool *preview_pmod_graphs_enabled;
     bool *parameter_graphs_enabled;
     i32 *parameter_graph_order;
     FnGraph *graphs;
@@ -815,7 +835,7 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 author.len, author.buf,
                 author.len == 0 ? 0 : 2, ", ",
                 diff.len, diff.buf);
-            isize display_id_len = id.len;
+            String display_id = id;
             id.len += buf_printf(id.buf, "##%.*s.%d",
                 ck.len, ck.buf,
                 req->skillset);
@@ -833,7 +853,12 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
             }
 
             id = copy_string(id);
-            String display_id = (String) { id.buf, display_id_len };
+            display_id = copy_string(display_id);
+
+            NoteInfo const *rows = note_data_rows(file->note_data);
+            f32 first_row_time = rows[0].rowTime;
+            f32 last_row_time = rows[file->n_rows - 1].rowTime;
+
             SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
                 .title = copy_string(title),
                 .diff = diff,
@@ -848,7 +873,7 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 .target.last_user_set_weight = req->weight,
                 .notes = file->note_data,
                 .n_rows = file->n_rows,
-                .rowtime_offset = file->first_second,
+                .length_in_seconds = last_row_time - first_row_time,
                 .selected_skillsets[0] = true,
             });
 
@@ -917,14 +942,6 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
     if (state.info.params[param_idx].fake) {
         return;
     }
-    if (param_idx == 0) {
-        // Stupid hack to not show the slider for rate, but it can still be graphed
-        if (igCheckbox("##graph", &state.parameter_graphs_enabled[param_idx])) {
-            out->type = ParamSlider_GraphToggled;
-            out->param = param_idx;
-        } tooltip("graph this parameter");
-        return;
-    }
     assert(out);
     i32 type = ParamSlider_Nothing;
     f32 value = 0.0f;
@@ -977,7 +994,17 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
 
 void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
 {
-    if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (mod_index == 0) {
+        if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
+            igSetCursorPosX(52);
+            if (igCheckbox("##graph", &state.parameter_graphs_enabled[0])) {
+                changed_param->param = 0;
+                changed_param->type = ParamSlider_GraphToggled;
+            }
+            tooltip("graph rate");
+            igTreePop();
+        }
+    } else if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
         i32 count = 0;
         for (i32 i = 0; i < mod->num_params; i++) {
             i32 mp = mod->index + i;
@@ -985,15 +1012,18 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
                 count++;
             }
         }
-        if (count) {
-            if (count > 1) {
-                if (igCheckbox("##opt_all", &state.opt_cfg.all_mod_enabled[mod_index])) {
-                    for (i32 i = 0; i < mod->num_params; i++) {
-                        i32 mp = mod->index + i;
-                        state.opt_cfg.enabled[mp] = state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
-                    }
-                    changed_param->type = ParamSlider_OptimizingToggled;
-                } tooltip("optimize visible");
+        if (count || state.preview_pmod_graphs_enabled[mod_index]) {
+            if (igCheckbox("##opt_all", &state.opt_cfg.all_mod_enabled[mod_index])) {
+                for (i32 i = 0; i < mod->num_params; i++) {
+                    i32 mp = mod->index + i;
+                    state.opt_cfg.enabled[mp] = state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
+                }
+                changed_param->type = ParamSlider_OptimizingToggled;
+            } tooltip("optimize visible");
+            if (debuginfo_mod_index(mod_index) != CalcPatternMod_Invalid) {
+                igSameLine(0, 4);
+                igCheckbox("##pmod graph", &state.preview_pmod_graphs_enabled[mod_index]);
+                tooltip("graph on preview");
             }
             for (i32 i = 0; i < mod->num_params; i++) {
                 i32 mp = mod->index + i;
@@ -1326,6 +1356,7 @@ void init(void)
     state.info = calc_info();
     state.ps = copy_param_set(&state.info.defaults);
     buf_pushn(state.parameter_graphs_enabled, state.info.num_params);
+    buf_pushn(state.preview_pmod_graphs_enabled, state.info.num_mods);
     buf_reserve(state.graphs, 1024);
 
     // todo: use handles instead
@@ -1926,77 +1957,124 @@ void frame(void)
                     next_active = state.files;
                     next_active->open = true;
                 } else {
-                    static float x = 100, y_scale = 1000;
-                    igSliderFloat("x", &x, 0, 200, "%f", 0);
-                    igSliderFloat("y", &y_scale, 1.0f, 2000, "%f", 0);
+                    float x = 64.0f;
+                    static f32 y_scale = 600.0f;
+                    igSliderFloat("cmod", &y_scale, 1.0f, 2000, "%f", 0);
+
                     ImVec2 dbz_dim = V2((f32)dbz.width, (f32)dbz.height);
                     ImVec2 uv_min = V2(0.0f, 0.0f);
                     ImVec2 uv_max = V2(1.0f, 1.0f);
-                    ImVec4 tint_col = (ImVec4) {1.0f, 1.0f, 1.0f, 1.0f };
+                    ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f };
                     ImVec4 border_col = (ImVec4) {0};
 
-                    if (ALWAYS(active->notes)) {
-                        calculate_debug_graphs(&state.debug_graph_work, active, state.generation);
+                    static f32 last_scroll_y[2] = {0};
+                    static bool scroll_changed_last_frame = false;
+                    static f32 scroll_difference = 0.0f;
+                    static i32 scroll_control = 0;
+                    static bool link_scroll = true;
+                    if (igCheckbox("link", &link_scroll)) {
+                        scroll_difference = last_scroll_y[scroll_control] - last_scroll_y[(scroll_control + 1) & 1];
+                    }
 
-                        if (active->debug_generation == state.generation) {
-                            DebugInfo *d = &active->debug_info;
-                            isize n_rows = note_data_row_count(active->notes);
-                            NoteInfo const *rows = note_data_rows(active->notes);
-                            f32 last_row_time = rows[n_rows - 1].rowTime / active->target.rate;
-                            ImVec2 pos = {0};
-                            igSetNextWindowSize(V2(-1, last_row_time * y_scale), ImGuiCond_Always);
-                            if (igBeginChild_Str("##Preview", V2Zero, false, 0)) {
-                                sfi_set_snaps_from_bpms(active);
-                                igGetCursorPos(&pos);
-                                f32 y_scale_rate = y_scale / active->target.rate;
-                                for (isize i = 0; i < n_rows; i++) {
-                                    isize snap = active->snaps[i];
-                                    if (rows[i].notes & 1) {
-                                        igSetCursorPos(V2(1.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
-                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][0].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
-                                    }
-                                    if (rows[i].notes & 2) {
-                                        igSetCursorPos(V2(2.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
-                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][1].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
-                                    }
-                                    if (rows[i].notes & 4) {
-                                        igSetCursorPos(V2(3.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
-                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][2].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
-                                    }
-                                    if (rows[i].notes & 8) {
-                                        igSetCursorPos(V2(4.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
-                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][3].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
-                                    }
+                    for (i32 preview_index = 0; preview_index < 2; preview_index++) {
+                        SimFileInfo *sfi = state.previews[preview_index];
+                        if (sfi && ALWAYS(sfi->notes)) {
+                            calculate_debug_graphs(&state.debug_graph_work, sfi, state.generation);
+
+                            if (sfi->debug_generation == state.generation) {
+                                DebugInfo *d = &sfi->debug_info;
+                                isize n_rows = sfi->n_rows;
+                                NoteInfo const *rows = note_data_rows(sfi->notes);
+                                f32 last_row_time = rows[n_rows - 1].rowTime / sfi->target.rate;
+                                igPushID_Int(preview_index);
+                                if (link_scroll && scroll_changed_last_frame && preview_index != scroll_control) {
+                                    scroll_changed_last_frame = false;
+                                    igSetNextWindowScroll(V2(0, last_scroll_y[scroll_control] + scroll_difference));
                                 }
-                                f32 scroll_y = igGetScrollY();
-                                f32 scroll_y_time_lo = (scroll_y / y_scale) - 1.0f;
-                                f32 scroll_y_time_hi = clamp_high(last_row_time + 1.0f, ((scroll_y + igGetWindowHeight()) / y_scale) + 1.0f);
-                                isize scroll_y_interval_index_lo = (isize)(scroll_y_time_lo * 2.0f);
-                                isize scroll_y_interval_index_hi = (isize)(scroll_y_time_hi * 2.0f);
-                                isize interval_offset = clamps(0, d->n_intervals, scroll_y_interval_index_lo);
-                                isize n_intervals = clamps(0, d->n_intervals - interval_offset, scroll_y_interval_index_hi - scroll_y_interval_index_lo);
-                                assert(interval_offset >= 0);
-                                assert(interval_offset + n_intervals <= d->n_intervals);
-                                igSetCursorPos(V2(pos.x, scroll_y - 1.0f * y_scale));
-                                ImPlot_PushColormap_PlotColormap(3);
-                                ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
-                                ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
-                                ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                                ImPlot_SetNextPlotLimitsX(0, 1, 0);
-                                ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
-                                // ImPlot_SetLegendLocation(ImPlotLocation_East, ImPlotOrientation_Horizontal);
-                                if (ImPlot_BeginPlot("idk", "p", "t", V2(0,(scroll_y_time_hi - scroll_y_time_lo) * y_scale),
-                                  (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & ~ImPlotFlags_NoLegend,
-                                  ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
-                                  ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
-                                     ImPlot_PlotStairs_FloatPtrFloatPtr("a", d->interval_hand[0].pmod[0] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                    ImPlot_EndPlot();
+                                igSetNextWindowSize(V2(-1.0f, last_row_time * y_scale), ImGuiCond_Always);
+                                if (igBeginChild_Str("##same id to keep the scroll", V2(450.0f, 0), true, ImGuiWindowFlags_MenuBar)) {
+                                    igBeginMenuBar();
+                                    igText(sfi->display_id.buf);
+                                    igEndMenuBar();
+
+                                    sfi_set_snaps_from_bpms(sfi);
+
+                                    f32 scroll_y = igGetScrollY();
+                                    if (igIsWindowHovered(0) && io->MouseWheel && link_scroll) {
+                                        scroll_control = preview_index;
+                                        scroll_changed_last_frame = true;
+                                    }
+                                    last_scroll_y[preview_index] = scroll_y;
+
+                                    f32 y_scale_rate = y_scale / sfi->target.rate;
+                                    f32 scroll_y_time_lo = (scroll_y / y_scale);
+                                    f32 scroll_y_time_hi = clamp_high(last_row_time, ((scroll_y + igGetWindowHeight()) / y_scale));
+                                    f32 x_offset = 128.0f;
+                                    f32 y_offset = -32.0f;
+                                    isize end_row = sfi_row_at_time(sfi, 0.5f + scroll_y_time_hi * sfi->target.rate);
+                                    f32 start_time = scroll_y_time_lo * sfi->target.rate - 0.5f;
+                                    for (isize i = end_row - 1; i >= 0 && rows[i].rowTime > start_time; i--) {
+                                        isize snap = sfi->snaps[i];
+                                        for (isize c = 0; c < 4; c++) {
+                                            if (rows[i].notes & (1 << c)) {
+                                                igSetCursorPos(V2((f32)c * x + x_offset, rows[i].rowTime * y_scale_rate + y_offset));
+                                                igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
+                                            }
+                                        }
+                                    }
+                                    {
+                                        isize i = n_rows - 1;
+                                        isize snap = sfi->snaps[i];
+                                        for (isize c = 0; c < 4; c++) {
+                                            if (rows[i].notes & (1 << c)) {
+                                                igSetCursorPos(V2((f32)c * x + x_offset, rows[i].rowTime * y_scale_rate + y_offset));
+                                                igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
+                                            }
+                                        }
+                                    }
+                                    isize scroll_y_interval_index_lo = (isize)(scroll_y_time_lo * 2.0f);
+                                    isize scroll_y_interval_index_hi = (isize)((scroll_y_time_hi + 1.0f) * 2.0f);
+                                    isize interval_offset = clamps(0, d->n_intervals, scroll_y_interval_index_lo);
+                                    isize n_intervals = clamps(0, d->n_intervals - interval_offset, scroll_y_interval_index_hi - scroll_y_interval_index_lo);
+                                    assert(interval_offset >= 0);
+                                    assert(interval_offset + n_intervals <= d->n_intervals);
+                                    igSetCursorPos(V2(0, scroll_y));
+                                    ImPlot_PushColormap_PlotColormap(3);
+                                    ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
+                                    ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
+                                    ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
+                                    ImPlot_SetNextPlotLimitsX(-1.1, 1.1, 0);
+                                    ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
+                                    push_allocator(scratch);
+                                    ImPlot_SetNextPlotFormatY("%06.2f", 0);
+                                    if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
+                                    (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
+                                    ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoTickMarks|ImPlotAxisFlags_NoTickLabels|ImPlotAxisFlags_NoLabel|ImPlotAxisFlags_NoGridLines,
+                                    ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
+                                        ImPlot_SetLegendLocation(ImPlotLocation_South, ImPlotOrientation_Vertical, 0);
+                                        for (isize i = 0; i < state.info.num_mods; i++) {
+                                            i32 mi = debuginfo_mod_index(i);
+                                            if (state.preview_pmod_graphs_enabled[i] && mi != CalcPatternMod_Invalid) {
+                                                igPushID_Int(mi);
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr(state.info.mods[i].name, d->interval_hand[0].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                ImVec4 c = {0};
+                                                ImPlot_GetLastItemColor(&c);
+                                                ImPlot_SetNextLineStyle(c, 2.0f);
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                igPopID();
+                                            }
+                                        }
+                                        ImPlot_EndPlot();
+                                    }
+                                    pop_allocator();
+                                    ImPlot_PopStyleColor(3);
+                                    ImPlot_PopColormap(1);
                                 }
-                                ImPlot_PopStyleColor(3);
-                                ImPlot_PopColormap(1);
+                                igEndChild();
+                                igPopID();
                             }
-                            igEndChild();
                         }
+                        igSameLine(0,-1);
                     }
                 }
 
@@ -2250,8 +2328,13 @@ void frame(void)
         assert(next_active->open);
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
-        calculate_file_graphs(&state.high_prio_work, state.active, state.generation);
         calculate_effects(&state.high_prio_work, &state.info, state.active, state.generation);
+
+        if (active == state.previews[0]) {
+            state.previews[1] = next_active;
+        } else {
+            state.previews[0] = next_active;
+        }
     }
 
     if (changed_param.type) {
@@ -2299,17 +2382,9 @@ void frame(void)
         state.high_prio_work[idx] = temp;
     }
 
-    push_allocator(scratch);
-    CalcWork *pacer = 0;
-    for (isize i = 0; i < 1 && buf_len(state.optimizer_effects_work) > 0; i++) {
-        buf_push(pacer, buf_pop(state.optimizer_effects_work));
-    }
-    pop_allocator();
-
     submit_work(&high_prio_work_queue, state.debug_graph_work, state.generation);
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
     submit_work(&low_prio_work_queue, state.low_prio_work, state.generation);
-    submit_work(&low_prio_work_queue, pacer, state.generation);
     fflush(0);
 }
 

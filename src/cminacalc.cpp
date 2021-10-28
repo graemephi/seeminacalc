@@ -516,6 +516,12 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
         for (ptrdiff_t i = 0; i < NUM_CalcPatternMod; i++) {
             result.interval_hand[h].pmod[i] = result.buffers->handInfo[h][0][i].data();
             assert(length == result.buffers->handInfo[h][0][i].size());
+
+            if (h == 0) {
+                for (auto& v : result.buffers->handInfo[h][0][i]) {
+                    v = -v;
+                }
+            }
         }
         for (ptrdiff_t i = 0; i < NUM_CalcDiffValue; i++) {
             result.interval_hand[h].diff[i] = result.buffers->handInfo[h][1][i].data();
@@ -555,6 +561,14 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
 void debuginfo_free(DebugInfo *info)
 {
     info->buffers = {};
+}
+
+size_t debuginfo_mod_index(size_t mod)
+{
+    if (mod >= NumMods) {
+        return (size_t)CalcPatternMod_Invalid;
+    }
+    return (size_t)Mods[mod].id;
 }
 
 void nddump(NoteData *nd, NoteData *nd2)

@@ -147,6 +147,7 @@ SkillsetRatings calc_go_with_rate_and_param(SeeCalc *calc, ParamSet *params, Not
 DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data, float rate);
 
 void debuginfo_free(DebugInfo *debug_info);
+size_t debuginfo_mod_index(size_t mod);
 
 void nddump(NoteData *nd, NoteData *nd2);
 
