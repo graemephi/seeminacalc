@@ -35,7 +35,12 @@
 #include "cminacalc.h"
 #include "sm.h"
 
+#include "dbz.c"
 #include "optimize.c"
+
+#pragma float_control(precise, on, push)
+#include "sm.c"
+#pragma float_control(pop)
 
 #include "calcconstants.h"
 
@@ -57,12 +62,15 @@ typedef struct SimFileInfo
     String chartkey;
     String id;
     String display_id;
+    String bpms;
 
     SkillsetRatings aa_rating;
     SkillsetRatings max_rating;
 
     NoteData *notes;
+    u8 *snaps;
     i32 n_rows;
+    f32 rowtime_offset;
     EffectMasks effects;
     i32 *graphs;
 
@@ -97,6 +105,70 @@ typedef struct SimFileInfo
 bool sfi_visible_in_right_pane(SimFileInfo *sfi)
 {
     return sfi->target.weight != 0.0f;
+}
+
+void sfi_set_snaps_from_bpms(SimFileInfo *sfi)
+{
+    if (sfi->snaps != 0) {
+        return;
+    }
+
+    push_allocator(scratch);
+    // Reusing sm parser code, again. The gift that keeps on giving
+    jmp_buf env;
+    SmParser *ctx = &(SmParser) {
+        .buf = sfi->bpms.buf,
+        .p = sfi->bpms.buf,
+        .end = sfi->bpms.buf + sfi->bpms.len,
+        .env = &env
+    };
+    i32 err = setjmp(env);
+    if (err) {
+        printf("cache.db bpms parse error: %s\n", ctx->error.buf);
+        pop_allocator();
+        return;
+    }
+    BPMChange *bpms = 0;
+    BPMChange bpm = parse_bpm_change(ctx);
+    buf_push(bpms, bpm);
+    while (try_parse_next_bpm_change(ctx, &bpm)) {
+        buf_push(bpms, bpm);
+    }
+    buf_push(bpms, SentinelBPM);
+    pop_allocator();
+
+    // The cache saves non-empty row times only and tries to set the first row
+    // to time 0. Unfortunately we don't know what number of row that is in the
+    // chart, and we can't recover this information from information in the
+    // cache (I think). Also, if the first note is a mine, the first non-empty
+    // row might not be on time 0.
+    //
+    // Assuming whatever row is at time 0 is a 4th note seems to work well.
+    // Probably some frequency (in the histogram sense) analysis on jumps/hands
+    // can get us the rest of the way there for almost-all files but lets not
+
+    sfi->snaps = calloc(sfi->n_rows, sizeof(u8));
+    NoteInfo const *rows = note_data_rows(sfi->notes);
+    isize n_rows = sfi->n_rows;
+    BPMChange *current_bpm = bpms;
+    MinaRowTimeGarbage g = { .have_single_bpm = buf_len(bpms) == 2 };
+    f32 row_number = 0.0f;
+    for (isize nerv_index = 0; nerv_index < n_rows; nerv_index++) {
+        f32 nd_t = rows[nerv_index].rowTime;
+        f32 row_t = mina_row_time(&g, current_bpm, row_number);
+        while (absolute_value(row_t - nd_t) > (0.5f / (48.0f * current_bpm->bps))) {
+            row_number += 1.0f;
+            row_t = mina_row_time(&g, current_bpm, row_number);
+        }
+        while (row_number >= current_bpm[1].row) {
+            current_bpm++;
+        }
+        isize row_of_measure = (isize)fmodf(row_number, 192.0f);
+        sfi->snaps[nerv_index] = clamp_highs(7, SnapToNthSnap[RowToSnap[row_of_measure]]);
+    }
+
+    // We might have left notes in the last bpm region incorrectly snapped due
+    // to floating point error. Can't be bothered thinking it through
 }
 
 static SimFileInfo null_sfi_ = {0};
@@ -152,6 +224,8 @@ typedef struct State
     SimFileInfo *active;
 
     ModInfo *inline_mods;
+
+    sg_image dbz_tex[array_length(dbz.luts)][4];
 
     ParamSet ps;
     bool *parameter_graphs_enabled;
@@ -215,11 +289,6 @@ char const *db_path = 0;
 char const *test_list_path = 0;
 
 #include "graphs.c"
-
-#pragma float_control(precise, on, push)
-#include "sm.c"
-#pragma float_control(pop)
-
 
 OptimizationCheckpoint make_checkpoint(u8 *name)
 {
@@ -770,6 +839,7 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 .diff = diff,
                 .chartkey = copy_string(ck),
                 .id = id,
+                .bpms = copy_string(file->bpms),
                 .display_id = display_id,
                 .target.want_msd = req->target,
                 .target.rate = req->rate,
@@ -778,6 +848,7 @@ b32 process_target_files(CalcTestListLoader *loader, DBResult results[])
                 .target.last_user_set_weight = req->weight,
                 .notes = file->note_data,
                 .n_rows = file->n_rows,
+                .rowtime_offset = file->first_second,
                 .selected_skillsets[0] = true,
             });
 
@@ -1186,6 +1257,69 @@ void init(void)
         img_desc.label = "sokol-imgui-font";
         _simgui.img = sg_make_image(&img_desc);
         io->Fonts->TexID = (ImTextureID)(uintptr_t) _simgui.img.id;
+    }
+
+    {
+        // Brain dead--upload separate images, 4 orientations for every snap. Makes the usage code stupid simple
+        push_allocator(scratch);
+
+        u32 *pixels = 0;
+        buf_pushn(pixels, dbz.width*dbz.height);
+
+        sg_image_desc img_desc = {0};
+        img_desc.width = dbz.width;
+        img_desc.height = dbz.height;
+        img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+        img_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
+        img_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
+        img_desc.min_filter = SG_FILTER_LINEAR;
+        img_desc.mag_filter = SG_FILTER_LINEAR;
+        img_desc.data.subimage[0][0].ptr = pixels;
+        img_desc.data.subimage[0][0].size = dbz.width * dbz.height * sizeof(uint32_t);
+
+        for (isize i = 0; i < array_length(dbz.luts); i++) {
+            for (isize y = 0; y < dbz.height; y++) {
+                for (isize x = 0; x < dbz.width; x++) {
+                    isize pp = y * dbz.width + x;
+                    isize bp = y * dbz.width + x;
+                    assert(dbz.bitmap[pp] - '0' < 5);
+                    pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
+                }
+            }
+            state.dbz_tex[i][1] = sg_make_image(&img_desc);
+
+            for (isize y = 0; y < dbz.height; y++) {
+                for (isize x = 0; x < dbz.width; x++) {
+                    isize pp = y * dbz.width + x;
+                    isize bp = (dbz.height - y - 1) * dbz.width + x;
+                    assert(dbz.bitmap[pp] - '0' < 5);
+                    pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
+                }
+            }
+            state.dbz_tex[i][2] = sg_make_image(&img_desc);
+
+            assert(dbz.height == dbz.width);
+            for (isize y = 0; y < dbz.height; y++) {
+                for (isize x = 0; x < dbz.width; x++) {
+                    isize pp = y * dbz.width + x;
+                    isize bp = (dbz.height - x - 1) * dbz.width + y;
+                    assert(dbz.bitmap[pp] - '0' < 5);
+                    pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
+                }
+            }
+            state.dbz_tex[i][0] = sg_make_image(&img_desc);
+
+            for (isize y = 0; y < dbz.height; y++) {
+                for (isize x = 0; x < dbz.width; x++) {
+                    isize pp = y * dbz.width + x;
+                    isize bp = x * dbz.width + y;
+                    assert(dbz.bitmap[pp] - '0' < 5);
+                    pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
+                }
+            }
+            state.dbz_tex[i][3] = sg_make_image(&img_desc);
+        }
+        pop_allocator();
     }
 
     state.generation = 1;
@@ -1795,11 +1929,9 @@ void frame(void)
                     static float x = 100, y_scale = 1000;
                     igSliderFloat("x", &x, 0, 200, "%f", 0);
                     igSliderFloat("y", &y_scale, 1.0f, 2000, "%f", 0);
-                    ImTextureID my_tex_id = io->Fonts->TexID;
-                    float my_tex_w = 50;
-                    float my_tex_h = 80;
+                    ImVec2 dbz_dim = V2((f32)dbz.width, (f32)dbz.height);
                     ImVec2 uv_min = V2(0.0f, 0.0f);
-                    ImVec2 uv_max = V2(50.f / (float)io->Fonts->TexWidth, 80.0f / (float)io->Fonts->TexHeight);
+                    ImVec2 uv_max = V2(1.0f, 1.0f);
                     ImVec4 tint_col = (ImVec4) {1.0f, 1.0f, 1.0f, 1.0f };
                     ImVec4 border_col = (ImVec4) {0};
 
@@ -1814,24 +1946,26 @@ void frame(void)
                             ImVec2 pos = {0};
                             igSetNextWindowSize(V2(-1, last_row_time * y_scale), ImGuiCond_Always);
                             if (igBeginChild_Str("##Preview", V2Zero, false, 0)) {
+                                sfi_set_snaps_from_bpms(active);
                                 igGetCursorPos(&pos);
                                 f32 y_scale_rate = y_scale / active->target.rate;
                                 for (isize i = 0; i < n_rows; i++) {
+                                    isize snap = active->snaps[i];
                                     if (rows[i].notes & 1) {
-                                        igSetCursorPos(V2(1.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
-                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                        igSetCursorPos(V2(1.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
+                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][0].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                     }
                                     if (rows[i].notes & 2) {
-                                        igSetCursorPos(V2(2.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
-                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                        igSetCursorPos(V2(2.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
+                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][1].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                     }
                                     if (rows[i].notes & 4) {
-                                        igSetCursorPos(V2(3.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
-                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                        igSetCursorPos(V2(3.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
+                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][2].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                     }
                                     if (rows[i].notes & 8) {
-                                        igSetCursorPos(V2(4.0f * x, rows[i].rowTime * y_scale_rate - my_tex_h/2));
-                                        igImage(my_tex_id, V2(my_tex_w, my_tex_h), uv_min, uv_max, tint_col, border_col);
+                                        igSetCursorPos(V2(4.0f * x, rows[i].rowTime * y_scale_rate - (f32)dbz.height * 0.5f));
+                                        igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][3].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                     }
                                 }
                                 f32 scroll_y = igGetScrollY();

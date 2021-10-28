@@ -197,6 +197,8 @@ typedef struct DBFile
     String author;
     String chartkey;
     String all_msds;
+    String bpms;
+    f32 first_second;
     i32 skillset;
     f32 rating;
     NoteData *note_data;
@@ -371,10 +373,10 @@ u64 db_search(String query)
         .query = query
     };
 
-    // Part of the idea was to funnel everything thru db_pump
-    // but doing sending and receiving from one place results
-    // in one (1) frame of lag which turned out make the
-    // search Less Nice
+    // Part of the idea was to funnel everything thru db_pump but doing sending
+    // and receiving from one place results in one (1) frame of lag which turned
+    // out make the search Less Nice. So we immediately push and notify, now,
+    // rather than wait.
     usize read = db_request_queue.read;
     usize write = db_request_queue.write;
     memory_barrier();
@@ -488,6 +490,11 @@ b32 dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
     void const *nd = sqlite3_column_blob(stmt, 7);
     isize nd_len = sqlite3_column_bytes(stmt, 7);
 
+    u8 const *bpms = sqlite3_column_blob(stmt, 8);
+    isize bpms_len = sqlite3_column_bytes(stmt, 8);
+
+    f64 first_second = sqlite3_column_double(stmt, 9);
+
     out->difficulty = difficulty;
     out->title.len = buf_printf(out->title.buf, "%.*s", title_len, title);
     out->subtitle.len = buf_printf(out->subtitle.buf, "%.*s", subtitle_len, subtitle);
@@ -498,6 +505,8 @@ b32 dbfile_from_stmt(sqlite3_stmt *stmt, DBFile *out)
     if (nd_len > 0) {
         out->note_data = frobble_serialized_note_data(nd, nd_len);
         out->n_rows = note_data_row_count(out->note_data);
+        out->bpms.len = buf_printf(out->bpms.buf, "%.*s", bpms_len, bpms);
+        out->first_second = (f32)first_second;
     }
     out->ok = (ck_len > 0);
     return stmt_can_continue;
@@ -525,7 +534,10 @@ i32 db_thread(void *userdata)
         goto err;
     }
 
-    static const char file_query[]   = "select songs.title, songs.title, songs.artist, songs.credit, steps.difficulty, steps.msd, steps.chartkey, steps.serializednotedata from steps inner join songs on songs.id = steps.songid where chartkey=? and stepstype='dance-single'";
+    static const char file_query[] =
+        "select songs.title, songs.title, songs.artist, songs.credit, steps.difficulty, steps.msd, steps.chartkey, steps.serializednotedata, songs.bpms, songs.offset "
+        "from steps inner join songs on songs.id = steps.songid "
+        "where chartkey=? and stepstype='dance-single'";
     static const char search_query[] = "select songs.title, songs.subtitle, songs.artist, songs.credit, steps.difficulty, steps.msd, steps.chartkey "
         "from steps inner join songs on songs.id = steps.songid "
         "where chartkey=?1 or instr(lower(songs.title), ?1) or instr(lower(songs.subtitle), ?1) or instr(lower(songs.titletranslit), ?1) or instr(lower(songs.credit), ?1) or instr(lower(songs.artist), ?1) and stepstype='dance-single';";

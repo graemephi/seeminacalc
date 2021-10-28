@@ -377,6 +377,19 @@ enum
     Snap_Sentinel = 255
 };
 
+static const u8 SnapToNthSnap[256] = {
+    [4] = 0,
+    [8] = 1,
+    [12] = 2,
+    [16] = 3,
+    [24] = 4,
+    [32] = 5,
+    [48] = 6,
+    [64] = 7,
+    [96] = 8,
+    [192] = 9
+};
+
 static u8 row_to_snap(i32 numer, i32 denom)
 {
     assert(numer >= 0 && numer <= 192);
