@@ -31,4 +31,3 @@ MIT.
 - [Dear Imgui](https://github.com/ocornut/imgui) (Omar Cornut, MIT License). 
 - [cimgui](https://github.com/cimgui/cimgui) (Stephan Dilly/Victor Bombi, MIT License).
 - [ImPlot](https://github.com/epezent/implot) (Evan Pezent, MIT License).
-- Noto (Google, SIL Open Font License).

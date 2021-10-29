@@ -75,6 +75,14 @@ thread_local ParamJunk ManualConstants {
     { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
 };
 
+thread_local float anchor_len_cap_float = (float)anchor_len_cap;
+thread_local float jack_len_cap_float = (float)jack_len_cap;
+
+thread_local ParamJunk ManualConstantInts {
+    { "GenericSequencing.anchor_len_cap", &anchor_len_cap_float },
+    { "GenericSequencing.jack_len_cap", &jack_len_cap_float },
+};
+
 static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
 {
     for (const auto &p : ulbu->_s._params) *p.second = *mod_cursor++;
@@ -100,8 +108,12 @@ static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
     for (const auto &p : ulbu->_tt._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_tt2._params) *p.second = *mod_cursor++;
 	for (const auto &p : BaseScalers) *p.second = *mod_cursor++;
+	for (const auto &p : ManualConstantInts) *p.second = *mod_cursor++;
 	for (const auto &p : ManualConstants) *p.second = *mod_cursor++;
 	for (const auto &p : MinaCalcConstants) *p.second = *mod_cursor++;
+
+    anchor_len_cap = (int)anchor_len_cap_float;
+    jack_len_cap = (int)jack_len_cap_float;
 }
 
 #include "common.h"
@@ -150,9 +162,10 @@ struct {
     { "FlamJamMod",                 "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h", FlamJam,  },
     { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing },
     { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing2},
-    { "BaseScalers",                0, CalcPatternMod_Invalid },
+    { "Base Scalers",               0, CalcPatternMod_Invalid },
+    { "Global Integers",            0, CalcPatternMod_Invalid },
     { "Globals",                    0, CalcPatternMod_Invalid },
-    { "InlineConstants",            0, CalcPatternMod_Invalid },
+    { "Inline Constants",           0, CalcPatternMod_Invalid },
 };
 const char *BaseScalersFile = "etterna/Etterna/MinaCalc/UlbuAcolytes.h";
 
@@ -171,6 +184,11 @@ const char *GlobalFiles[] = {
     "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.jack_speed_increase_cutoff_factor", &jack_speed_increase_cutoff_factor },
     "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.guaranteed_reset_buffer_ms", &guaranteed_reset_buffer_ms },
     "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/RMSequencing.h",        // { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
+};
+
+const char *GlobalIntegerFiles[] = {
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.anchor_len_cap", &anchor_len_cap_float },
+    "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.jack_len_cap", &jack_len_cap_float },
 };
 
 enum
@@ -236,6 +254,7 @@ CalcInfo calc_info()
     // static just so the param strings aren't freed :)
     static auto shalhoub = TheGreatBazoinkazoinkInTheSky(*dummy_calc);
 
+    // Order here must match the order of the global Mods array
     const std::vector<std::pair<std::string,float*>> *params[NumMods] = {
         &RateMod,
         &shalhoub._s._params,
@@ -261,6 +280,7 @@ CalcInfo calc_info()
         &shalhoub._tt._params,
         &shalhoub._tt2._params,
         &BaseScalers,
+        &ManualConstantInts,
         &ManualConstants,
         &MinaCalcConstants,
     };
@@ -368,6 +388,16 @@ CalcInfo calc_info()
     param_info[0].max = 3.0;
     param_info[0].optimizable = false;
 
+    // Special case for constant ints
+    for (isize i = 0; i < num_params; i++) {
+        if (str_eq(mod_info[param_info[i].mod].name, "Global Integers")) {
+            param_info[i].min = 0;
+            param_info[i].max = 10;
+            param_info[i].optimizable = false;
+            param_info[i].integer = true;
+        }
+    }
+
     ParamSet defaults = {};
     defaults.params = (float *)calloc(num_params, sizeof(float));
     defaults.min = (float *)calloc(num_params, sizeof(float));
@@ -387,7 +417,7 @@ CalcInfo calc_info()
     result.params = param_info;
     result.defaults = defaults;
 
-    assert(str_eq(mod_info[NumMods - 1].name, "InlineConstants"));
+    assert(str_eq(mod_info[NumMods - 1].name, "Inline Constants"));
     ModInfo *inlines_mod = &mod_info[NumMods - 1];
     for (size_t i = 0; i < inlines_mod->num_params; i++) {
         size_t p = inlines_mod->index + i;
@@ -420,7 +450,12 @@ const char *file_for_param(CalcInfo *info, size_t param_index)
             size_t idx = param_index - m->index;
             assert(idx < array_length(GlobalFiles));
             result = GlobalFiles[idx];
-        } else if (str_eq(m->name, "BaseScalers")) {
+        } else if (str_eq(m->name, "Global Integers")) {
+            ModInfo *m = &info->mods[p->mod];
+            size_t idx = param_index - m->index;
+            assert(idx < array_length(GlobalIntegerFiles));
+            result = GlobalIntegerFiles[idx];
+        } else if (str_eq(m->name, "Base Scalers")) {
             return BaseScalersFile;
         } else {
             InlineConstantInfo *icf = info_for_inline_constant(info, param_index);
@@ -436,7 +471,7 @@ InlineConstantInfo *info_for_inline_constant(CalcInfo *info, size_t param_index)
     assert(param_index >= 0 && param_index < info->num_params);
     ParamInfo *p = &info->params[param_index];
     ModInfo *m = &info->mods[p->mod];
-    assert(str_eq(m->name, "InlineConstants"));
+    assert(str_eq(m->name, "Inline Constants"));
     return &where_u_at[param_index - m->index];
 }
 

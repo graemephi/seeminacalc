@@ -17,12 +17,12 @@
 /****** Relevant to anchors ******/
 thread_local float anchor_spacing_buffer_ms = 10.F;
 thread_local float anchor_speed_increase_cutoff_factor = 2.34F;
-static const int anchor_len_cap = 5;
+thread_local int anchor_len_cap = 5;
 
 /****** Relevant to jacks ******/
 thread_local float jack_spacing_buffer_ms = 10.F;
 thread_local float jack_speed_increase_cutoff_factor = 1.9F;
-static const int jack_len_cap = 4;
+thread_local int jack_len_cap = 4;
 
 
 /// ms to pass that definitely means an anchor has finished and started a new one

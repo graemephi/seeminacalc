@@ -322,7 +322,6 @@ typedef struct State
     FnGraph *optimization_graph;
     struct {
         b8 *enabled;
-        b8 *all_mod_enabled;
         f32 barriers[NumSkillsets];
         f32 goals[NumSkillsets];
         f32 *normalization_factors;
@@ -965,7 +964,7 @@ typedef struct ParamSliderChange
     f32 value;
 } ParamSliderChange;
 
-static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
+static void param_slider_widget(i32 param_idx, b32 effective, ParamSliderChange *out)
 {
     if (state.info.params[param_idx].fake) {
         return;
@@ -992,19 +991,24 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
         i32 value_int = (i32)state.ps.params[mp];
         i32 low = (i32)state.ps.min[mp];
         i32 high = (i32)state.ps.max[mp];
+        igPushStyleVar_Float(ImGuiStyleVar_Alpha, effective ? 1.0f : 0.707f);
         igSetNextItemWidth(-FLT_MIN);
         if (igSliderInt(slider_id, &value_int, low, high, "%d", ImGuiSliderFlags_None)) {
             state.ps.params[mp] = (f32)value_int;
             type = ParamSlider_ValueChanged;
             value = (f32)value_int;
         }
+        igPopStyleVar(1);
+        tooltip(state.info.params[mp].name);
     } else {
         igSetNextItemWidth(-FLT_MIN);
+        igPushStyleVar_Float(ImGuiStyleVar_Alpha, effective ? 1.0f : 0.707f);
         if (igSliderFloat(slider_id, &state.ps.params[mp], state.ps.min[mp], state.ps.max[mp], "%f", 1.0f)) {
             type = ParamSlider_ValueChanged;
             value = state.ps.params[mp];
         }
-        tooltip(state.info.params[mp].name);
+        igPopStyleVar(1);
+        tooltip("%s%s", state.info.params[mp].name, " (no effect on current file)");
         if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
             type = ParamSlider_ValueChanged;
@@ -1020,12 +1024,14 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
     }
 }
 
-b32 param_visible(i32 param_index, u8 *effects, u32 effect_mask)
+u32 param_effective(i32 param_index, u8 *effects, u32 effect_mask)
 {
-    return effects == 0 || (effects[param_index] & effect_mask) != 0 || state.opt_cfg.enabled[param_index];
+    b32 effective = (effects == 0 || (effects[param_index] & effect_mask) != 0);
+    b32 enabled_for_optimizing = state.opt_cfg.enabled[param_index] != 0;
+    return effective + (enabled_for_optimizing << 1);
 }
 
-void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
+void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, b32 by_group, ParamSliderChange *changed_param)
 {
     if (mod_index == 0) {
         if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1041,15 +1047,30 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
         i32 count = 0;
         for (i32 i = 0; i < mod->num_params; i++) {
             i32 mp = mod->index + i;
-            if (param_visible(mp, effects, effect_mask)) {
+            if (param_effective(mp, effects, effect_mask)) {
                 count++;
             }
         }
         if (count || state.preview_pmod_graphs_enabled[mod_index]) {
-            if (igCheckbox("##opt_all", &state.opt_cfg.all_mod_enabled[mod_index])) {
+            if (igButton("##opt_all", V2(19,19))) {
+                b32 all_visible_are_enabled = true;
                 for (i32 i = 0; i < mod->num_params; i++) {
                     i32 mp = mod->index + i;
-                    state.opt_cfg.enabled[mp] = param_visible(mp, effects, effect_mask) && state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
+                    b32 visible = by_group ? count > 0 : param_effective(mp, effects, effect_mask);
+                    if (visible && state.info.params[mp].optimizable) {
+                        if (state.opt_cfg.enabled[mp] == false) {
+                            all_visible_are_enabled = false;
+                            break;
+                        }
+                    }
+                }
+
+                b32 new_state = all_visible_are_enabled ? false : true;
+
+                for (i32 i = 0; i < mod->num_params; i++) {
+                    i32 mp = mod->index + i;
+                    b32 visible = by_group ? count > 0 : param_effective(mp, effects, effect_mask);
+                    state.opt_cfg.enabled[mp] = new_state && visible && state.info.params[mp].optimizable;
                 }
                 changed_param->type = ParamSlider_OptimizingToggled;
             } tooltip("optimize visible");
@@ -1060,8 +1081,9 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
             }
             for (i32 i = 0; i < mod->num_params; i++) {
                 i32 mp = mod->index + i;
-                if (param_visible(mp, effects, effect_mask)) {
-                    param_slider_widget(mp, changed_param);
+                b32 effective = param_effective(mp, effects, effect_mask);
+                if (effective || by_group) {
+                    param_slider_widget(mp, effective & 1, changed_param);
                 }
             }
         }
@@ -1080,10 +1102,10 @@ char const *after_last_slash(char const *p)
     return cursor + 1;
 }
 
-void inlines_param_sliders(i32 inlines_mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
+void inlines_param_sliders(i32 inlines_mod_index, u8 *effects, u32 effect_mask, b32 by_group, ParamSliderChange *changed_param)
 {
     for (i32 i = 0; i < buf_len(state.inline_mods); i++) {
-        mod_param_sliders(&state.inline_mods[i], inlines_mod_index + i, effects, effect_mask, changed_param);
+        mod_param_sliders(&state.inline_mods[i], inlines_mod_index + i, effects, effect_mask, by_group, changed_param);
     }
 }
 
@@ -1106,7 +1128,7 @@ static void skillset_line_plot(i32 ss, b32 highlight, FnGraph *fng, f32 *ys)
 isize param_index_by_name(CalcInfo *info, String mod, String param)
 {
     isize idx = -1;
-    isize first_param_of_mod = 0;
+    isize first_param_of_mod = -1;
     isize m = 0;
     for (; m < info->num_mods; m++) {
         if (string_equals_cstr(mod, info->mods[m].name)) {
@@ -1154,7 +1176,6 @@ void setup_optimizer(void)
 
     buf_pushn(normalization_factors, state.ps.num_params);
     buf_pushn(state.opt_cfg.enabled, state.ps.num_params);
-    buf_pushn(state.opt_cfg.all_mod_enabled, state.ps.num_params);
     buf_pushn(state.opt_cfg.map.to_ps, state.ps.num_params + 1);
     // This sets to_ps[-1] = to_ps[Param_None] = 0
     state.opt_cfg.map.to_ps = state.opt_cfg.map.to_ps + 1;
@@ -1190,15 +1211,15 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.stream_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.bad_newbie_skillsets_pbm"))].low = 1.0f;
 #if DUMP_CONSTANTS == 0
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(81)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("OHJ.h(89)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(76, 2)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(94)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148, 2)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(183, 2)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(183, 4)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(555)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("OHJ.h(81)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("OHJ.h(89)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(76, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(94)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(148)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(148, 2)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(183, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(183, 4)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(555)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
         state.opt_cfg.bounds[i].low = (state.opt_cfg.bounds[i].low - state.info.defaults.params[i]) / normalization_factors[i];
@@ -1740,22 +1761,36 @@ void frame(void)
 
         // Tabs for param strength filters
         if (igBeginTabBar("FilterTabs", ImGuiTabBarFlags_NoTooltip)) {
-            if (igBeginTabItem("Relevant", 0, ImGuiTabItemFlags_None)) {
-                tooltip("Parameters that affect the active file");
+            if (igBeginTabItem("By group", 0, ImGuiTabItemFlags_None)) {
+                tooltip("Filter groups that don't affect the active file\nThis only checks the highlighted skillsets above");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, &changed_param);
+                    mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, true, &changed_param);
                 }
-                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, &changed_param);
+                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, true, &changed_param);
                 igEndTabItem();
-            } else tooltip("Parameters that affect the active file");
+            } else {
+                tooltip("Filter groups that don't affect the active file\nThis only checks the highlighted skillsets above");
+            }
+            if (igBeginTabItem("By parameter", 0, ImGuiTabItemFlags_None)) {
+                tooltip("Filter parameters that don't affect the active file\nThis only checks the highlighted skillsets above");
+                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
+                    mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, false, &changed_param);
+                }
+                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, false, &changed_param);
+                igEndTabItem();
+            } else {
+                tooltip("Filter parameters that don't affect the active file\nThis only checks the highlighted skillsets above");
+            }
             if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
                 tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
                 for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i,  0, 0, &changed_param);
+                    mod_param_sliders(&state.info.mods[i], i,  0, 0, false, &changed_param);
                 }
-                inlines_param_sliders((i32)state.info.num_mods - 1,  0, 0, &changed_param);
+                inlines_param_sliders((i32)state.info.num_mods - 1,  0, 0, false, &changed_param);
                 igEndTabItem();
-            } else tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
+            } else {
+                tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
+            }
         }
         igEndTabBar();
     }
@@ -1794,7 +1829,9 @@ void frame(void)
             }
 
             if (igBeginTabItem("Files", 0,0)) {
-                if (igBeginTable("FileTable", 8, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
+                if (buf_len(state.files) == 0) {
+                    TextString(S("No files :("));
+                } else if (igBeginTable("FileTable", 8, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
                     igTableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 20.0f, 0);
                     igTableSetupColumn("File", 0, 1.0f, 0);
                     igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 105.0f, 0);
@@ -1992,6 +2029,10 @@ void frame(void)
                     igTextWrapped("No cache.db :(");
                 }
                 igEndTabItem();
+            }
+
+            if (buf_len(state.files) == 0) {
+                goto no_files;
             }
 
             if (igBeginTabItem("Graphs", 0,0)) {
@@ -2276,29 +2317,9 @@ void frame(void)
                     }
                 }
                 igEndChild();
-
-#if 0
-                for (isize i = 1; i < NumSkillsets; i++) {
-                    igPushIDInt((i32)i);
-                    igText("%s Bias", SkillsetNames[i]);
-                    tooltip("+ offsets the target MSD for this skillset\n* multiplies\n%% sets the target wife%%");
-                    igSameLine(0, 4);
-                    igSetCursorPosX(116.f);
-                    TextString("+", 0));
-                    igSameLine(0,4);
-                    igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
-                    igSliderFloat("*##+", &state.opt_cfg.bias[i].add, -5.0f, 5.0f, "%f", 1.0f);
-                    igSameLine(0, 4);
-                    igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
-                    igSliderFloat("^##*", &state.opt_cfg.bias[i].mul, 0.1f, 5.0f, "%f", 1.0f);
-                    igSameLine(0, 4);
-                    igSetNextItemWidth(igGetWindowContentRegionWidth() / 5.0f);
-                    igSliderFloat("##%", &state.opt_cfg.goals[i], 0.9f, 0.965f, "%f", 1.0f);
-                    igPopID();
-                }
-#endif
                 igEndTabItem();
             }
+no_files:
             igEndTabBar();
         }
     }
@@ -2459,7 +2480,7 @@ void frame(void)
         assert(next_active->open);
         next_active->frame_last_focused = _sapp.frame_count;
         state.active = next_active;
-        calculate_effects(&state.high_prio_work, &state.info, state.active, state.generation);
+        calculate_effects(&state.low_prio_work, &state.info, state.active, state.generation);
 
         if (active == state.previews[0]) {
             state.previews[1] = next_active;
