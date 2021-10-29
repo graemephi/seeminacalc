@@ -41,6 +41,7 @@ typedef enum {
     Tag_Music,
     Tag_Notes,
     Tag_Offset,
+    Tag_Origin,
     Tag_SampleLength,
     Tag_SampleStart,
     Tag_Selectable,

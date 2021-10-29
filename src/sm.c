@@ -198,6 +198,7 @@ static const String TagStrings[TagCount] = {
     SS("MUSIC"),
     SS("NOTES"),
     SS("OFFSET"),
+    SS("ORIGIN"),
     SS("SAMPLELENGTH"),
     SS("SAMPLESTART"),
     SS("SELECTABLE"),
@@ -377,7 +378,7 @@ enum
     Snap_Sentinel = 255
 };
 
-static const u8 SnapToNthSnap[256] = {
+static const u8 SnapToNthSnap64[256] = {
     [4] = 0,
     [8] = 1,
     [12] = 2,
@@ -386,8 +387,8 @@ static const u8 SnapToNthSnap[256] = {
     [32] = 5,
     [48] = 6,
     [64] = 7,
-    [96] = 8,
-    [192] = 9
+    [96] = 7,
+    [192] = 7
 };
 
 static u8 row_to_snap(i32 numer, i32 denom)

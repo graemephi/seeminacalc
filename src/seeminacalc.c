@@ -147,6 +147,9 @@ typedef struct SimFileInfo
     u64 frame_last_focused;
 } SimFileInfo;
 
+static SimFileInfo null_sfi_ = {0};
+static SimFileInfo *const null_sfi = &null_sfi_;
+
 bool sfi_visible_in_right_pane(SimFileInfo *sfi)
 {
     return sfi->target.weight != 0.0f;
@@ -209,7 +212,7 @@ void sfi_set_snaps_from_bpms(SimFileInfo *sfi)
             current_bpm++;
         }
         isize row_of_measure = (isize)fmodf(row_number, 192.0f);
-        sfi->snaps[nerv_index] = clamp_highs(7, SnapToNthSnap[RowToSnap[row_of_measure]]);
+        sfi->snaps[nerv_index] = SnapToNthSnap64[RowToSnap[row_of_measure]];
     }
 
     // We might have left notes in the last bpm region incorrectly snapped due
@@ -235,8 +238,27 @@ isize sfi_row_at_time(SimFileInfo *sfi, f32 time)
     return result;
 }
 
-static SimFileInfo null_sfi_ = {0};
-static SimFileInfo *const null_sfi = &null_sfi_;
+String make_sfi_display_id(String *dest, String title, String author, String diff, f32 rate)
+{
+    dest->len = buf_printf(dest->buf, "%.*s ", title.len, title.buf);
+    if (rate != 1.0f) {
+        dest->len += buf_printf(dest->buf, "%.1f ", (f64)rate);
+    }
+    dest->len += buf_printf(dest->buf, "(%.*s%.*s%.*s)",
+        author.len, author.buf,
+        author.len == 0 ? 0 : 2, ", ",
+        diff.len, diff.buf);
+    return *dest;
+}
+
+String make_sfi_id(String *dest, String chartkey, String title, String author, String diff, f32 rate, i32 skillset)
+{
+    make_sfi_display_id(dest, title, author, diff, rate);
+    dest->len += buf_printf(dest->buf, "##%.*s.%d",
+        chartkey.len, chartkey.buf,
+        skillset);
+    return *dest;
+}
 
 typedef struct PendingFile
 {
@@ -251,7 +273,6 @@ typedef struct PendingFile
 
 typedef struct FileLoader {
     PendingFile *requested_files;
-    f32 mean, unscaled_variance;
 } FileLoader;
 
 typedef struct DBFile DBFile;
@@ -708,12 +729,11 @@ void free_all_graphs(i32 handles[])
     buf_clear(handles);
 }
 
-i32 parse_and_add_sm(Buffer buf, b32 open_window)
+SimFileInfo *parse_and_add_sm(Buffer buf)
 {
-#if 0
     if (buf_len(state.files) == buf_cap(state.files)) {
         printf("please.. no more files");
-        return -1;
+        return 0;
     }
 
     SmFile sm = {0};
@@ -721,60 +741,78 @@ i32 parse_and_add_sm(Buffer buf, b32 open_window)
     i32 err = parse_sm(buf, &sm);
     pop_allocator();
     if (err) {
-        return -1;
+        return 0;
     }
 
     String title = sm_tag_inplace(&sm, Tag_Title);
     String author = sm_tag_inplace(&sm, Tag_Credit);
+    String bpms = sm_tag_inplace(&sm, Tag_BPMs);
+
+    SimFileInfo *result = 0;
 
     for (isize i = 0; i < buf_len(sm.diffs); i++) {
         NoteInfo *ni = sm_to_ett_note_info(&sm, (i32)i);
         push_allocator(scratch);
         String ck = generate_chart_key(&sm, i);
         String diff = SmDifficultyStrings[sm.diffs[i].diff];
-        String id = {0};
-        id.len = buf_printf(id.buf, "%.*s (%.*s%.*s%.*s)##%.*s",
-            title.len, title.buf,
-            author.len, author.buf,
-            author.len == 0 ? 0 : 2, ", ",
-            diff.len, diff.buf,
-            ck.len, ck.buf
-        );
+        // Using 0 as the skillset is a potential bug here? We'll see. IDs may
+        // end up non-unique, but possibly in a situation where this doesn't
+        // matter. Confusing even so
+        String id = make_sfi_id(&(String){0}, ck, title, author, diff, 1.0f, 0);
+        String display_id = make_sfi_display_id(&(String){0}, title, author, diff, 1.0);
         pop_allocator();
 
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             if (strings_are_equal(sfi->id, id)) {
-                return -2;
+                return sfi;
             }
+        }
+
+        NoteData *nd = frobble_note_data(ni, buf_len(ni));
+        u8 *snaps = calloc(buf_len(ni), sizeof(u8));
+        NoteInfo const *rows = note_data_rows(nd);
+        f32 first_row_time = rows[0].rowTime;
+        f32 last_row_time = rows[buf_len(ni) - 1].rowTime;
+
+        for (isize j = 0; j < buf_len(ni); j++) {
+            snaps[j] = SnapToNthSnap64[sm.diffs[i].rows[j].snap];
         }
 
         SimFileInfo *sfi = buf_push(state.files, (SimFileInfo) {
             .title = copy_string(title),
+            .author = copy_string(author),
             .diff = diff,
             .chartkey = copy_string(ck),
             .id = copy_string(id),
-            .notes = frobble_note_data(ni, buf_len(ni)),
-            .stops = sm.has_stops,
-            .open = open_window,
+            .display_id = copy_string(display_id),
+            .bpms = copy_string(bpms),
+            .target.want_msd = -1.0f,
+            .target.rate = 1.0f,
+            .target.skillset = 0,
+            .target.weight = 0.0f,
+            .target.last_user_set_weight = 1.0f,
+            .notes = nd,
+            .n_rows = buf_len(ni),
+            .snaps = snaps,
+            .length_in_seconds = last_row_time - first_row_time,
             .selected_skillsets[0] = true,
         });
 
+        result = sfi;
+
         buf_push(sfi->graphs, make_skillsets_graph());
 
-        buf_reserve(sfi->effects.weak, state.info.num_params);
-        buf_reserve(sfi->effects.strong, state.info.num_params);
+        buf_reserve(sfi->effects.masks, state.info.num_params);
 
         calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
-        calculate_file_graph_force(&state.low_prio_work, sfi, state.generation);
+        calculate_debug_graphs(&state.low_prio_work, sfi, state.generation);
 
         printf("Added %s\n", id.buf);
     }
 
     submit_work(&high_prio_work_queue, state.high_prio_work, state.generation);
 
-    return 0;
-#endif
-    return 0;
+    return result;
 }
 
 void load_file(FileLoader *loader, String key, f32 rate, f32 target, i32 skillset)
@@ -821,36 +859,11 @@ void load_target_files(FileLoader *loader, Buffer test_list_xml)
     free(test_list_xml.buf);
 }
 
-String make_sfi_display_id(String *dest, String title, String author, String diff, f32 rate)
-{
-    dest->len = buf_printf(dest->buf, "%.*s ", title.len, title.buf);
-    if (rate != 1.0f) {
-        dest->len += buf_printf(dest->buf, "%.1f ", (f64)rate);
-    }
-    dest->len += buf_printf(dest->buf, "(%.*s%.*s%.*s)",
-        author.len, author.buf,
-        author.len == 0 ? 0 : 2, ", ",
-        diff.len, diff.buf);
-    return *dest;
-}
-
-String make_sfi_id(String *dest, String chartkey, String title, String author, String diff, f32 rate, i32 skillset)
-{
-    make_sfi_display_id(dest, title, author, diff, rate);
-    dest->len += buf_printf(dest->buf, "##%.*s.%d",
-        chartkey.len, chartkey.buf,
-        skillset);
-    return *dest;
-}
-
 b32 process_target_files(FileLoader *loader, DBResult results[])
 {
     if (buf_len(results) == 0) {
         return false;
     }
-
-    f32 target_m = loader->mean;
-    f32 target_s = loader->unscaled_variance;
 
     isize added_count = 0;
     isize n_to_remove = 0;
@@ -921,11 +934,6 @@ b32 process_target_files(FileLoader *loader, DBResult results[])
             calculate_skillsets(&state.high_prio_work, sfi, true, state.generation);
             calculate_debug_graphs(&state.low_prio_work, sfi, state.generation);
 
-            f32 old_m = target_m;
-            f32 old_s = target_s;
-            target_m = old_m + (req->target - old_m) / (f32)(buf_len(state.files) + 1);
-            target_s = old_s + (req->target - old_m)*(req->target - target_m);
-
             printf("Added %s %s %02.2fx: %02.2f\n", SkillsetNames[req->skillset], title.buf, (f64)req->rate, (f64)req->target);
 
             added_count++;
@@ -941,13 +949,6 @@ give_up:
         // Oughta log here too
         buf_clear(loader->requested_files);
     }
-
-    loader->mean = target_m;
-    loader->unscaled_variance = target_s;
-
-    f32 target_var = target_s / (f32)(buf_len(state.files) - 1);
-    state.target.msd_mean = target_m;
-    state.target.msd_sd = sqrtf(target_var);
 
     return added_count > 0;
 }
@@ -1263,6 +1264,35 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
     state.opt_pending_evals--;
 }
 
+void gen_mips(u32 *mips[], u32 *pixels, isize dim)
+{
+    u32 *p = pixels;
+    for (i32 mip = 0; mip < buf_len(mips); mip++) {
+        u32 *dest = mips[mip];
+        for (isize y = 0; y < dim; y += 2) {
+            for (isize x = 0; x < dim; x += 2) {
+                ImVec4 a = {0};
+                ImVec4 b = {0};
+                ImVec4 c = {0};
+                ImVec4 d = {0};
+                igColorConvertU32ToFloat4(&a, p[y    *dim + x  ]);
+                igColorConvertU32ToFloat4(&b, p[y    *dim + x+1]);
+                igColorConvertU32ToFloat4(&c, p[(y+1)*dim + x  ]);
+                igColorConvertU32ToFloat4(&d, p[(y+1)*dim + x+1]);
+                ImVec4 s = (ImVec4) {
+                    (a.x + b.x + c.x + d.x) * 0.25f,
+                    (a.y + b.y + c.y + d.y) * 0.25f,
+                    (a.z + b.z + c.z + d.z) * 0.25f,
+                    (a.w + b.w + c.w + d.w) * 0.25f,
+                };
+                *dest++ = igColorConvertFloat4ToU32(s);
+            }
+        }
+        p = mips[mip];
+        dim /= 2;
+    }
+}
+
 void init(void)
 {
     setup_allocators();
@@ -1324,8 +1354,15 @@ void init(void)
         // Brain dead--upload separate images, 4 orientations for every snap. Makes the usage code stupid simple
         push_allocator(scratch);
 
+
         u32 *pixels = 0;
-        buf_pushn(pixels, dbz.width*dbz.height);
+        buf_pushn(pixels, dbz.width*dbz.height*4);
+        u32 *p = pixels + dbz.width*dbz.height;
+        u32 **mips = 0;
+        for (isize d = dbz.width / 2; d >= 1; d /= 2) {
+            buf_push(mips, p);
+            p += d*d;
+        }
 
         sg_image_desc img_desc = {0};
         img_desc.width = dbz.width;
@@ -1333,20 +1370,28 @@ void init(void)
         img_desc.pixel_format = SG_PIXELFORMAT_RGBA8;
         img_desc.wrap_u = SG_WRAP_CLAMP_TO_EDGE;
         img_desc.wrap_v = SG_WRAP_CLAMP_TO_EDGE;
-        img_desc.min_filter = SG_FILTER_LINEAR;
+        img_desc.min_filter = SG_FILTER_LINEAR_MIPMAP_LINEAR;
         img_desc.mag_filter = SG_FILTER_LINEAR;
         img_desc.data.subimage[0][0].ptr = pixels;
         img_desc.data.subimage[0][0].size = dbz.width * dbz.height * sizeof(uint32_t);
+        assert(dbz.height == dbz.width);
+        i32 n_mips = 1;
+        for (isize d = dbz.width / 2; d >= 1; d /= 2) {
+            img_desc.data.subimage[0][n_mips].ptr = mips[n_mips-1];
+            img_desc.data.subimage[0][n_mips].size = d * d * sizeof(uint32_t);
+            n_mips++;
+        }
+        img_desc.num_mipmaps = n_mips;
 
         for (isize i = 0; i < array_length(dbz.luts); i++) {
             for (isize y = 0; y < dbz.height; y++) {
                 for (isize x = 0; x < dbz.width; x++) {
-                    isize pp = y * dbz.width + x;
-                    isize bp = y * dbz.width + x;
-                    assert(dbz.bitmap[pp] - '0' < 5);
-                    pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
+                    isize p = y * dbz.width + x;
+                    assert(dbz.bitmap[p] - '0' < 5);
+                    pixels[p] = dbz.luts[i][dbz.bitmap[p] - '0'];
                 }
             }
+            gen_mips(mips, pixels, dbz.height);
             state.dbz_tex[i][1] = sg_make_image(&img_desc);
 
             for (isize y = 0; y < dbz.height; y++) {
@@ -1357,6 +1402,7 @@ void init(void)
                     pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
                 }
             }
+            gen_mips(mips, pixels, dbz.height);
             state.dbz_tex[i][2] = sg_make_image(&img_desc);
 
             assert(dbz.height == dbz.width);
@@ -1368,6 +1414,7 @@ void init(void)
                     pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
                 }
             }
+            gen_mips(mips, pixels, dbz.height);
             state.dbz_tex[i][0] = sg_make_image(&img_desc);
 
             for (isize y = 0; y < dbz.height; y++) {
@@ -1378,6 +1425,7 @@ void init(void)
                     pixels[pp] = dbz.luts[i][dbz.bitmap[bp] - '0'];
                 }
             }
+            gen_mips(mips, pixels, dbz.height);
             state.dbz_tex[i][3] = sg_make_image(&img_desc);
         }
         pop_allocator();
@@ -1485,6 +1533,8 @@ void frame(void)
     reset_scratch();
     finish_work();
 
+    SimFileInfo *new_sfi = 0;
+
     for (isize i = buf_len(state.dropped_files) - 1; i >= 0; i--) {
         Buffer *b = &state.dropped_files[i];
 
@@ -1500,7 +1550,9 @@ void frame(void)
             }
         } else if ((buffer_first_nonwhitespace_char(b) == '/') || (buffer_first_nonwhitespace_char(b) == '#')) {
             // Assume .sm
+            new_sfi = parse_and_add_sm(*b);
             free(b->buf);
+            buf_remove_unsorted(state.dropped_files, b);
         } else {
             free(b->buf);
             buf_remove_unsorted(state.dropped_files, b);
@@ -1542,11 +1594,20 @@ void frame(void)
 
             buf_clear(state.opt_cfg.map.to_file);
             if (n_params > 0) {
+                f32 target_m = 0.0f;
+                f32 target_s = 0.0f;
                 for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
                     if (sfi->target.weight > 0.0f) {
+                        f32 old_m = target_m;
+                        f32 old_s = target_s;
+                        target_m = old_m + (sfi->target.want_msd - old_m) / (f32)(buf_len(state.opt_cfg.map.to_file) + 1);
+                        target_s = old_s + (sfi->target.want_msd - old_m)*(sfi->target.want_msd - target_m);
                         buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
                     }
                 }
+                f32 target_var = target_s / (f32)(buf_len(state.files) - 1);
+                state.target.msd_mean = target_m;
+                state.target.msd_sd = sqrtf(target_var);
             }
 
             optimize(&state.opt, n_params, x, (i32)buf_len(state.opt_cfg.map.to_file));
@@ -1796,7 +1857,8 @@ void frame(void)
                                         buf_clear(sfi->id.buf);
                                         sfi->id.len = 0;
                                         make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
-                                        make_sfi_display_id(&sfi->id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                                        sfi->display_id.len = 0;
+                                        make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
                                         if (state.optimizing) state.generation++;
                                     }
                                     if (is_selected) {
@@ -1821,7 +1883,8 @@ void frame(void)
                                             buf_clear(sfi->id.buf);
                                             sfi->id.len = 0;
                                             make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
-                                            make_sfi_display_id(&sfi->id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                                            sfi->display_id.len = 0;
+                                            make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
                                             state.generation++;
                                         }
                                         if (is_selected) {
@@ -2002,14 +2065,22 @@ void frame(void)
                     next_active = state.files;
                     next_active->open = true;
                 } else {
+                    static f32 cmod = 600.0f;
+                    static f32 mini = 0.5f;
+                    f32 old_y_scale = cmod * mini;
                     float x = 64.0f;
-                    static f32 y_scale = 600.0f;
-                    igSliderFloat("cmod", &y_scale, 1.0f, 2000, "%f", 0);
+                    igSetNextItemWidth(100.0f);
+                    bool cmod_changed = igSliderFloat("cmod", &cmod, 1.0f, 2000, "%f", 0);
+                    igSameLine(0,-1);
+                    igSetNextItemWidth(100.0f);
+                    bool mini_changed = igSliderFloat("mini", &mini, 0.0f, 2.0f, "%f", 0);
 
-                    ImVec2 dbz_dim = V2((f32)dbz.width, (f32)dbz.height);
+                    f32 y_scale = cmod * mini;
+
+                    ImVec2 dbz_dim = V2((f32)dbz.width * mini, (f32)dbz.height * mini);
                     ImVec2 uv_min = V2(0.0f, 0.0f);
                     ImVec2 uv_max = V2(1.0f, 1.0f);
-                    ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f };
+                    ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
                     ImVec4 border_col = (ImVec4) {0};
 
                     static f32 last_scroll_y[2] = {0.0f, -1.0f};
@@ -2019,6 +2090,14 @@ void frame(void)
                     static bool link_scroll = true;
                     if (igCheckbox("link", &link_scroll)) {
                         scroll_difference = last_scroll_y[scroll_control] - last_scroll_y[(scroll_control + 1) & 1];
+                    }
+
+                    if (cmod_changed || mini_changed) {
+                        last_scroll_y[0] = (last_scroll_y[0] + 225.0f) * (y_scale / old_y_scale) - 225.0f;
+                        igSetNextWindowScroll(V2(0, last_scroll_y[0]));
+                        scroll_control = 0;
+                        scroll_difference *= y_scale / old_y_scale;
+                        scroll_changed_last_frame = true;
                     }
 
                     for (i32 preview_index = 0; preview_index < 2; preview_index++) {
@@ -2036,8 +2115,8 @@ void frame(void)
                                     if (last_scroll_y[preview_index] == -1.0f) {
                                         igSetNextWindowScroll(V2(0, last_scroll_y[0]));
                                     } else if (scroll_changed_last_frame && preview_index != scroll_control) {
-                                       igSetNextWindowScroll(V2(0, last_scroll_y[scroll_control] + scroll_difference));
-                                       scroll_changed_last_frame = false;
+                                        igSetNextWindowScroll(V2(0, last_scroll_y[scroll_control] + scroll_difference));
+                                        scroll_changed_last_frame = false;
                                     }
                                 }
                                 igSetNextWindowSize(V2(-1.0f, last_row_time * y_scale), ImGuiCond_Always);
@@ -2062,7 +2141,7 @@ void frame(void)
                                     f32 y_scale_rate = y_scale / sfi->target.rate;
                                     f32 scroll_y_time_lo = (scroll_y / y_scale);
                                     f32 scroll_y_time_hi = clamp_high(last_row_time, ((scroll_y + igGetWindowHeight()) / y_scale));
-                                    f32 x_offset = 128.0f;
+                                    f32 x_offset = 450.0f / 4.0f;
                                     f32 y_offset = -32.0f;
                                     isize end_row = sfi_row_at_time(sfi, 0.5f + scroll_y_time_hi * sfi->target.rate);
                                     f32 start_time = scroll_y_time_lo * sfi->target.rate - 0.5f;
@@ -2070,7 +2149,9 @@ void frame(void)
                                         isize snap = sfi->snaps[i];
                                         for (isize c = 0; c < 4; c++) {
                                             if (rows[i].notes & (1 << c)) {
-                                                igSetCursorPos(V2((f32)c * x + x_offset, rows[i].rowTime * y_scale_rate + y_offset));
+                                                f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
+                                                f32 y_pos = rows[i].rowTime * y_scale_rate + y_offset;
+                                                igSetCursorPos(V2(x_pos, y_pos));
                                                 igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                             }
                                         }
@@ -2080,7 +2161,9 @@ void frame(void)
                                         isize snap = sfi->snaps[i];
                                         for (isize c = 0; c < 4; c++) {
                                             if (rows[i].notes & (1 << c)) {
-                                                igSetCursorPos(V2((f32)c * x + x_offset, rows[i].rowTime * y_scale_rate + y_offset));
+                                                f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
+                                                f32 y_pos = rows[i].rowTime * y_scale_rate + y_offset;
+                                                igSetCursorPos(V2(x_pos, y_pos));
                                                 igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                             }
                                         }
@@ -2096,7 +2179,7 @@ void frame(void)
                                     ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
                                     ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
                                     ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                                    ImPlot_SetNextPlotLimitsX(-1.1, 1.1, 0);
+                                    ImPlot_SetNextPlotLimitsX(-2.0, 2.0, 0);
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
                                     push_allocator(scratch);
                                     ImPlot_SetNextPlotFormatY("%06.2f", 0);
@@ -2355,6 +2438,11 @@ void frame(void)
                 next_active = sfi;
             }
         }
+    }
+
+    if (next_active == null_sfi && new_sfi) {
+        next_active = new_sfi;
+        next_active->open = true;
     }
 
     if (next_active != null_sfi) {

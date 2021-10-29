@@ -667,7 +667,15 @@ b32 buffer_begins_with(Buffer *buffer, String s)
 
 u8 buffer_first_nonwhitespace_char(Buffer *buffer)
 {
-    for (isize i = 0; i < buffer->len; i++) {
+    isize i = 0;
+    if (buffer->len > 4) {
+        // boms.. so many boms... whjy
+        u32 first_word = *(u32 *)buffer->buf;
+        if ((first_word & 0xffffff) == 0xBFBBEF) {
+            i = 3;
+        }
+    }
+    for (; i < buffer->len; i++) {
         if (isspace(buffer->buf[i]) == false) {
             return buffer->buf[i];
         }

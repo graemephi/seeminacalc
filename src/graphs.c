@@ -798,6 +798,19 @@ void finish_work(void)
                             sfi->selected_skillsets[ss] = sfi->display_skillsets[ss];
                         }
                     }
+                    if (sfi->target.want_msd == -1.0f) {
+                        isize max_ss = 1;
+                        f32 max_msd = sfi->aa_rating.E[1];
+                        for (isize ss = 2; ss < NumSkillsets; ss++) {
+                            if (sfi->aa_rating.E[ss] > max_msd) {
+                                max_msd = sfi->aa_rating.E[ss];
+                                max_ss = ss;
+                            }
+                        }
+                        sfi->target.want_msd = max_msd;
+                        sfi->target.skillset = max_ss;
+                        sfi->target.weight = 1.0f;
+                    }
                     sfi->target.got_msd = done.ssr.E[sfi->target.skillset];
                     sfi->target.delta = done.ssr.E[sfi->target.skillset] - sfi->target.want_msd;
                     targets_updated = true;
