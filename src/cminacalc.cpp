@@ -199,7 +199,10 @@ enum
 struct DebugBuffers
 {
     std::vector<std::vector<std::vector<float>>> handInfo[2];
-    std::vector<JackDebugInfo> jackInfo[2];
+    std::vector<float> row_time[2];
+    std::vector<float> jack_diff[2];
+    std::vector<float> jack_stam[2];
+    std::vector<float> jack_loss[2];
     std::vector<float> interval_times;
 };
 
@@ -561,26 +564,43 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
         for (ptrdiff_t i = 0; i < NUM_CalcDiffValue; i++) {
             result.interval_hand[h].diff[i] = result.buffers->handInfo[h][1][i].data();
             assert(length == result.buffers->handInfo[h][1][i].size());
+
+            if (h == 0) {
+                for (auto& v : result.buffers->handInfo[h][1][i]) {
+                    v = -v;
+                }
+            }
         }
         for (ptrdiff_t i = 0; i < NUM_CalcDebugMisc; i++) {
             result.interval_hand[h].misc[i] = result.buffers->handInfo[h][2][i].data();
             assert(length == result.buffers->handInfo[h][2][i].size());
+
+            if (h == 0) {
+                for (auto& v : result.buffers->handInfo[h][2][i]) {
+                    v = -v;
+                }
+            }
         }
 
         result.interval_hand[h].length = ptrdiff_t(length);
 
-        result.buffers->jackInfo[h].resize(calc->handle->jack_diff[h].size());
+        result.buffers->row_time[h].resize(calc->handle->jack_diff[h].size());
+        result.buffers->jack_diff[h].resize(calc->handle->jack_diff[h].size());
+        result.buffers->jack_stam[h].resize(calc->handle->jack_diff[h].size());
+        result.buffers->jack_loss[h].resize(calc->handle->jack_diff[h].size());
+        f32 left_hand_negate = (h == 0) ? -1.0f : 1.0f;
         for (ptrdiff_t i = 0; i < calc->handle->jack_diff[h].size(); i++) {
-            result.buffers->jackInfo[h][i] = {
-                calc->handle->jack_diff[h][i].first,
-                calc->handle->jack_diff[h][i].second,
-                (i < calc->handle->jack_stam_stuff[h].size()) ? calc->handle->jack_stam_stuff[h][i] : 0.0f,
-                (i < calc->handle->jack_loss[h].size())       ? calc->handle->jack_loss[h][i] : 0.0f
-            };
+            result.buffers->row_time[h][i] = calc->handle->jack_diff[h][i].first;
+            result.buffers->jack_diff[h][i] = left_hand_negate * calc->handle->jack_diff[h][i].second;
+            result.buffers->jack_stam[h][i] = left_hand_negate * ((i < calc->handle->jack_stam_stuff[h].size()) ? calc->handle->jack_stam_stuff[h][i] : 0.0f);
+            result.buffers->jack_loss[h][i] = left_hand_negate * ((i < calc->handle->jack_loss[h].size())       ? calc->handle->jack_loss[h][i] : 0.0);
         }
 
-        result.jack_hand[h].jank = result.buffers->jackInfo[h].data();
-        result.jack_hand[h].length = ptrdiff_t(result.buffers->jackInfo[h].size());
+        result.jack_hand[h].row_time  = result.buffers->row_time[h].data();
+        result.jack_hand[h].jack_diff = result.buffers->jack_diff[h].data();
+        result.jack_hand[h].jack_stam = result.buffers->jack_stam[h].data();
+        result.jack_hand[h].jack_loss = result.buffers->jack_loss[h].data();
+        result.jack_hand[h].length = ptrdiff_t(result.buffers->row_time[h].size());
 
         result.buffers->interval_times.resize(length);
         for (ptrdiff_t i = 0; i < length; i++) {

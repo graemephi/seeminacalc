@@ -1008,7 +1008,7 @@ static void param_slider_widget(i32 param_idx, b32 effective, ParamSliderChange 
             value = state.ps.params[mp];
         }
         igPopStyleVar(1);
-        tooltip("%s%s", state.info.params[mp].name, " (no effect on current file)");
+        tooltip("%s%s", state.info.params[mp].name, effective ? "" : " (no effect on current file)");
         if (ItemDoubleClicked(0)) {
             state.ps.params[mp] = state.info.defaults.params[mp];
             type = ParamSlider_ValueChanged;
@@ -1289,7 +1289,7 @@ void gen_mips(u32 *mips[], u32 *pixels, isize dim)
                     (a.x + b.x + c.x + d.x) * 0.25f,
                     (a.y + b.y + c.y + d.y) * 0.25f,
                     (a.z + b.z + c.z + d.z) * 0.25f,
-                    (a.w + b.w + c.w + d.w) * 0.25f,
+                    (a.w + b.w + c.w + d.w) * 0.5f,
                 };
                 *dest++ = igColorConvertFloat4ToU32(s);
             }
@@ -2094,24 +2094,28 @@ void frame(void)
                     next_active = state.files;
                     next_active->open = true;
                 } else {
+                    igBeginGroup();
                     static f32 cmod = 600.0f;
                     static f32 mini = 0.5f;
                     f32 old_y_scale = cmod * mini;
-                    float x = 64.0f;
                     igSetNextItemWidth(100.0f);
                     bool cmod_changed = igSliderFloat("cmod", &cmod, 1.0f, 2000, "%f", 0);
-                    igSameLine(0,-1);
                     igSetNextItemWidth(100.0f);
-                    bool mini_changed = igSliderFloat("mini", &mini, 0.0f, 2.0f, "%f", 0);
+                    bool mini_changed = igSliderFloat("mini", &mini, 0.01f, 2.0f, "%f", 0);
+                    igEndGroup();
 
-                    f32 y_scale = cmod * mini;
+                    igSameLine(0,-1);
+                    igBeginGroup();
+                    static f32 x_scale = 1.0f;
+                    static f32 x_nps_scale = 1.0f;
+                    igSetNextItemWidth(100.0f);
+                    igSliderFloat("scale (pmod)", &x_scale, 0.01f, 2.0f, "%f", 0);
+                    igSetNextItemWidth(100.0f);
+                    igSliderFloat("scale (nps)", &x_nps_scale, 0.01f, 2.0f, "%f", 0);
+                    igEndGroup();
 
-                    ImVec2 dbz_dim = V2((f32)dbz.width * mini, (f32)dbz.height * mini);
-                    ImVec2 uv_min = V2(0.0f, 0.0f);
-                    ImVec2 uv_max = V2(1.0f, 1.0f);
-                    ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
-                    ImVec4 border_col = (ImVec4) {0};
-
+                    igSameLine(0,-1);
+                    igBeginGroup();
                     static f32 last_scroll_y[2] = {0.0f, -1.0f};
                     static bool scroll_changed_last_frame = false;
                     static f32 scroll_difference = 0.0f;
@@ -2120,6 +2124,41 @@ void frame(void)
                     if (igCheckbox("link", &link_scroll)) {
                         scroll_difference = last_scroll_y[scroll_control] - last_scroll_y[(scroll_control + 1) & 1];
                     }
+                    igEndGroup();
+                    igSameLine(0, 50.0f);
+                    igBeginGroup();
+                    static bool jack_diff = false;
+                    static bool jack_stam = false;
+                    static bool jack_loss = false;
+                    igCheckbox("jack diff", &jack_diff);
+                    igSameLine(0,-1); igCheckbox("jack stam", &jack_stam);
+                    igSameLine(0,-1); igCheckbox("jack loss", &jack_loss);
+
+                    static i32 const diff_values[] = { NPSBase, TechBase, RMABase, MSD };
+                    static char const *diff_values_strings[] = { "NPSBase", "TechBase", "RMABase", "MSD" };
+                    static bool diff_values_enabled[array_length(diff_values)] = {0};
+
+                    static i32 const misc[] = { Pts, PtLoss, StamMod };
+                    static char const *misc_strings[] = { "Pts", "PtLoss", "StamMod" };
+                    static bool misc_enabled[array_length(misc)] = {0};
+
+                    for (isize i = 0; i < array_length(diff_values); i++) {
+                        igCheckbox(diff_values_strings[i], diff_values_enabled + i);
+                        igSameLine(0,-1);
+                    }
+                    for (isize i = 0; i < array_length(misc); i++) {
+                        igCheckbox(misc_strings[i], misc_enabled + i);
+                        igSameLine(0,-1);
+                    }
+                    igEndGroup();
+
+                    f32 y_scale = cmod * mini;
+
+                    ImVec2 dbz_dim = V2((f32)dbz.width * mini, (f32)dbz.height * mini);
+                    ImVec2 uv_min = V2(0.0f, 0.0f);
+                    ImVec2 uv_max = V2(1.0f, 1.0f);
+                    ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
+                    ImVec4 border_col = (ImVec4) {0};
 
                     if (cmod_changed || mini_changed) {
                         last_scroll_y[0] = (last_scroll_y[0] + 225.0f) * (y_scale / old_y_scale) - 225.0f;
@@ -2167,11 +2206,10 @@ void frame(void)
                                     }
                                     last_scroll_y[preview_index] = scroll_y;
 
-                                    f32 y_scale_rate = y_scale / sfi->target.rate;
+                                    f32 x = 64.0f;
                                     f32 scroll_y_time_lo = (scroll_y / y_scale);
                                     f32 scroll_y_time_hi = clamp_high(last_row_time, ((scroll_y + igGetWindowHeight()) / y_scale));
                                     f32 x_offset = 450.0f / 4.0f;
-                                    f32 y_offset = -32.0f;
                                     isize end_row = sfi_row_at_time(sfi, 0.5f + scroll_y_time_hi * sfi->target.rate);
                                     f32 start_time = scroll_y_time_lo * sfi->target.rate - 0.5f;
                                     for (isize i = end_row - 1; i >= 0 && rows[i].rowTime > start_time; i--) {
@@ -2179,7 +2217,7 @@ void frame(void)
                                         for (isize c = 0; c < 4; c++) {
                                             if (rows[i].notes & (1 << c)) {
                                                 f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
-                                                f32 y_pos = rows[i].rowTime * y_scale_rate + y_offset;
+                                                f32 y_pos = y_scale * (rows[i].rowTime / sfi->target.rate);
                                                 igSetCursorPos(V2(x_pos, y_pos));
                                                 igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                             }
@@ -2191,7 +2229,7 @@ void frame(void)
                                         for (isize c = 0; c < 4; c++) {
                                             if (rows[i].notes & (1 << c)) {
                                                 f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
-                                                f32 y_pos = rows[i].rowTime * y_scale_rate + y_offset;
+                                                f32 y_pos = y_scale * (rows[i].rowTime / sfi->target.rate);
                                                 igSetCursorPos(V2(x_pos, y_pos));
                                                 igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
                                             }
@@ -2208,24 +2246,70 @@ void frame(void)
                                     ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
                                     ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
                                     ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                                    ImPlot_SetNextPlotLimitsX(-2.0, 2.0, 0);
+                                    ImPlot_SetNextPlotLimitsX(-2.18 / (f64)x_scale, 2.0 / (f64)x_scale, ImGuiCond_Always);
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
                                     push_allocator(scratch);
+                                    f64 ymin, ymax;
+                                    ImPlot_LinkNextPlotLimits(0, 0, &ymin, &ymax, 0, 0, 0, 0);
                                     ImPlot_SetNextPlotFormatY("%06.2f", 0);
                                     if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
-                                    (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
-                                    ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoTickMarks|ImPlotAxisFlags_NoTickLabels|ImPlotAxisFlags_NoLabel|ImPlotAxisFlags_NoGridLines,
-                                    ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
+                                      (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
+                                      ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoLabel|ImPlotAxisFlags_NoGridLines,
+                                      ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
                                         ImPlot_SetLegendLocation(ImPlotLocation_South, ImPlotOrientation_Vertical, 0);
                                         for (isize i = 0; i < state.info.num_mods; i++) {
                                             i32 mi = debuginfo_mod_index(i);
-                                            if (state.preview_pmod_graphs_enabled[i] && mi != CalcPatternMod_Invalid) {
+                                            if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
                                                 igPushID_Int(mi);
                                                 ImPlot_PlotStairs_FloatPtrFloatPtr(state.info.mods[i].name, d->interval_hand[0].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                ImVec4 c = {0};
-                                                ImPlot_GetLastItemColor(&c);
-                                                ImPlot_SetNextLineStyle(c, 2.0f);
+                                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
                                                 ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                igPopID();
+                                            }
+                                        }
+                                        if (jack_stam) {
+                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_stam L", d->jack_hand[0].jack_stam, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
+                                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_stam R", d->jack_hand[1].jack_stam, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
+                                        }
+                                        if (jack_loss) {
+                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_loss L", d->jack_hand[0].jack_loss, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
+                                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_loss R", d->jack_hand[1].jack_loss, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
+                                        }
+                                        ImPlot_EndPlot();
+                                    }
+
+                                    igSetCursorPos(V2(0, scroll_y));
+                                    ImPlot_PushColormap_PlotColormap(2);
+                                    ImPlot_LinkNextPlotLimits(0, 0, &ymin, &ymax, 0, 0, 0, 0);
+                                    ImPlot_SetNextPlotLimitsX(-75.0 / (f64)x_nps_scale, 50.0 / (f64)x_nps_scale, ImGuiCond_Always);
+                                    ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
+                                    if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
+                                      (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & ~ImPlotFlags_NoLegend,
+                                      ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
+                                      ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
+                                        ImPlot_SetLegendLocation(ImPlotLocation_North, ImPlotOrientation_Vertical, 0);
+                                        if (jack_diff) {
+                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_diff L", d->jack_hand[0].jack_diff, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
+                                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_diff R", d->jack_hand[1].jack_diff, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
+                                        }
+                                        for (i32 i = 0; i < array_length(diff_values); i++) {
+                                            if (diff_values_enabled[i]) {
+                                                igPushID_Int(100+i);
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr(diff_values_strings[i], d->interval_hand[0].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                igPopID();
+                                            }
+                                        }
+                                        for (i32 i = 0; i < array_length(misc); i++) {
+                                            if (misc_enabled[i]) {
+                                                igPushID_Int(200+i);
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr(misc_strings[i], d->interval_hand[0].misc[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].misc[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
                                                 igPopID();
                                             }
                                         }
@@ -2233,7 +2317,7 @@ void frame(void)
                                     }
                                     pop_allocator();
                                     ImPlot_PopStyleColor(3);
-                                    ImPlot_PopColormap(1);
+                                    ImPlot_PopColormap(2);
                                 }
                                 igEndChild();
                                 igPopID();

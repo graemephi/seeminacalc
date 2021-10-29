@@ -74,14 +74,6 @@ typedef struct ParamInfo
 
 typedef struct DebugBuffers DebugBuffers;
 
-typedef struct JackDebugInfo
-{
-    float row_time;
-    float jack_diff;
-    float jack_stam;
-    float jack_loss;
-} JackDebugInfo;
-
 typedef struct DebugInfo
 {
     struct {
@@ -91,7 +83,10 @@ typedef struct DebugInfo
         ptrdiff_t length;
     } interval_hand[2];
     struct {
-        JackDebugInfo *jank;
+        float *row_time;
+        float *jack_diff;
+        float *jack_stam;
+        float *jack_loss;
         ptrdiff_t length;
     } jack_hand[2];
     float *interval_times;
