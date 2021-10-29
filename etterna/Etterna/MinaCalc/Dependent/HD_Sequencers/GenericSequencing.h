@@ -172,9 +172,9 @@ struct Jack_Sequencing : public Finger_Sequencing
 			return _len_cap_ms;
 		}
 
-		const auto avg_ms_mult = P(1.075F);
-		const auto anchor_time_buffer_ms = P(25.F);
-		const auto min_ms = P(82.5F);
+		const auto avg_ms_mult = P(1.5F);
+		const auto anchor_time_buffer_ms = P(30.F);
+		const auto min_ms = P(95.F);
 
 		// get total ms
 		const auto total_ms = ms_from(_last, _start);
@@ -196,7 +196,7 @@ struct Jack_Sequencing : public Finger_Sequencing
 		// BAD TEMP HACK LUL
 		if (_len == 2) {
 			ms *= P(1.1F);
-			ms = ms < P(155.F) ? PREV(155.F) : ms;
+			ms = ms < P(180.F) ? PREV(180.F) : ms;
 		}
 
 		ms = ms < min_ms ? min_ms : ms;

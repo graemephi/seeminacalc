@@ -1198,7 +1198,7 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(148, 2)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(183, 2)"))].low = 0.1f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(183, 4)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(536)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(555)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
         state.opt_cfg.bounds[i].low = (state.opt_cfg.bounds[i].low - state.info.defaults.params[i]) / normalization_factors[i];

@@ -199,9 +199,24 @@ Calc::CalcMain(const std::vector<NoteInfo>& NoteInfo,
 		for (auto& ssvals : all_skillset_values) {
 			iteration_ss_vals.push_back(ssvals[i]);
 		}
-		output[i] = mean(iteration_ss_vals) * grindscaler;
+		output[i] = mean(iteration_ss_vals);
 		iteration_ss_vals.clear();
 	}
+	// lighten grindscaler for jack files only
+	Skillset highest_final_ss = Skill_Overall;
+	auto highest_final_ssv = -1.F;
+	for (size_t i = 0; i < output.size(); i++) {
+		if (i == Skill_Overall)
+			continue;
+		if (output[i] > highest_final_ssv) {
+			highest_final_ss = static_cast<Skillset>(i);
+			highest_final_ssv = output[i];
+		}
+	}
+	if (highest_final_ss == Skill_JackSpeed || highest_final_ss == Skill_Chordjack)
+		grindscaler = fastsqrt(grindscaler);
+	for (auto& ssv : output)
+		ssv *= grindscaler;
 	return output;
 }
 
@@ -290,11 +305,14 @@ JackStamAdjust(const float x, Calc& calc, const int hand)
 	static const auto stam_mag = P(23.F);
 	static const auto stam_fscale = P(750.F);
 	static const auto stam_prop = P(0.49424F);
+	// mod hard floor
 	auto stam_floor = P(0.95F);
-	auto mod = P(0.95F);
+	auto mod = P(1.F);
 
 	auto avs2 = 0.F;
-	const auto super_stam_ceil = P(1.09F);
+
+	// mod hard cap
+	const auto super_stam_ceil = P(1.01F);
 
 	const auto& diff = calc.jack_diff.at(hand);
 	std::vector<std::pair<float, float>> output(diff.size());
@@ -470,7 +488,8 @@ Calc::InitializeHands(const std::vector<NoteInfo>& NoteInfo,
 		InitAdjDiff(*this, hand);
 
 		// post pattern mod smoothing for cj
-		Smooth(base_adj_diff.at(hand).at(Skill_Chordjack), P(1.F), numitv);
+		// (Chordjack related tuning done: this is disabled for now)
+		// Smooth(base_adj_diff.at(hand).at(Skill_Chordjack), P(1.F), numitv);
 	}
 
 	// debug info loop
@@ -971,7 +990,7 @@ MinaSDCalcDebug(
 	}
 }
 
-int mina_calc_version = 466;
+int mina_calc_version = 471;
 auto
 GetCalcVersion() -> int
 {
