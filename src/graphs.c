@@ -235,6 +235,7 @@ typedef struct ParameterLossWork
     f32 value;
     f32 goal;
     f32 msd;
+    f32 x;
 } ParameterLossWork;
 
 typedef struct CalcWork

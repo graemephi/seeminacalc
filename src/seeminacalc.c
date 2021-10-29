@@ -328,10 +328,6 @@ typedef struct State
         f32 *normalization_factors;
         Bound *bounds;
         struct {
-            f32 add;
-            f32 mul;
-        } bias[NumSkillsets];
-        struct {
             i32 *to_opt;
             i32 *to_ps;
             i32 *to_file;
@@ -1024,6 +1020,11 @@ static void param_slider_widget(i32 param_idx, ParamSliderChange *out)
     }
 }
 
+b32 param_visible(i32 param_index, u8 *effects, u32 effect_mask)
+{
+    return effects == 0 || (effects[param_index] & effect_mask) != 0 || state.opt_cfg.enabled[param_index];
+}
+
 void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
 {
     if (mod_index == 0) {
@@ -1040,7 +1041,7 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
         i32 count = 0;
         for (i32 i = 0; i < mod->num_params; i++) {
             i32 mp = mod->index + i;
-            if (effects == 0 || (effects[mp] & effect_mask) != 0 || state.opt_cfg.enabled[mp]) {
+            if (param_visible(mp, effects, effect_mask)) {
                 count++;
             }
         }
@@ -1048,7 +1049,7 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
             if (igCheckbox("##opt_all", &state.opt_cfg.all_mod_enabled[mod_index])) {
                 for (i32 i = 0; i < mod->num_params; i++) {
                     i32 mp = mod->index + i;
-                    state.opt_cfg.enabled[mp] = state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
+                    state.opt_cfg.enabled[mp] = param_visible(mp, effects, effect_mask) && state.info.params[mp].optimizable && state.opt_cfg.all_mod_enabled[mod_index];
                 }
                 changed_param->type = ParamSlider_OptimizingToggled;
             } tooltip("optimize visible");
@@ -1059,7 +1060,7 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
             }
             for (i32 i = 0; i < mod->num_params; i++) {
                 i32 mp = mod->index + i;
-                if (effects == 0 || (effects[mp] & effect_mask) != 0 || state.opt_cfg.enabled[mp]) {
+                if (param_visible(mp, effects, effect_mask)) {
                     param_slider_widget(mp, changed_param);
                 }
             }
@@ -1133,7 +1134,7 @@ i32 pack_opt_parameters(CalcInfo *info, f32 *params, f32 *normalization_factors,
         if (enabled[i]) {
             to_ps[packed_i] = i;
             to_opt[i] = packed_i;
-            x[packed_i] = params[i] / normalization_factors[i];
+            x[packed_i] = (params[i] - info->defaults.params[i]) / normalization_factors[i];
             packed_i++;
         }
     }
@@ -1200,18 +1201,9 @@ void setup_optimizer(void)
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("InlineConstants"), S("MinaCalc.cpp(536)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
-        state.opt_cfg.bounds[i].low /= normalization_factors[i];
-        state.opt_cfg.bounds[i].high /= normalization_factors[i];
+        state.opt_cfg.bounds[i].low = (state.opt_cfg.bounds[i].low - state.info.defaults.params[i]) / normalization_factors[i];
+        state.opt_cfg.bounds[i].high = (state.opt_cfg.bounds[i].high - state.info.defaults.params[i]) / normalization_factors[i];
     }
-    // Loss fine-tuning. Disabled in the UI and set to the identity function
-    state.opt_cfg.barriers[0] = 2.0f;
-    state.opt_cfg.barriers[1] = 2.0f;
-    state.opt_cfg.barriers[2] = 2.0f;
-    state.opt_cfg.barriers[3] = 2.0f;
-    state.opt_cfg.barriers[4] = 2.0f;
-    state.opt_cfg.barriers[5] = 2.0f;
-    state.opt_cfg.barriers[6] = 2.0f;
-    state.opt_cfg.barriers[7] = 2.0f;
     state.opt_cfg.goals[0] = 0.93f;
     state.opt_cfg.goals[1] = 0.93f;
     state.opt_cfg.goals[2] = 0.93f;
@@ -1220,13 +1212,6 @@ void setup_optimizer(void)
     state.opt_cfg.goals[5] = 0.93f;
     state.opt_cfg.goals[6] = 0.93f;
     state.opt_cfg.goals[7] = 0.93f;
-    state.opt_cfg.bias[1].add = 0.0f; state.opt_cfg.bias[1].mul = 1.0f;
-    state.opt_cfg.bias[2].add = 0.0f; state.opt_cfg.bias[2].mul = 1.0f;
-    state.opt_cfg.bias[3].add = 0.0f; state.opt_cfg.bias[3].mul = 1.0f;
-    state.opt_cfg.bias[4].add = 0.0f; state.opt_cfg.bias[4].mul = 1.0f;
-    state.opt_cfg.bias[5].add = 0.0f; state.opt_cfg.bias[5].mul = 1.0f;
-    state.opt_cfg.bias[6].add = 0.0f; state.opt_cfg.bias[6].mul = 1.0f;
-    state.opt_cfg.bias[7].add = 0.0f; state.opt_cfg.bias[7].mul = 1.0f;
 }
 
 void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRatings ssr)
@@ -1235,32 +1220,32 @@ void optimizer_skulduggery(SimFileInfo *sfi, ParameterLossWork work, SkillsetRat
     i32 ss = sfi->target.skillset;
     f32 mean = state.target.msd_mean;
     f32 target = (work.msd - mean) / state.target.msd_sd;
-    if (ExpScale) target = lerp(target, expf(target), ExpScale);
     f32 skillset = (ssr.E[ss] - mean) / state.target.msd_sd;
-    if (ExpScale) skillset = lerp(skillset, expf(skillset), ExpScale);
     f32 overall = (ssr.overall - mean) / state.target.msd_sd;
-    if (ExpScale) overall = lerp(overall, expf(overall), ExpScale);
-    f32 delta_skillset = skillset - target;
-    f32 delta_overall = overall - target;
+    f32 mixed = lerp(skillset, overall, SkillsetOverallBalance);
+    if (ExpScale) {
+        target = lerp(target, expf(target), ExpScale);
+        mixed = lerp(mixed, expf(mixed), ExpScale);
+    }
+
     f32 ssr_largest = 0;
     for (isize i = 1; i < NumSkillsets; i++) {
         ssr_largest = max(ssr_largest, ssr.E[i]);
     }
     f32 misclass = 1.0f;
-    if (Misclass) misclass = expf(Misclass * (ssr_largest / ssr.E[ss] - 1.0f));
-    f32 delta = sfi->target.weight * misclass * lerp(delta_skillset, delta_overall, SkillsetOverallBalance);
-    i32 opt_param = state.opt_cfg.map.to_opt[work.param];
-    f32 difference = 0.0f;
-    if (work.param != Param_None) {
-        difference = (work.value - state.info.defaults.params[work.param]) / state.opt_cfg.normalization_factors[work.param];
+    if (Misclass) {
+        misclass = expf(Misclass * (ssr_largest / ssr.E[ss] - 1.0f));
     }
+
     buf_push(state.opt_evaluations, (OptimizationEvaluation) {
         .sample = work.sample,
-        .param = opt_param,
-        .value_difference_from_initial = difference,
-        .delta = delta,
-        .barrier = state.opt_cfg.barriers[ss]
+        .param = state.opt_cfg.map.to_opt[work.param],
+        .x = work.x,
+        .y_wanted = target,
+        .y_got = mixed,
+        .weight = sfi->target.weight * misclass
     });
+
     state.opt_pending_evals--;
 }
 
@@ -1353,7 +1338,6 @@ void init(void)
     {
         // Brain dead--upload separate images, 4 orientations for every snap. Makes the usage code stupid simple
         push_allocator(scratch);
-
 
         u32 *pixels = 0;
         buf_pushn(pixels, dbz.width*dbz.height*4);
@@ -1578,9 +1562,12 @@ void frame(void)
         if (!state.optimization_graph) {
             state.optimization_graph = &state.graphs[make_optimization_graph()];
         }
+        if (state.optimizing && state.reset_optimizer_flag) {
+            state.generation++;
+        }
 
         static u32 last_generation = 1;
-        if (last_generation != state.generation || state.reset_optimizer_flag) {
+        if (last_generation != state.generation) {
             // Some parameter has been messed with, or turned off
             // This invalidates the optimizer state either way, so just recreate the whole thing
             buf_clear(state.opt_evaluations);
@@ -1651,7 +1638,7 @@ void frame(void)
                     // Since we have regularisation this is well behaved
                     state.opt.x[i] = clamp(state.opt_cfg.bounds[p].low, state.opt_cfg.bounds[p].high, state.opt.x[i]);
                     // Copy x into the calc parameters
-                    state.ps.params[p] = state.opt.x[i] * state.opt_cfg.normalization_factors[p];
+                    state.ps.params[p] = state.info.defaults.params[p] + (state.opt.x[i] * state.opt_cfg.normalization_factors[p]);
                 }
 
                 if (state.optimizing) {
@@ -1670,9 +1657,9 @@ void frame(void)
 
                         i32 ss = sfi->target.skillset;
                         f32 goal = state.opt_cfg.goals[ss];
-                        f32 msd = (sfi->target.want_msd + state.opt_cfg.bias[ss].add) * state.opt_cfg.bias[ss].mul;
+                        f32 msd = sfi->target.want_msd;
 
-                        calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork ) {
+                        calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
                             .sample = sample,
                             .goal = goal,
                             .msd = msd
@@ -1686,7 +1673,8 @@ void frame(void)
                                 .goal = goal,
                                 .msd = msd,
                                 .param = p,
-                                .value = (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
+                                .value = state.info.defaults.params[p] + (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
+                                .x = state.opt.x[param] + req.h,
                             }, state.generation);
                         }
                     }
@@ -2267,6 +2255,8 @@ void frame(void)
                     tooltip("penalise moving parameters very far away from the defaults");
                     igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
                     tooltip("0 = prefer large changes to few parameters\n1 = prefer small changes to many parameters\n...theoretically");
+                    igSliderFloat("Loss function", &LossFunction, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
+                    tooltip("0 = optimise average error (squared loss)\n1 = optimize for correct order (quantile loss)\ndon't know how well this works. just an idea");
                 }
                 igEndChild();
                 igSameLine(0, 4);
@@ -2506,7 +2496,7 @@ void frame(void)
                 }
             } break;
             case ParamSlider_OptimizingToggled: {
-                state.generation++;
+                state.reset_optimizer_flag = true;
             } break;
             default: {
                 // Nothing

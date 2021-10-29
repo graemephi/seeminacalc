@@ -8,6 +8,7 @@ static i32 ParameterBatchSize = 16;
 static f32 NegativeEpsilon = 0.0f;
 static f32 Regularisation = 0.01f;
 static f32 RegularisationAlpha = 0.15f;
+static f32 LossFunction = 0.0f;
 
 enum {
     Param_None = -1
@@ -103,14 +104,18 @@ typedef struct {
 typedef struct {
     i32 sample;
     i32 param;
-    f32 value_difference_from_initial;
-    f32 delta;
-    f32 barrier;
+    f32 x;
+    f32 y_wanted;
+    f32 y_got;
+    f32 weight;
 } OptimizationEvaluation;
 
-f32 loss(f32 delta, f32 barrier)
+f32 loss(f32 want, f32 got, f32 weight)
 {
-    return delta*delta;
+    f32 delta = want - got;
+    f32 squared_loss = delta*delta;
+    f32 quantile_loss = (delta >= 0.0f) ? 2.0f * delta : -delta;
+    return weight * lerp(squared_loss, quantile_loss, LossFunction);
 }
 
 void optimize(OptimizationContext *opt, i32 n_params, f32 *initial_x, i32 n_samples)
@@ -185,10 +190,10 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
                     OptimizationEvaluation *xh = &evals[param_evals[i].samples[j]];
                     assert(sample_seen[xh->sample]);
                     OptimizationEvaluation *x = &evals[sample_evals[xh->sample]];
-                    loss_x += loss(x->delta, x->barrier);
-                    loss_xh += loss(xh->delta, xh->barrier);
-                    regularisation_l1 += clamp(-H, H, 2 * xh->value_difference_from_initial - H);
-                    regularisation_l2 += h2 * xh->value_difference_from_initial;
+                    loss_x += loss(x->y_wanted, x->y_got, x->weight);
+                    loss_xh += loss(xh->y_wanted, xh->y_got, xh->weight);
+                    regularisation_l1 += clamp(-H, H, 2 * xh->x - H);
+                    regularisation_l2 += h2 * xh->x;
 
                     n_losses += 1.0f;
                 }
@@ -226,11 +231,11 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
         for (isize i = 0; i < opt->n_params; i++) {
             opt->w[i] /= w_sum;
         }
+
+        opt->loss *= (f32)(opt->n_samples * opt->n_params) / n_losses;
     }
 
     opt->iter++;
-
-    opt->loss *= (f32)(opt->n_samples * opt->n_params) / n_losses;
 
     random_sequence(opt->active.samples, opt->focus);
     random_sequence_weighted(opt->active.parameters, opt->w);
