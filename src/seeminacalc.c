@@ -2094,6 +2094,7 @@ void frame(void)
                     next_active = state.files;
                     next_active->open = true;
                 } else {
+                    igBeginChild_Str("##no scroll", V2(-1,-1), 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoScrollbar);
                     igBeginGroup();
                     static f32 cmod = 600.0f;
                     static f32 mini = 0.5f;
@@ -2121,9 +2122,11 @@ void frame(void)
                     static f32 scroll_difference = 0.0f;
                     static i32 scroll_control = 0;
                     static bool link_scroll = true;
+                    static bool diff = false;
                     if (igCheckbox("link", &link_scroll)) {
                         scroll_difference = last_scroll_y[scroll_control] - last_scroll_y[(scroll_control + 1) & 1];
                     }
+                    igCheckbox("abs diff", &diff);
                     igEndGroup();
                     igSameLine(0, 50.0f);
                     igBeginGroup();
@@ -2159,6 +2162,7 @@ void frame(void)
                     ImVec2 uv_max = V2(1.0f, 1.0f);
                     ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
                     ImVec4 border_col = (ImVec4) {0};
+                    f32 plot_window_height = 0.0f;
 
                     if (cmod_changed || mini_changed) {
                         last_scroll_y[0] = (last_scroll_y[0] + 225.0f) * (y_scale / old_y_scale) - 225.0f;
@@ -2167,6 +2171,8 @@ void frame(void)
                         scroll_difference *= y_scale / old_y_scale;
                         scroll_changed_last_frame = true;
                     }
+
+                    f64 plots_ymin, plots_ymax;
 
                     for (i32 preview_index = 0; preview_index < 2; preview_index++) {
                         SimFileInfo *sfi = state.previews[preview_index];
@@ -2192,6 +2198,8 @@ void frame(void)
                                     igBeginMenuBar();
                                     igText(sfi->display_id.buf);
                                     igEndMenuBar();
+
+                                    plot_window_height = igGetWindowHeight();
 
                                     sfi_set_snaps_from_bpms(sfi);
 
@@ -2248,9 +2256,18 @@ void frame(void)
                                     ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
                                     ImPlot_SetNextPlotLimitsX(-2.18 / (f64)x_scale, 2.0 / (f64)x_scale, ImGuiCond_Always);
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
-                                    push_allocator(scratch);
-                                    f64 ymin, ymax;
-                                    ImPlot_LinkNextPlotLimits(0, 0, &ymin, &ymax, 0, 0, 0, 0);
+                                    // todo: literally anything else. we sync the diff to the file at preview_index 0, so we need
+                                    // to keep their linked limits around
+                                    f64 sorryx, sorryy;
+                                    f64 *ymin, *ymax;
+                                    if (preview_index == 0) {
+                                        ymin = &plots_ymin;
+                                        ymax = &plots_ymax;
+                                    } else {
+                                        ymin = &sorryx;
+                                        ymax = &sorryy;
+                                    }
+                                    ImPlot_LinkNextPlotLimits(0, 0, ymin, ymax, 0, 0, 0, 0);
                                     ImPlot_SetNextPlotFormatY("%06.2f", 0);
                                     if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
                                       (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
@@ -2282,7 +2299,7 @@ void frame(void)
 
                                     igSetCursorPos(V2(0, scroll_y));
                                     ImPlot_PushColormap_PlotColormap(2);
-                                    ImPlot_LinkNextPlotLimits(0, 0, &ymin, &ymax, 0, 0, 0, 0);
+                                    ImPlot_LinkNextPlotLimits(0, 0, ymin, ymax, 0, 0, 0, 0);
                                     ImPlot_SetNextPlotLimitsX(-75.0 / (f64)x_nps_scale, 50.0 / (f64)x_nps_scale, ImGuiCond_Always);
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
                                     if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
@@ -2315,7 +2332,6 @@ void frame(void)
                                         }
                                         ImPlot_EndPlot();
                                     }
-                                    pop_allocator();
                                     ImPlot_PopStyleColor(3);
                                     ImPlot_PopColormap(2);
                                 }
@@ -2325,6 +2341,90 @@ void frame(void)
                         }
                         igSameLine(0,-1);
                     }
+
+                    // pmod diffs
+                    if (diff && state.previews[1] != 0) {
+                        if ((state.previews[0]->debug_generation == state.generation) && (state.previews[1]->debug_generation == state.generation)) {
+                            static DebugInfo diff_data = {0};
+                            static struct { SimFileInfo *a, *b; float scroll_difference; i32 generation; } current = {0};
+                            f32 ab_scroll_difference = last_scroll_y[1] - last_scroll_y[0];
+                            isize scroll_intervals = (isize)(ab_scroll_difference / y_scale);
+                            b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ab_scroll_difference || current.generation != state.generation;
+                            if (invalidated || (!link_scroll && scroll_changed_last_frame)) {
+                                DebugInfo *da = &state.previews[0]->debug_info;
+                                DebugInfo *db = &state.previews[1]->debug_info;
+                                isize n_intervals = maxs(da->n_intervals, db->n_intervals);
+                                for (isize i = 0; i < NUM_CalcPatternMod; i++) {
+                                    buf_clear(diff_data.interval_hand[0].pmod[i]);
+                                    buf_clear(diff_data.interval_hand[1].pmod[i]);
+                                    buf_pushn(diff_data.interval_hand[0].pmod[i], maxs(2*60*20, n_intervals));
+                                    buf_pushn(diff_data.interval_hand[1].pmod[i], maxs(2*60*20, n_intervals));
+
+                                    for (isize j = 0; j < n_intervals; j++) {
+                                        f32 al = (j < da->n_intervals) ? da->interval_hand[0].pmod[i][j] : 0.0f;
+                                        f32 ar = (j < da->n_intervals) ? da->interval_hand[1].pmod[i][j] : 0.0f;
+                                        isize clamped = clamps(0, db->n_intervals - 1, j + scroll_intervals);
+                                        f32 bl = db->interval_hand[0].pmod[i][clamped];
+                                        f32 br = db->interval_hand[1].pmod[i][clamped];
+                                        diff_data.interval_hand[0].pmod[i][j] = -absolute_value(al - bl);
+                                        diff_data.interval_hand[1].pmod[i][j] = absolute_value(ar - br);
+                                    }
+                                }
+                                diff_data.n_intervals = n_intervals;
+                                current.a = state.previews[0];
+                                current.b = state.previews[1];
+                                current.scroll_difference = ab_scroll_difference;
+                                current.generation = state.generation;
+                            }
+                            // manually positioned like an animal
+                            igSetCursorPos(V2(255.0f, 55.0f));
+                            plot_window_height -= 16.0f;
+                            f64 scroll_y_time_lo = (f64)(last_scroll_y[0] / y_scale);
+                            f64 scroll_y_time_hi = scroll_y_time_lo + (f64)(plot_window_height / y_scale);
+                            isize interval_offset = (isize)(scroll_y_time_lo * 2);
+                            isize n_intervals = clamp_highs((isize)((scroll_y_time_hi - scroll_y_time_lo + 1.0) * 2.0) , diff_data.n_intervals - interval_offset);
+                            // we compute this every frame because we want to fit to whatever is visible
+                            f32 largest_difference = 1.0;
+                            for (isize i = 0; i < state.info.num_mods; i++) {
+                                i32 mi = debuginfo_mod_index(i);
+                                if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
+                                    for (isize i = interval_offset; i < n_intervals; i++) {
+                                        largest_difference = max(largest_difference, absolute_value(diff_data.interval_hand[0].pmod[mi][i]));
+                                        largest_difference = max(largest_difference, absolute_value(diff_data.interval_hand[1].pmod[mi][i]));
+                                    }
+                                }
+                            }
+                            f64 x_min = (f64)-largest_difference;
+                            f64 x_max = (f64)largest_difference;
+                            ImPlot_LinkNextPlotLimits(0, 0, &plots_ymin, &plots_ymax, 0, 0, 0, 0);
+                            ImPlot_SetNextPlotLimitsX(x_min, x_max, ImGuiCond_Always);
+                            ImPlot_PushColormap_PlotColormap(3);
+                            ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
+                            ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
+                            ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
+                            if (ImPlot_BeginPlot("##diff", "p", "t", V2(0, plot_window_height -1.0f),
+                              ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly,
+                              ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
+                              ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
+                                for (isize i = 0; i < state.info.num_mods; i++) {
+                                    i32 mi = debuginfo_mod_index(i);
+                                    if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
+                                        igPushID_Int(mi);
+                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##left", diff_data.interval_hand[0].pmod[mi] + interval_offset, current.a->debug_info.interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                        ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##right", diff_data.interval_hand[1].pmod[mi] + interval_offset, current.a->debug_info.interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                        igPopID();
+                                    }
+                                }
+
+                                ImPlot_EndPlot();
+                            }
+                            ImPlot_PopStyleColor(3);
+                            ImPlot_PopColormap(1);
+                        }
+                    }
+
+                    igEndChild();
                 }
 
                 igEndTabItem();
