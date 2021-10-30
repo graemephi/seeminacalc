@@ -2084,7 +2084,7 @@ void frame(void)
                     next_active = state.files;
                     next_active->open = true;
                 } else {
-                    igBeginChild_Str("##no scroll", V2(-1,-1), 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoScrollbar);
+                    igBeginChild_Str("##no scroll", V2(-1,-1), 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
                     igBeginGroup();
                     static f32 cmod = 600.0f;
                     static f32 mini = 0.5f;
@@ -2107,14 +2107,13 @@ void frame(void)
 
                     igSameLine(0,-1);
                     igBeginGroup();
-                    static f32 last_scroll_y[2] = {0.0f, -1.0f};
-                    static bool scroll_changed_last_frame = false;
+                    static f32 scroll[2] = {0.0f, 0.0f};
+                    static f32 ig_scroll[2] = {0.0f, 0.0f};
                     static f32 scroll_difference = 0.0f;
-                    static i32 scroll_control = 0;
                     static bool link_scroll = true;
                     static bool diff = false;
-                    if (igCheckbox("link", &link_scroll)) {
-                        scroll_difference = last_scroll_y[scroll_control] - last_scroll_y[(scroll_control + 1) & 1];
+                    if (igCheckbox("link scroll", &link_scroll)) {
+                        scroll_difference = scroll[1] - scroll[0];
                     }
                     igCheckbox("abs diff", &diff);
                     igEndGroup();
@@ -2152,14 +2151,12 @@ void frame(void)
                     ImVec2 uv_max = V2(1.0f, 1.0f);
                     ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
                     ImVec4 border_col = (ImVec4) {0};
-                    f32 plot_window_height = 0.0f;
+                    static f32 plot_window_height = 0.0f;
 
                     if (cmod_changed || mini_changed) {
-                        last_scroll_y[0] = (last_scroll_y[0] + 225.0f) * (y_scale / old_y_scale) - 225.0f;
-                        igSetNextWindowScroll(V2(0, last_scroll_y[0]));
-                        scroll_control = 0;
+                        scroll[0] = (scroll[0] + (plot_window_height*0.5f)) * (y_scale / old_y_scale) - (plot_window_height*0.5f);
+                        scroll[1] = (scroll[1] + (plot_window_height*0.5f)) * (y_scale / old_y_scale) - (plot_window_height*0.5f);
                         scroll_difference *= y_scale / old_y_scale;
-                        scroll_changed_last_frame = true;
                     }
 
                     f64 linked_ymin = 0.0;
@@ -2176,14 +2173,7 @@ void frame(void)
                                 NoteInfo const *rows = note_data_rows(sfi->notes);
                                 f32 last_row_time = rows[n_rows - 1].rowTime / sfi->target.rate;
                                 igPushID_Int(preview_index);
-                                if (link_scroll) {
-                                    if (last_scroll_y[preview_index] == -1.0f) {
-                                        igSetNextWindowScroll(V2(0, last_scroll_y[0]));
-                                    } else if (scroll_changed_last_frame && preview_index != scroll_control) {
-                                        igSetNextWindowScroll(V2(0, last_scroll_y[scroll_control] + scroll_difference));
-                                        scroll_changed_last_frame = false;
-                                    }
-                                }
+                                igSetNextWindowScroll(V2(0, scroll[preview_index]));
                                 igSetNextWindowSize(V2(-1.0f, last_row_time * y_scale), ImGuiCond_Always);
                                 if (igBeginChild_Str("##same id to keep the scroll", V2(450.0f, 0), true, ImGuiWindowFlags_MenuBar)) {
                                     igBeginMenuBar();
@@ -2195,18 +2185,25 @@ void frame(void)
                                     sfi_set_snaps_from_bpms(sfi);
 
                                     f32 scroll_y = igGetScrollY();
-                                    if (link_scroll) {
-                                        ImGuiWindow *window = igGetCurrentWindow();
-                                        ImGuiID active_id = igGetActiveID();
-                                        if ((igIsWindowHovered(0) && io->MouseWheel) || (active_id == igGetWindowScrollbarID(window, ImGuiAxis_Y))) {
-                                            if (scroll_control != preview_index) {
-                                                scroll_difference = -scroll_difference;
-                                            }
-                                            scroll_control = preview_index;
-                                            scroll_changed_last_frame = true;
+                                    ImGuiWindow *window = igGetCurrentWindow();
+                                    ImGuiID active_id = igGetActiveID();
+                                    if (igIsWindowHovered(0) && io->MouseWheel) {
+                                        scroll[preview_index] -= io->MouseWheel*5.0f*ImGuiWindow_CalcFontSize(window);
+                                        if (link_scroll) {
+                                            scroll[(preview_index + 1) & 1] -= io->MouseWheel*5.0f*ImGuiWindow_CalcFontSize(window);
                                         }
                                     }
-                                    last_scroll_y[preview_index] = scroll_y;
+                                    if (active_id == igGetWindowScrollbarID(window, ImGuiAxis_Y)) {
+                                        scroll[preview_index] = scroll_y;
+                                        if (link_scroll) {
+                                            if (preview_index == 0) {
+                                                scroll[1] = scroll[0] + scroll_difference;
+                                            } else {
+                                                scroll[0] = scroll[1] - scroll_difference;
+                                            }
+                                        }
+                                    }
+                                    ig_scroll[preview_index] = scroll_y;
 
                                     f32 x = 64.0f;
                                     f32 scroll_y_time_lo = (scroll_y / y_scale);
@@ -2330,10 +2327,10 @@ void frame(void)
                         if ((state.previews[0]->debug_generation == state.generation) && (state.previews[1]->debug_generation == state.generation)) {
                             static DebugInfo diff_data = {0};
                             static struct { SimFileInfo *a, *b; f32 scroll_difference; i32 generation; } current = {0};
-                            f32 ba_scroll_difference = last_scroll_y[0] - last_scroll_y[1];
-                            isize scroll_intervals = (isize)(ba_scroll_difference / y_scale);
+                            f32 ba_scroll_difference = ig_scroll[0] - ig_scroll[1];
+                            isize scroll_intervals = (isize)(2 * ba_scroll_difference / y_scale);
                             b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ba_scroll_difference || current.generation != state.generation;
-                            if (invalidated || (!link_scroll && scroll_changed_last_frame)) {
+                            if (invalidated || (!link_scroll && (ba_scroll_difference != current.scroll_difference))) {
                                 DebugInfo *da = &state.previews[0]->debug_info;
                                 DebugInfo *db = &state.previews[1]->debug_info;
                                 isize n_intervals = maxs(da->n_intervals, db->n_intervals);
@@ -2366,7 +2363,7 @@ void frame(void)
                             // manually positioned like an animal
                             igSetCursorPos(V2(255.0f, 55.0f));
                             plot_window_height -= 16.0f;
-                            f64 scroll_y_time_lo = (f64)(last_scroll_y[1] / y_scale);
+                            f64 scroll_y_time_lo = (f64)(ig_scroll[1] / y_scale);
                             f64 scroll_y_time_hi = scroll_y_time_lo + (f64)(plot_window_height / y_scale);
                             isize interval_offset = (isize)(scroll_y_time_lo * 2);
                             isize n_intervals = clamp_highs((isize)((scroll_y_time_hi - scroll_y_time_lo + 1.0) * 2.0) , diff_data.n_intervals - interval_offset);
@@ -2374,6 +2371,7 @@ void frame(void)
                             f64 x_max =  2 * (f64)x_scale;
                             ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
                             ImPlot_SetNextPlotLimitsX(x_min, x_max, ImGuiCond_Always);
+                            ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
                             ImPlot_PushColormap_PlotColormap(3);
                             ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
                             ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
