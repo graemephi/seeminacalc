@@ -222,10 +222,13 @@ Stack *permanent_memory = &permanent_memory_stack;
 
 void setup_allocators(void)
 {
-    isize bignumber = 100*1024*1024;
-    scratch_stack = stack_make(malloc(bignumber), bignumber);
-    permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
-    current_allocator = permanent_memory;
+    if (scratch_stack.buf == 0) {
+        assert(permanent_memory_stack.buf == 0);
+        isize bignumber = 100*1024*1024;
+        scratch_stack = stack_make(malloc(bignumber), bignumber);
+        permanent_memory_stack = stack_make(malloc(bignumber), bignumber);
+        current_allocator = permanent_memory;
+    }
 }
 
 void reset_scratch(void)

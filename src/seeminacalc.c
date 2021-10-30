@@ -1303,8 +1303,6 @@ void gen_mips(u32 *mips[], u32 *pixels, isize dim)
 
 void init(void)
 {
-    setup_allocators();
-
     push_allocator(scratch);
     Buffer font = read_file("web/NotoSansCJKjp-Regular.otf");
     pop_allocator();
@@ -2107,6 +2105,7 @@ void frame(void)
 
                     igSameLine(0,-1);
                     igBeginGroup();
+                    f32 scroll_max[2] = {0.0f, 0.0f};
                     static f32 scroll[2] = {0.0f, 0.0f};
                     static f32 ig_scroll[2] = {0.0f, 0.0f};
                     static f32 scroll_difference = 0.0f;
@@ -2172,9 +2171,11 @@ void frame(void)
                                 isize n_rows = sfi->n_rows;
                                 NoteInfo const *rows = note_data_rows(sfi->notes);
                                 f32 last_row_time = rows[n_rows - 1].rowTime / sfi->target.rate;
+                                f32 last_row_time_scroll = last_row_time * y_scale;
+                                scroll_max[preview_index] = last_row_time_scroll;
                                 igPushID_Int(preview_index);
-                                igSetNextWindowScroll(V2(0, scroll[preview_index]));
-                                igSetNextWindowSize(V2(-1.0f, last_row_time * y_scale), ImGuiCond_Always);
+                                igSetNextWindowScroll(V2(0, clamp(0, last_row_time_scroll, scroll[preview_index])));
+                                igSetNextWindowSize(V2(-1.0f, last_row_time_scroll), ImGuiCond_Always);
                                 if (igBeginChild_Str("##same id to keep the scroll", V2(450.0f, 0), true, ImGuiWindowFlags_MenuBar)) {
                                     igBeginMenuBar();
                                     igText(sfi->display_id.buf);
@@ -2395,6 +2396,16 @@ void frame(void)
                             }
                             ImPlot_PopStyleColor(3);
                             ImPlot_PopColormap(1);
+                        }
+                    }
+
+                    if (link_scroll) {
+                        if (scroll_difference > 0) {
+                            scroll[0] = clamp(-scroll_difference, scroll_max[0], scroll[0]);
+                            scroll[1] = clamp(0, scroll_max[1] + scroll_difference, scroll[1]);
+                        } else {
+                            scroll[0] = clamp(0, scroll_max[0] - scroll_difference, scroll[0]);
+                            scroll[1] = clamp(scroll_difference, scroll_max[1], scroll[1]);
                         }
                     }
 
@@ -2741,6 +2752,8 @@ void input(const sapp_event* event)
 
 sapp_desc sokol_main(int argc, char **argv)
 {
+    setup_allocators();
+
     sargs_setup(&(sargs_desc){
         .argc = argc,
         .argv = argv
