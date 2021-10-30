@@ -2258,8 +2258,8 @@ void frame(void)
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
                                     // todo: literally anything else. we sync the diff to the file at preview_index 0, so we need
                                     // to keep their linked limits around
-                                    f64 sorryx, sorryy;
-                                    f64 *ymin, *ymax;
+                                    f64 sorryx = 0.0, sorryy = 0.0;
+                                    f64 *ymin = 0, *ymax = 0;
                                     if (preview_index == 0) {
                                         ymin = &plots_ymin;
                                         ymax = &plots_ymax;
@@ -2346,7 +2346,7 @@ void frame(void)
                     if (diff && state.previews[1] != 0) {
                         if ((state.previews[0]->debug_generation == state.generation) && (state.previews[1]->debug_generation == state.generation)) {
                             static DebugInfo diff_data = {0};
-                            static struct { SimFileInfo *a, *b; float scroll_difference; i32 generation; } current = {0};
+                            static struct { SimFileInfo *a, *b; f32 scroll_difference; i32 generation; } current = {0};
                             f32 ab_scroll_difference = last_scroll_y[1] - last_scroll_y[0];
                             isize scroll_intervals = (isize)(ab_scroll_difference / y_scale);
                             b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ab_scroll_difference || current.generation != state.generation;
@@ -2383,19 +2383,8 @@ void frame(void)
                             f64 scroll_y_time_hi = scroll_y_time_lo + (f64)(plot_window_height / y_scale);
                             isize interval_offset = (isize)(scroll_y_time_lo * 2);
                             isize n_intervals = clamp_highs((isize)((scroll_y_time_hi - scroll_y_time_lo + 1.0) * 2.0) , diff_data.n_intervals - interval_offset);
-                            // we compute this every frame because we want to fit to whatever is visible
-                            f32 largest_difference = 1.0;
-                            for (isize i = 0; i < state.info.num_mods; i++) {
-                                i32 mi = debuginfo_mod_index(i);
-                                if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
-                                    for (isize i = interval_offset; i < n_intervals; i++) {
-                                        largest_difference = max(largest_difference, absolute_value(diff_data.interval_hand[0].pmod[mi][i]));
-                                        largest_difference = max(largest_difference, absolute_value(diff_data.interval_hand[1].pmod[mi][i]));
-                                    }
-                                }
-                            }
-                            f64 x_min = (f64)-largest_difference;
-                            f64 x_max = (f64)largest_difference;
+                            f64 x_min = -2 * (f64)x_scale;
+                            f64 x_max =  2 * (f64)x_scale;
                             ImPlot_LinkNextPlotLimits(0, 0, &plots_ymin, &plots_ymax, 0, 0, 0, 0);
                             ImPlot_SetNextPlotLimitsX(x_min, x_max, ImGuiCond_Always);
                             ImPlot_PushColormap_PlotColormap(3);
