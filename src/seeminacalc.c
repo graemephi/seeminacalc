@@ -2172,7 +2172,8 @@ void frame(void)
                         scroll_changed_last_frame = true;
                     }
 
-                    f64 plots_ymin, plots_ymax;
+                    f64 linked_ymin = 0.0;
+                    f64 linked_ymax = 0.0;
 
                     for (i32 preview_index = 0; preview_index < 2; preview_index++) {
                         SimFileInfo *sfi = state.previews[preview_index];
@@ -2208,6 +2209,9 @@ void frame(void)
                                         ImGuiWindow *window = igGetCurrentWindow();
                                         ImGuiID active_id = igGetActiveID();
                                         if ((igIsWindowHovered(0) && io->MouseWheel) || (active_id == igGetWindowScrollbarID(window, ImGuiAxis_Y))) {
+                                            if (scroll_control != preview_index) {
+                                                scroll_difference = -scroll_difference;
+                                            }
                                             scroll_control = preview_index;
                                             scroll_changed_last_frame = true;
                                         }
@@ -2256,18 +2260,7 @@ void frame(void)
                                     ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
                                     ImPlot_SetNextPlotLimitsX(-2.18 / (f64)x_scale, 2.0 / (f64)x_scale, ImGuiCond_Always);
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
-                                    // todo: literally anything else. we sync the diff to the file at preview_index 0, so we need
-                                    // to keep their linked limits around
-                                    f64 sorryx = 0.0, sorryy = 0.0;
-                                    f64 *ymin = 0, *ymax = 0;
-                                    if (preview_index == 0) {
-                                        ymin = &plots_ymin;
-                                        ymax = &plots_ymax;
-                                    } else {
-                                        ymin = &sorryx;
-                                        ymax = &sorryy;
-                                    }
-                                    ImPlot_LinkNextPlotLimits(0, 0, ymin, ymax, 0, 0, 0, 0);
+                                    ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
                                     ImPlot_SetNextPlotFormatY("%06.2f", 0);
                                     if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
                                       (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
@@ -2299,7 +2292,7 @@ void frame(void)
 
                                     igSetCursorPos(V2(0, scroll_y));
                                     ImPlot_PushColormap_PlotColormap(2);
-                                    ImPlot_LinkNextPlotLimits(0, 0, ymin, ymax, 0, 0, 0, 0);
+                                    ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
                                     ImPlot_SetNextPlotLimitsX(-75.0 / (f64)x_nps_scale, 50.0 / (f64)x_nps_scale, ImGuiCond_Always);
                                     ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
                                     if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
@@ -2347,9 +2340,9 @@ void frame(void)
                         if ((state.previews[0]->debug_generation == state.generation) && (state.previews[1]->debug_generation == state.generation)) {
                             static DebugInfo diff_data = {0};
                             static struct { SimFileInfo *a, *b; f32 scroll_difference; i32 generation; } current = {0};
-                            f32 ab_scroll_difference = last_scroll_y[1] - last_scroll_y[0];
-                            isize scroll_intervals = (isize)(ab_scroll_difference / y_scale);
-                            b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ab_scroll_difference || current.generation != state.generation;
+                            f32 ba_scroll_difference = last_scroll_y[0] - last_scroll_y[1];
+                            isize scroll_intervals = (isize)(ba_scroll_difference / y_scale);
+                            b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ba_scroll_difference || current.generation != state.generation;
                             if (invalidated || (!link_scroll && scroll_changed_last_frame)) {
                                 DebugInfo *da = &state.previews[0]->debug_info;
                                 DebugInfo *db = &state.previews[1]->debug_info;
@@ -2361,47 +2354,51 @@ void frame(void)
                                     buf_pushn(diff_data.interval_hand[1].pmod[i], maxs(2*60*20, n_intervals));
 
                                     for (isize j = 0; j < n_intervals; j++) {
-                                        f32 al = (j < da->n_intervals) ? da->interval_hand[0].pmod[i][j] : 0.0f;
-                                        f32 ar = (j < da->n_intervals) ? da->interval_hand[1].pmod[i][j] : 0.0f;
-                                        isize clamped = clamps(0, db->n_intervals - 1, j + scroll_intervals);
-                                        f32 bl = db->interval_hand[0].pmod[i][clamped];
-                                        f32 br = db->interval_hand[1].pmod[i][clamped];
-                                        diff_data.interval_hand[0].pmod[i][j] = -absolute_value(al - bl);
-                                        diff_data.interval_hand[1].pmod[i][j] = absolute_value(ar - br);
+                                        f32 bl = (j < db->n_intervals) ? db->interval_hand[0].pmod[i][j] : 0.0f;
+                                        f32 br = (j < db->n_intervals) ? db->interval_hand[1].pmod[i][j] : 0.0f;
+                                        isize clamped = clamps(0, da->n_intervals - 1, j + scroll_intervals);
+                                        f32 al = da->interval_hand[0].pmod[i][clamped];
+                                        f32 ar = da->interval_hand[1].pmod[i][clamped];
+                                        diff_data.interval_hand[0].pmod[i][j] = -absolute_value(bl - al);
+                                        diff_data.interval_hand[1].pmod[i][j] = absolute_value(br - ar);
                                     }
+                                }
+                                buf_reserve(diff_data.interval_times, 2*60*20);
+                                for (isize i = buf_len(diff_data.interval_times); i < n_intervals; i++) {
+                                    buf_push(diff_data.interval_times, (f32)i * 0.5f);
                                 }
                                 diff_data.n_intervals = n_intervals;
                                 current.a = state.previews[0];
                                 current.b = state.previews[1];
-                                current.scroll_difference = ab_scroll_difference;
+                                current.scroll_difference = ba_scroll_difference;
                                 current.generation = state.generation;
                             }
                             // manually positioned like an animal
                             igSetCursorPos(V2(255.0f, 55.0f));
                             plot_window_height -= 16.0f;
-                            f64 scroll_y_time_lo = (f64)(last_scroll_y[0] / y_scale);
+                            f64 scroll_y_time_lo = (f64)(last_scroll_y[1] / y_scale);
                             f64 scroll_y_time_hi = scroll_y_time_lo + (f64)(plot_window_height / y_scale);
                             isize interval_offset = (isize)(scroll_y_time_lo * 2);
                             isize n_intervals = clamp_highs((isize)((scroll_y_time_hi - scroll_y_time_lo + 1.0) * 2.0) , diff_data.n_intervals - interval_offset);
                             f64 x_min = -2 * (f64)x_scale;
                             f64 x_max =  2 * (f64)x_scale;
-                            ImPlot_LinkNextPlotLimits(0, 0, &plots_ymin, &plots_ymax, 0, 0, 0, 0);
+                            ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
                             ImPlot_SetNextPlotLimitsX(x_min, x_max, ImGuiCond_Always);
                             ImPlot_PushColormap_PlotColormap(3);
                             ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
                             ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
                             ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                            if (ImPlot_BeginPlot("##diff", "p", "t", V2(0, plot_window_height -1.0f),
+                            if (ImPlot_BeginPlot("##diff", "p", "t", V2(0, plot_window_height),
                               ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly,
-                              ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
+                              ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
                               ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
                                 for (isize i = 0; i < state.info.num_mods; i++) {
                                     i32 mi = debuginfo_mod_index(i);
                                     if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
                                         igPushID_Int(mi);
-                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##left", diff_data.interval_hand[0].pmod[mi] + interval_offset, current.a->debug_info.interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##left", diff_data.interval_hand[0].pmod[mi] + interval_offset, diff_data.interval_times + interval_offset, n_intervals, 0, sizeof(float));
                                         ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##right", diff_data.interval_hand[1].pmod[mi] + interval_offset, current.a->debug_info.interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##right", diff_data.interval_hand[1].pmod[mi] + interval_offset, diff_data.interval_times + interval_offset, n_intervals, 0, sizeof(float));
                                         igPopID();
                                     }
                                 }
