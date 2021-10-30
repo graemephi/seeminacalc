@@ -381,7 +381,7 @@ OptimizationCheckpoint make_checkpoint(u8 *name)
 void save_checkpoints_to_disk(void)
 {
     u8 *str = 0;
-    buf_printf(str, "#calc version: %d\n\n", state.info.version);
+    buf_printf(str, "checkpoints v1. calc version: %d\n\n", state.info.version);
     for (isize i = 0; i < buf_len(state.checkpoints); i++) {
         buf_printf(str, "#name: %s;\n#params: ", state.checkpoints[i].name);
         for (usize p = 0; p < state.ps.num_params; p++) {
@@ -426,7 +426,7 @@ static SmTagValue parse_checkpoint_tag(SmParser *ctx)
 
 static i32 parse_checkpoint_version(SmParser *ctx)
 {
-    if (try_consume_string(ctx, S("#calc version:"))) {
+    if (try_consume_string(ctx, S("checkpoints v1. calc version:"))) {
         return (i32)parse_f32(ctx);
     }
     return 0;
@@ -485,6 +485,8 @@ void load_checkpoints_from_disk(void)
             }
             buf_push(state.checkpoints, cp);
         }
+    } else {
+        printf("checkpoints: No checkpoints to load\n");
     }
 }
 
@@ -1817,14 +1819,10 @@ void frame(void)
                     "Alternatively for the native binary only:\n"
                     "Place the .exe next to a cache.db and CalcTestList.xml, or run on the command line like:\n\n"
                     "    seeminacalc db=/etterna/Cache/cache.db list=/path/to/CalcTestList.xml\n\n"
-                    "For any given file, most parameters (on the left) will do nothing. So, by default, parameters that have no effect on the rating of the most recently selected file are filtered out.\n\n"
-                    "You can set the ratings you want files to have for particular skillsets and the optimizer will fiddle with numerical values in the calc and try to make it happen.\n\n"
-                    "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun");
-
-#ifdef NO_SSE
-                igTextColored((ImVec4) { 1, 0, 0, 1.0f}, "No SSE available");
-                igTextWrapped("If you are on an x64 machine, turn on SIMD support in about:flags if you want the calc to be the same as in game (this is a numerical precision thing, not a speed thing)");
-#endif
+                    "You can set the ratings you want files to have for particular skillsets and the optimizer will fiddle with numerical values in the calc and try to make it happen. "
+                    "I left it in here so people could mess around with it if they want. If you do find a good set, checkpoint it and it will save to persistent storage, you don't have to worry about losing it.\n\n"
+                    "There isn't any way to get values out of it--talk to me if you want to do that.\n\n"
+                    "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n");
                 igEndTabItem();
             }
 
@@ -1968,71 +1966,63 @@ void frame(void)
                 igEndTabItem();
             }
 
-            if (igBeginTabItem("Search", 0,0)) {
-                if (db_ready()) {
-                    static char q[512] = "";
-                    static bool have_query = false;
-                    bool have_new_query = false;
-                    if (igInputText("##Search", q, 512, 0,0,0)) {
-                        have_query = (q[0] != 0);
-                        if (have_query) {
-                            state.search.id = db_search((String) { q, strlen(q) });
-                            have_new_query = true;
-                        }
-                    }
+            if (db_ready() && igBeginTabItem("Search", 0,0)) {
+                static char q[512] = "";
+                static bool have_query = false;
+                bool have_new_query = false;
+                if (igInputText("##Search", q, 512, 0,0,0)) {
+                    have_query = (q[0] != 0);
                     if (have_query) {
-                        igSameLine(0, 4);
-                        igText("%lld matches", buf_len(state.search.results));
+                        state.search.id = db_search((String) { q, strlen(q) });
+                        have_new_query = true;
                     }
-                    if (igBeginTable("Search Results", 7, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
-                        igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 65.0f, 0);
-                        igTableSetupColumn("Author", 0, 2, 0);
-                        igTableSetupColumn("Title", 0, 5, 0);
-                        igTableSetupColumn("Subtitle", 0, 3, 0);
-                        igTableSetupColumn("Artist", 0, 2, 0);
-                        igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
-                        igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 75.0f, 0);
-                        igTableHeadersRow();
-                        ImGuiListClipper clip = {0};
-                        ImGuiListClipper_Begin(&clip, buf_len(state.search.results), 0.0f);
-                        while (ImGuiListClipper_Step(&clip)) {
-                            for (isize i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
-                                DBFile *f = &state.search.results[i];
-                                dbfile_set_skillset_and_rating_from_all_msds(f);
-                                igTableNextRow(0, 0);
-                                igTableSetColumnIndex(0);
-                                TextString(SmDifficultyStrings[f->difficulty]);
-                                igTableSetColumnIndex(1);
-                                TextString(f->author);
-                                igTableSetColumnIndex(2);
-                                if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
-                                    load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
-                                }
-                                igTableSetColumnIndex(3);
-                                TextString(f->subtitle);
-                                igTableSetColumnIndex(4);
-                                TextString(f->artist);
-                                igTableSetColumnIndex(5);
-                                igTextColored(msd_color(f->rating), "%02.2f", (f64)f->rating);
-                                igTableSetColumnIndex(6);
-                                igText("%s", SkillsetNames[f->skillset]);
+                }
+                if (have_query) {
+                    igSameLine(0, 4);
+                    igText("%lld matches", buf_len(state.search.results));
+                }
+                if (igBeginTable("Search Results", 7, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
+                    igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 65.0f, 0);
+                    igTableSetupColumn("Author", 0, 2, 0);
+                    igTableSetupColumn("Title", 0, 5, 0);
+                    igTableSetupColumn("Subtitle", 0, 3, 0);
+                    igTableSetupColumn("Artist", 0, 2, 0);
+                    igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+                    igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 75.0f, 0);
+                    igTableHeadersRow();
+                    ImGuiListClipper clip = {0};
+                    ImGuiListClipper_Begin(&clip, buf_len(state.search.results), 0.0f);
+                    while (ImGuiListClipper_Step(&clip)) {
+                        for (isize i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
+                            DBFile *f = &state.search.results[i];
+                            dbfile_set_skillset_and_rating_from_all_msds(f);
+                            igTableNextRow(0, 0);
+                            igTableSetColumnIndex(0);
+                            TextString(SmDifficultyStrings[f->difficulty]);
+                            igTableSetColumnIndex(1);
+                            TextString(f->author);
+                            igTableSetColumnIndex(2);
+                            if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
+                                load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
                             }
+                            igTableSetColumnIndex(3);
+                            TextString(f->subtitle);
+                            igTableSetColumnIndex(4);
+                            TextString(f->artist);
+                            igTableSetColumnIndex(5);
+                            igTextColored(msd_color(f->rating), "%02.2f", (f64)f->rating);
+                            igTableSetColumnIndex(6);
+                            igText("%s", SkillsetNames[f->skillset]);
                         }
+                    }
 
-                        igEndTable();
-                    }
-                    if (have_new_query) {
-                        // Delaying clearing the old search's results one frame looks a bit nicer
-                        buf_clear(state.search.results);
-                    }
-                } else {
-                    igTextWrapped("No cache.db :(");
+                    igEndTable();
+                }
+                if (have_new_query) {
+                    // Delaying clearing the old search's results one frame looks a bit nicer
+                    buf_clear(state.search.results);
                 }
                 igEndTabItem();
-            }
-
-            if (buf_len(state.files) == 0) {
-                goto no_files;
             }
 
             if (igBeginTabItem("Graphs", 0,0)) {
@@ -2489,7 +2479,6 @@ void frame(void)
                 igEndChild();
                 igEndTabItem();
             }
-no_files:
             igEndTabBar();
         }
     }

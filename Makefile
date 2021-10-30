@@ -1,5 +1,5 @@
 EMCCFlags :=
-EMCCFlags += -fstrict-aliasing
+EMCCFlags += -fno-strict-aliasing
 EMCCFlags += -fno-exceptions
 EMCCFlags += -fno-rtti
 EMCCFlags += -flto
@@ -27,7 +27,7 @@ EMCCFlagsBinary += -s ERROR_ON_UNDEFINED_SYMBOLS=1
 EMCCFlagsBinary += -s ALLOW_MEMORY_GROWTH=1
 EMCCFlagsBinary += -s USE_WEBGL2=1
 EMCCFlagsBinary += -s "MALLOC='emmalloc'"
-EMCCFlagsBinary += -s NO_FILESYSTEM=1
+EMCCFlagsBinary += -s -lidbfs.js
 EMCCFlagsBinary += -s WASM=1
 EMCCFlagsBinary += -s ASSERTIONS=1
 EMCCFlagsBinary += -s ENVIRONMENT=web,worker

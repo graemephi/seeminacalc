@@ -68,7 +68,16 @@
                 print: (...args) => console.log(...args),
                 printErr: (...args) => console.error(...args),
                 canvas: document.getElementById("canvas"),
-                setStatus: (...args) => console.log("status:", ...args)
+                setStatus: (...args) => console.log("status:", ...args),
+                noInitialRun: true,
+                onRuntimeInitialized: () => {
+                    FS.mkdir("/seeminacalc");
+                    FS.mount(IDBFS, {}, "/seeminacalc");
+                    FS.syncfs(true, (err) => {
+                        if (err) console.error(err);
+                        Module.ccall("main", "v");
+                    });
+                }
             };
         </script>
     </body>

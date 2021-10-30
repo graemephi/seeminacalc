@@ -559,8 +559,7 @@ f32 rngf(void)
     return (f32)a / (f32)(1 << 23);
 }
 
-#if !defined(__EMSCRIPTEN__)
-Buffer read_file(const char *path)
+Buffer read_file_really(const char *path)
 {
     Buffer result = {0};
     FILE *f = fopen(path, "rb");
@@ -600,6 +599,23 @@ bail:
     result = (Buffer) {0};
     return result;
 }
+
+void write_file_really(const char *path, u8 buf[])
+{
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        int written = fwrite(buf, 1, buf_len(buf), f);
+        assert(written == buf_len(buf));
+        fclose(f);
+    } else {
+        printf("Couldn't open %s for writing\n", path);
+    }
+}
+
+
+#if !defined(__EMSCRIPTEN__)
+Buffer read_file(const char *path) { return read_file_really(path); }
+void write_file(const char *path, u8 buf[]) { write_file_really(path, buf); }
 
 Buffer read_file_malloc(const char *path)
 {
@@ -645,19 +661,27 @@ bail:
     return result;
 }
 
-void write_file(const char *path, u8 buf[])
-{
-    FILE *f = fopen(path, "wb");
-    if (f) {
-        fwrite(buf, 1, buf_len(buf), f);
-        fclose(f);
-    }
-}
-
 #else // ^^^^ !defined(__EMSCRIPTEN__)
-Buffer read_file(const char *path) { return (Buffer) {}; }
+Buffer read_file(const char *path) {
+    push_allocator(scratch);
+    const char *p = 0;
+    buf_printf(p, "/seeminacalc/%s", path);
+    pop_allocator();
+    return read_file_really(p);
+}
+void write_file(const char *path, u8 buf[]) {
+    push_allocator(scratch);
+    const char *p = 0;
+    buf_printf(p, "/seeminacalc/%s", path);
+    pop_allocator();
+    write_file_really(p, buf);
+    EM_ASM(
+        FS.syncfs((err) => {
+            if (err) console.error(err);
+        });
+    );
+}
 Buffer read_file_malloc(const char *path) { return (Buffer) {}; }
-void write_file(const char *path, u8 buf[]) {}
 #endif
 
 b32 buffer_begins_with(Buffer *buffer, String s)
