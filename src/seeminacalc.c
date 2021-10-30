@@ -2758,7 +2758,11 @@ sapp_desc sokol_main(int argc, char **argv)
         .event_cb = input,
         .width = 1920,
         .height = 1080,
+#if defined(__EMSCRIPTEN__)
+        .sample_count = 1,
+#else
         .sample_count = 8,
+#endif
         .window_title = "SeeMinaCalc",
         .ios_keyboard_resizes_canvas = false,
         .enable_clipboard = true,
