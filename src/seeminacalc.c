@@ -131,6 +131,9 @@ typedef struct SimFileInfo
         f32 delta;
     } target;
 
+    i32 opt_generation;
+    b32 opt_participating;
+
     SkillsetRatings default_ratings;
     u32 skillsets_generation;
     u32 num_effects_computed;
@@ -317,12 +320,12 @@ typedef struct State
     OptimizationContext opt;
     OptimizationEvaluation *opt_evaluations;
     i32 opt_pending_evals;
+    i32 opt_pending_participating;
     b32 optimizing;
     b32 reset_optimizer_flag;
     FnGraph *optimization_graph;
     struct {
         b8 *enabled;
-        f32 barriers[NumSkillsets];
         f32 goals[NumSkillsets];
         f32 *normalization_factors;
         Bound *bounds;
@@ -793,6 +796,7 @@ SimFileInfo *parse_and_add_sm(Buffer buf)
             .snaps = snaps,
             .length_in_seconds = last_row_time - first_row_time,
             .selected_skillsets[0] = true,
+            .opt_participating = true
         });
 
         result = sfi;
@@ -923,6 +927,7 @@ b32 process_target_files(FileLoader *loader, DBResult results[])
                 .n_rows = file->n_rows,
                 .length_in_seconds = last_row_time - first_row_time,
                 .selected_skillsets[0] = true,
+                .opt_participating = true
             });
 
             buf_push(sfi->graphs, make_skillsets_graph());
@@ -1585,128 +1590,140 @@ void frame(void)
         }
         if (state.optimizing && state.reset_optimizer_flag) {
             state.generation++;
-        }
 
-        static u32 last_generation = 1;
-        if (last_generation != state.generation) {
-            // Some parameter has been messed with, or turned off
-            // This invalidates the optimizer state either way, so just recreate the whole thing
-            buf_clear(state.opt_evaluations);
-
-            f32 *x = 0;
-            push_allocator(scratch);
-            buf_pushn(x, state.ps.num_params);
-            pop_allocator();
-
-            i32 n_params = pack_opt_parameters(&state.info, state.ps.params, state.opt_cfg.normalization_factors, state.opt_cfg.enabled, x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
-
-            buf_clear(state.opt_cfg.map.to_file);
-            if (n_params > 0) {
-                f32 target_m = 0.0f;
-                f32 target_s = 0.0f;
-                for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                    if (sfi->target.weight > 0.0f) {
-                        f32 old_m = target_m;
-                        f32 old_s = target_s;
-                        target_m = old_m + (sfi->target.want_msd - old_m) / (f32)(buf_len(state.opt_cfg.map.to_file) + 1);
-                        target_s = old_s + (sfi->target.want_msd - old_m)*(sfi->target.want_msd - target_m);
-                        buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
-                    }
+            isize count = 0;
+            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                sfi->opt_participating = false;
+                if (sfi->target.weight > 0.0f) {
+                    calculate_file_opt_participation(&state.low_prio_work, sfi, state.generation);
+                    count++;
                 }
-                f32 target_var = target_s / (f32)(buf_len(state.files) - 1);
-                state.target.msd_mean = target_m;
-                state.target.msd_sd = sqrtf(target_var);
             }
 
-            optimize(&state.opt, n_params, x, (i32)buf_len(state.opt_cfg.map.to_file));
-
-            last_generation = state.generation;
-            if (state.opt_pending_evals > 0) {
-                state.opt.iter--;
-                state.opt_pending_evals = 0;
-            }
-
+            state.opt_pending_participating = count;
             state.reset_optimizer_flag = false;
         }
 
-        if (state.optimizing) {
+        static u32 last_generation = 1;
+        if (state.optimizing && state.opt_pending_participating == 0) {
+            if (last_generation != state.generation) {
+                // Some parameter has been messed with, or turned off
+                // This invalidates the optimizer state either way, so just recreate the whole thing
+                buf_clear(state.opt_evaluations);
+
+                f32 *x = 0;
+                push_allocator(scratch);
+                buf_pushn(x, state.ps.num_params);
+                pop_allocator();
+
+                i32 n_params = pack_opt_parameters(&state.info, state.ps.params, state.opt_cfg.normalization_factors, state.opt_cfg.enabled, x, state.opt_cfg.map.to_ps, state.opt_cfg.map.to_opt);
+
+                buf_clear(state.opt_cfg.map.to_file);
+                if (n_params > 0) {
+                    f32 target_m = 0.0f;
+                    f32 target_s = 0.0f;
+                    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                        if (sfi->opt_participating) {
+                            f32 old_m = target_m;
+                            f32 old_s = target_s;
+                            target_m = old_m + (sfi->target.want_msd - old_m) / (f32)(buf_len(state.opt_cfg.map.to_file) + 1);
+                            target_s = old_s + (sfi->target.want_msd - old_m)*(sfi->target.want_msd - target_m);
+                            buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
+                        }
+                    }
+                    f32 target_var = target_s / (f32)(buf_len(state.files) - 1);
+                    state.target.msd_mean = target_m;
+                    state.target.msd_sd = sqrtf(target_var);
+                }
+
+                optimize(&state.opt, n_params, x, (i32)buf_len(state.opt_cfg.map.to_file));
+
+                last_generation = state.generation;
+                if (state.opt_pending_evals > 0) {
+                    state.opt.iter--;
+                    state.opt_pending_evals = 0;
+                }
+            }
+
             if (state.opt.n_params == 0) {
                 optimizer_error_message = "No parameters are enabled for optimizing.";
                 state.optimizing = false;
             } else if (state.opt.n_samples == 0) {
                 optimizer_error_message = "No files to optimize.";
                 state.optimizing = false;
-            } else if (state.opt_pending_evals == 0) {
-                state.generation++;
-                last_generation = state.generation;
+            }
+        }
 
-                OptimizationRequest req = opt_pump(&state.opt, state.opt_evaluations);
-                assert(req.n_samples > 0);
-                buf_clear(state.opt_evaluations);
+        if (state.optimizing && state.opt_pending_evals == 0 && state.opt_pending_participating == 0) {
+            state.generation++;
+            last_generation = state.generation;
 
-                for (isize i = 0; i < state.opt.n_params; i++) {
-                    if (isnan(state.opt.x[i])) {
-                        state.optimizing = false;
-                        optimizer_error_message = "Cannot optimize due to NaNs. Reset to a good state.";
-                        break;
-                    }
+            OptimizationRequest req = opt_pump(&state.opt, state.opt_evaluations);
+            assert(req.n_samples > 0);
+            buf_clear(state.opt_evaluations);
+
+            for (isize i = 0; i < state.opt.n_params; i++) {
+                if (isnan(state.opt.x[i])) {
+                    state.optimizing = false;
+                    optimizer_error_message = "Cannot optimize due to NaNs. Reset to a good state.";
+                    break;
                 }
+            }
 
-                // Do this even if we have NaNs so that they propagate to the UI.
-                for (isize i = 0; i < state.opt.n_params; i++) {
-                    isize p = state.opt_cfg.map.to_ps[i];
-                    // Apply bounds. This is a hack so it lives out here and not in the optimizer :)
-                    // Since we have regularisation this is well behaved
-                    state.opt.x[i] = clamp(state.opt_cfg.bounds[p].low, state.opt_cfg.bounds[p].high, state.opt.x[i]);
-                    // Copy x into the calc parameters
-                    state.ps.params[p] = state.info.defaults.params[p] + (state.opt.x[i] * state.opt_cfg.normalization_factors[p]);
+            // Do this even if we have NaNs so that they propagate to the UI.
+            for (isize i = 0; i < state.opt.n_params; i++) {
+                isize p = state.opt_cfg.map.to_ps[i];
+                // Apply bounds. This is a hack so it lives out here and not in the optimizer :)
+                // Since we have regularisation this is well behaved
+                state.opt.x[i] = clamp(state.opt_cfg.bounds[p].low, state.opt_cfg.bounds[p].high, state.opt.x[i]);
+                // Copy x into the calc parameters
+                state.ps.params[p] = state.info.defaults.params[p] + (state.opt.x[i] * state.opt_cfg.normalization_factors[p]);
+            }
+
+            if (state.optimizing) {
+                if (!optimizer_error_message) {
+                    checkpoint_latest();
                 }
+                optimizer_error_message = 0;
 
-                if (state.optimizing) {
-                    if (!optimizer_error_message) {
-                        checkpoint_latest();
-                    }
-                    optimizer_error_message = 0;
+                for (isize i = 0; i < req.n_samples; i++) {
+                    i32 sample = state.opt.active.samples[i];
+                    assert((u32)sample < buf_len(state.opt_cfg.map.to_file));
+                    i32 file_index = state.opt_cfg.map.to_file[sample];
+                    assert((u32)file_index < buf_len(state.files));
+                    SimFileInfo *sfi = &state.files[file_index];
+                    assert(sfi->target.weight > 0.0f);
 
-                    for (isize i = 0; i < req.n_samples; i++) {
-                        i32 sample = state.opt.active.samples[i];
-                        assert((u32)sample < buf_len(state.opt_cfg.map.to_file));
-                        i32 file_index = state.opt_cfg.map.to_file[sample];
-                        assert((u32)file_index < buf_len(state.files));
-                        SimFileInfo *sfi = &state.files[file_index];
-                        assert(sfi->target.weight > 0.0f);
+                    i32 ss = sfi->target.skillset;
+                    f32 goal = state.opt_cfg.goals[ss];
+                    f32 msd = sfi->target.want_msd;
 
-                        i32 ss = sfi->target.skillset;
-                        f32 goal = state.opt_cfg.goals[ss];
-                        f32 msd = sfi->target.want_msd;
+                    calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
+                        .sample = sample,
+                        .goal = goal,
+                        .msd = msd
+                    }, state.generation);
 
+                    for (isize j = 0; j < req.n_parameters; j++) {
+                        i32 param = state.opt.active.parameters[j];
+                        i32 p = state.opt_cfg.map.to_ps[param];
                         calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
                             .sample = sample,
                             .goal = goal,
-                            .msd = msd
+                            .msd = msd,
+                            .param = p,
+                            .value = state.info.defaults.params[p] + (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
+                            .x = state.opt.x[param] + req.h,
                         }, state.generation);
-
-                        for (isize j = 0; j < req.n_parameters; j++) {
-                            i32 param = state.opt.active.parameters[j];
-                            i32 p = state.opt_cfg.map.to_ps[param];
-                            calculate_parameter_loss(&state.low_prio_work, sfi, (ParameterLossWork) {
-                                .sample = sample,
-                                .goal = goal,
-                                .msd = msd,
-                                .param = p,
-                                .value = state.info.defaults.params[p] + (state.opt.x[param] + req.h) * state.opt_cfg.normalization_factors[p],
-                                .x = state.opt.x[param] + req.h,
-                            }, state.generation);
-                        }
                     }
-
-                    state.opt_pending_evals = (req.n_parameters + 1) * req.n_samples;
-
-                    isize x = state.opt.iter % NumGraphSamples;
-                    state.optimization_graph->ys[0][x] = absolute_value(state.target.average_delta.E[0]);
-                    state.optimization_graph->ys[1][x] = state.target.max_delta;
-                    state.optimization_graph->ys[2][x] = state.opt.loss;
                 }
+
+                state.opt_pending_evals = (req.n_parameters + 1) * req.n_samples;
+
+                isize x = state.opt.iter % NumGraphSamples;
+                state.optimization_graph->ys[0][x] = absolute_value(state.target.average_delta.E[0]);
+                state.optimization_graph->ys[1][x] = state.target.max_delta;
+                state.optimization_graph->ys[2][x] = state.opt.loss;
             }
         }
     }
@@ -2521,45 +2538,49 @@ void frame(void)
         igSeparator();
 
         // Optimizing file list
-        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-            if (sfi->target.weight > 0) {
-                if (update_visible_skillsets) {
-                    calculate_skillsets(&state.high_prio_work, sfi, false, state.generation);
-                }
-                f32 wife93 = sfi->aa_rating.overall;
-                f32 wife965 = sfi->max_rating.overall;
-                if (sfi->target.want_msd) {
-                    igTextColored(msd_color(absolute_value(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
-                    tooltip("Optimizer: %02.2f %s, want %02.2f at %02.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
-                }
-                igTextColored(msd_color(wife93), "%02.2f", (f64)wife93);
-                tooltip("Overall at AA"); igSameLine(0, 7.0f);
-                igTextColored(msd_color(wife965), "%02.2f", (f64)wife965);
-                tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
-                igPushID_Str(sfi->id.buf);
-                if (sfi == active) {
-                    igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
-                }
-                if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
-                    if (sfi->open && sfi == active) {
-                        sfi->open = false;
-                    } else {
-                        sfi->open = true;
-                        next_active = sfi;
+        for (isize i = 0; i < 2; i++) {
+            igPushStyleVar_Float(ImGuiStyleVar_Alpha, (i == 0) ? 1.0f : 0.618f);
+            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                if (sfi->target.weight > 0 && (sfi->opt_participating ^ i)) {
+                    if (update_visible_skillsets) {
+                        calculate_skillsets(&state.high_prio_work, sfi, false, state.generation);
                     }
+                    f32 wife93 = sfi->aa_rating.overall;
+                    f32 wife965 = sfi->max_rating.overall;
+                    if (sfi->target.want_msd) {
+                        igTextColored(msd_color(absolute_value(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
+                        tooltip("Optimizer: %02.2f %s, want %02.2f at %02.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
+                    }
+                    igTextColored(msd_color(wife93), "%02.2f", (f64)wife93);
+                    tooltip("Overall at AA"); igSameLine(0, 7.0f);
+                    igTextColored(msd_color(wife965), "%02.2f", (f64)wife965);
+                    tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
+                    igPushID_Str(sfi->id.buf);
+                    if (sfi == active) {
+                        igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
+                    }
+                    if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+                        if (sfi->open && sfi == active) {
+                            sfi->open = false;
+                        } else {
+                            sfi->open = true;
+                            next_active = sfi;
+                        }
+                    }
+                    if (sfi == active) {
+                        igPopStyleColor(1);
+                    }
+                    if (sfi->stops) {
+                        igSameLine(igGetWindowWidth() - 30.f, 4);
+                        igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
+                        tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
+                                "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
+                    }
+                    igPopID();
+                    igSeparator();
                 }
-                if (sfi == active) {
-                    igPopStyleColor(1);
-                }
-                if (sfi->stops) {
-                    igSameLine(igGetWindowWidth() - 30.f, 4);
-                    igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
-                    tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
-                            "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
-                }
-                igPopID();
-                igSeparator();
             }
+            igPopStyleVar(1);
         }
     }
     igEnd();

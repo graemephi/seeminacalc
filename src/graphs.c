@@ -210,6 +210,7 @@ typedef enum {
     Work_Skillsets,
     Work_Target,
     Work_DebugGraphs,
+    Work_Participation,
 } WorkType;
 
 typedef struct DoneQueue DoneQueue;
@@ -306,6 +307,7 @@ typedef struct DoneWork
     union {
         SkillsetRatings ssr;
         DebugInfo debug_info;
+        b32 participating;
     };
 } DoneWork;
 
@@ -362,7 +364,7 @@ void calculate_file_graph_force(CalcWork *work[], SimFileInfo *sfi, u32 generati
 void calculate_file_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == false);
-    if (fng->pending_generation < generation) {
+    if (fng->pending_generation != generation) {
         fng->pending_generation = generation;
         for (isize i = 0; i < NumGraphSamples; i++) {
             buf_push(*work, (CalcWork) {
@@ -413,7 +415,7 @@ void calculate_parameter_graph_force(CalcWork *work[], SimFileInfo *sfi, FnGraph
 void calculate_parameter_graph(CalcWork *work[], SimFileInfo *sfi, FnGraph *fng, u32 generation)
 {
     assert(fng->is_param == true);
-    if (fng->pending_generation < generation) {
+    if (fng->pending_generation != generation) {
         fng->pending_generation = generation;
         calculate_parameter_graph_force(work, sfi, fng, generation);
     }
@@ -510,7 +512,7 @@ void calculate_graphs_in_background(CalcWork *work[], WorkType type, i32 param, 
 
 void calculate_skillsets(CalcWork *work[], SimFileInfo *sfi, b32 initialisation, u32 generation)
 {
-    if (sfi->skillsets_generation < generation) {
+    if (sfi->skillsets_generation != generation) {
         sfi->skillsets_generation = generation;
         buf_push(*work, (CalcWork) {
             .sfi = sfi,
@@ -559,11 +561,23 @@ void calculate_effects(CalcWork *work[], CalcInfo *info, SimFileInfo *sfi,  u32 
 
 void calculate_debug_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
 {
-    if (sfi->debug_generation < generation) {
+    if (sfi->debug_generation != generation) {
         sfi->debug_generation = generation;
         buf_push(*work, (CalcWork) {
             .sfi = sfi,
             .type = Work_DebugGraphs,
+            .generation = generation,
+        });
+    }
+}
+
+void calculate_file_opt_participation(CalcWork *work[], SimFileInfo *sfi, u32 generation)
+{
+    if (sfi->opt_generation != generation) {
+        sfi->opt_generation = generation;
+        buf_push(*work, (CalcWork) {
+            .sfi = sfi,
+            .type = Work_Participation,
             .generation = generation,
         });
     }
@@ -641,6 +655,18 @@ i32 calc_thread(void *userdata)
     ParamSet *ps = ct->ps;
     DoneQueue *done = ct->done;
 
+    ParamSet participation_test_ps = (ParamSet) {
+        .params = calloc(ps->num_params, sizeof(float)),
+        .min = calloc(ps->num_params, sizeof(float)),
+        .max = calloc(ps->num_params, sizeof(float)),
+        .num_params = ps->num_params
+    };
+    for (isize i = 0; i < ps->num_params; i++) {
+        participation_test_ps.params[i] = ps->params[i];
+        participation_test_ps.min[i] = ps->min[i];
+        participation_test_ps.max[i] = ps->max[i];
+    }
+
     while (true) {
         CalcWork work = {0};
         while (get_work(ct, &high_prio_work_queue, &work) || get_work(ct, &low_prio_work_queue, &work)) {
@@ -683,6 +709,41 @@ i32 calc_thread(void *userdata)
                     then = stm_now();
                     result.debug_info = calc_go_debuginfo(&calc, ps, work.sfi->notes, work.sfi->target.rate);
                     now = stm_now();
+                } break;
+                case Work_Participation: {
+                    memcpy(participation_test_ps.params, ps->params, participation_test_ps.num_params * sizeof(float));
+                    SkillsetRatings ssr_a = calc_go_with_param(&calc, &participation_test_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                    ssr_a = rating_floor_skillsets(ssr_a);
+
+                    for (isize i = 0; i < participation_test_ps.num_params; i++) {
+                        if (state.opt_cfg.enabled[i]) {
+                            // Lerp instead of going to fully max because setting many parameters fully max
+                            // can blow out the returned values into useless ranges, i.e. where we don't
+                            // want the optimizer to be searching anyway. Hard to say how much we can pull
+                            // back on this without introducing too much bias
+                            participation_test_ps.params[i] = lerp(participation_test_ps.params[i], participation_test_ps.max[i], 0.25f);
+                        }
+                    }
+                    SkillsetRatings ssr_b = calc_go_with_param(&calc, &participation_test_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                    ssr_b = rating_floor_skillsets(ssr_b);
+
+                    b32 participating = ssr_a.E[work.sfi->target.skillset] != ssr_b.E[work.sfi->target.skillset];
+
+                    if (participating == false) {
+                        // Again but min, just in case
+                        for (isize i = 0; i < participation_test_ps.num_params; i++) {
+                            if (state.opt_cfg.enabled[i]) {
+                                participation_test_ps.params[i] = participation_test_ps.min[i];
+                            }
+                        }
+                        SkillsetRatings ssr_c = calc_go_with_param(&calc, &participation_test_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                        ssr_c = rating_floor_skillsets(ssr_c);
+
+                        participating = ssr_a.overall - ssr_c.overall
+                                     || ssr_a.E[work.sfi->target.skillset] != ssr_c.E[work.sfi->target.skillset];
+                    }
+
+                    result.participating = participating;
                 } break;
                 default: assert_unreachable();
             }
@@ -827,6 +888,17 @@ void finish_work(void)
                     done.work.sfi->debug_info = done.debug_info;
                 } else {
                     debuginfo_free(&done.debug_info);
+                }
+                continue;
+            } break;
+            case Work_Participation: {
+                if (done.work.generation >= done.work.sfi->opt_generation) {
+                    assert(done.work.generation == done.work.sfi->opt_generation);
+                    done.work.sfi->opt_generation = done.work.generation;
+                    done.work.sfi->opt_participating = done.participating;
+
+                    assert(state.opt_pending_participating > 0);
+                    state.opt_pending_participating--;
                 }
                 continue;
             } break;
