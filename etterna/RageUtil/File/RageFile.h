@@ -3,7 +3,7 @@
 #ifndef RAGE_FILE_H
 #define RAGE_FILE_H
 
-struct RageFileBasic{};
+class RageFileBasic{};
 
 struct lua_State;
 

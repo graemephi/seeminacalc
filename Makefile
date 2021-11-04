@@ -39,8 +39,8 @@ EMCCFlagsBinary += -s PTHREAD_POOL_SIZE=navigator.hardwareConcurrency
 Includes = -Ilib -Ietterna
 
 emscripten: web/sqlite3.o
-	emcc $(EMCCFlags) $(EMCCFlagsBinary) -msse -msimd128 $(Includes) web/sqlite3.o src/seeminacalc.c src/cpp.cpp -o web/seeminacalc.js
-	emcc $(EMCCFlags) $(EMCCFlagsBinary) -DNO_SSE $(Includes) web/sqlite3.o src/seeminacalc.c src/cpp.cpp -o web/seeminacalc.nosse.js
+	emcc $(EMCCFlags) $(EMCCFlagsBinary) -msse -msimd128 $(Includes) web/sqlite3.o src/seeminacalc.c src/cminacalc.cpp src/cpp.cpp -o web/seeminacalc.js
+	emcc $(EMCCFlags) $(EMCCFlagsBinary) -DNO_SSE $(Includes) web/sqlite3.o src/seeminacalc.c src/cminacalc.cpp src/cpp.cpp -o web/seeminacalc.nosse.js
 
 web/sqlite3.o: lib/sqlite3.c
 	emcc $(EMCCFlags) $(EMCCFlagsSqlite) -c lib/sqlite3.c -o web/sqlite3.o

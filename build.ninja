@@ -6,18 +6,18 @@ cxx = clang
 builddir = build
 warnings = -Wall -Werror -Wno-unused-command-line-argument -Wdouble-promotion -Wimplicit-int-float-conversion -Wstrict-prototypes
 cflags = -Ietterna -Ilib -D_CRT_SECURE_NO_WARNINGS -fno-strict-aliasing -fvisibility=hidden -funsigned-char -fuse-ld=lld -g
-cppflags = $cflags -fno-rtti -fno-exceptions -std=c++17
+cppflags = $cflags -fno-rtti -fno-exceptions -std=c++17 -Wno-missing-braces
 sqliteflags = -DSQLITE_ENABLE_DESERIALIZE -DSQLITE_THREADSAFE=0 -DSQLITE_DEFAULT_MEMSTATUS=0 -DSQLITE_DEFAULT_WAL_SYNCHRONOUS=1 -DSQLITE_LIKE_DOESNT_MATCH_BLOBS -DSQLITE_MAX_EXPR_DEPTH=0 -DSQLITE_OMIT_DECLTYPE -DSQLITE_OMIT_DEPRECATED -DSQLITE_OMIT_PROGRESS_CALLBACK -DSQLITE_OMIT_SHARED_CACHE -DSQLITE_USE_ALLOCA -DSQLITE_DQS=0 -DSQLITE_MAX_EXPR_DEPTH=0
 
 rule obj
   deps = gcc
   depfile = $out.d
-  command = $cxx -MD -MF $out.d $cflags $warnings -o $out -c $in
+  command = $cxx -MD -MF $out.d $cflags -o $out -c $in
 
 rule bin
   deps = gcc
   depfile = $out.d
-  command = $cxx -MD -MF $out.d $cflags $warnings -o $out $in
+  command = $cxx -MD -MF $out.d $cflags -o $out $in
 
 #
 # Debug build. This compiles the calc with optimisations on as the assumption is
@@ -33,9 +33,14 @@ build $builddir/debug/cpp.o: obj src/cpp.cpp
   cflags = -DDEBUG -O2 $cppflags
   cxx = clang++
 
-build $builddir/debug/seeminacalc.exe: bin src/seeminacalc.c $builddir/debug/sqlite3.o $builddir/debug/cpp.o
+build $builddir/debug/cminacalc.o: obj src/cminacalc.cpp
+  description = $cxx cminacalc.cpp
+  cflags = -DDEBUG -O0 $cppflags
+  cxx = clang++
+
+build $builddir/debug/seeminacalc.exe: bin src/seeminacalc.c $builddir/debug/sqlite3.o $builddir/debug/cpp.o $builddir/debug/cminacalc.o
   description = $cxx seeminacalc.c
-  cflags = -DDEBUG $cflags
+  cflags = -DDEBUG $warnings $cflags
 
 #
 # Native release build.
@@ -49,7 +54,12 @@ build $builddir/release/cpp.o: obj src/cpp.cpp
   cflags = -O2 -flto $cppflags
   cxx = clang++
 
-build $builddir/release/seeminacalc.exe: bin src/seeminacalc.c $builddir/release/sqlite3.o $builddir/release/cpp.o
+build $builddir/release/cminacalc.o: obj src/cminacalc.cpp
+  description = $cxx cminacalc.cpp
+  cflags = -O2 -flto $cppflags
+  cxx = clang++
+
+build $builddir/release/seeminacalc.exe: bin src/seeminacalc.c $builddir/release/sqlite3.o $builddir/release/cpp.o $builddir/release/cminacalc.o
   description = $cxx seeminacalc.c
   cflags = -O2 $cflags
 

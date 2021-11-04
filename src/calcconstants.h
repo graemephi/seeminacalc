@@ -514,7 +514,7 @@ extern "C" struct {
     int line;
     float value;
     ConstantType type;
-} constant_info[1024] = {0};
+} constant_info[1024] = {};
 
 #if DUMP_CONSTANTS
 static void add_constant_info(int id,  char const *file, int line, float value, ConstantType type)

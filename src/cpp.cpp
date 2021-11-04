@@ -23,7 +23,6 @@
 #include "cimgui/cimgui.cpp"
 #include "cimgui/cimplot.cpp"
 
-#include "cminacalc.cpp"
 #include "thread.cpp"
 
 #ifdef _MSC_VER

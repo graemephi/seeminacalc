@@ -7,7 +7,7 @@ extern std::string sInitialWorkingDirectory;
 extern std::string sDirOfExecutable;
 }
 
-class RageFileDriver{};
+struct RageFileDriver{};
 class RageFileBasic;
 struct lua_State;
 

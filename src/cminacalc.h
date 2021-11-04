@@ -144,8 +144,6 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
 void debuginfo_free(DebugInfo *debug_info);
 size_t debuginfo_mod_index(size_t mod);
 
-void nddump(NoteData *nd, NoteData *nd2);
-
 #ifdef __cplusplus
 }
 #endif

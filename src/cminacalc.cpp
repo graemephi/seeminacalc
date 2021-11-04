@@ -6,6 +6,9 @@
 #include <string_view>
 #include <cstddef>
 
+#include "common.h"
+#include "cminacalc.h"
+
 using std::vector;
 
 #if defined(NO_SSE)
@@ -115,9 +118,6 @@ static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
     anchor_len_cap = (int)anchor_len_cap_float;
     jack_len_cap = (int)jack_len_cap_float;
 }
-
-#include "common.h"
-#include "cminacalc.h"
 
 static float absolute_value(float a)
 {
@@ -593,7 +593,7 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
             result.buffers->row_time[h][i] = calc->handle->jack_diff[h][i].first;
             result.buffers->jack_diff[h][i] = left_hand_negate * calc->handle->jack_diff[h][i].second;
             result.buffers->jack_stam[h][i] = left_hand_negate * ((i < calc->handle->jack_stam_stuff[h].size()) ? calc->handle->jack_stam_stuff[h][i] : 0.0f);
-            result.buffers->jack_loss[h][i] = left_hand_negate * ((i < calc->handle->jack_loss[h].size())       ? calc->handle->jack_loss[h][i] : 0.0);
+            result.buffers->jack_loss[h][i] = left_hand_negate * ((i < calc->handle->jack_loss[h].size())       ? calc->handle->jack_loss[h][i] : 0.0f);
         }
 
         result.jack_hand[h].row_time  = result.buffers->row_time[h].data();
@@ -624,19 +624,4 @@ size_t debuginfo_mod_index(size_t mod)
         return (size_t)CalcPatternMod_Invalid;
     }
     return (size_t)Mods[mod].id;
-}
-
-void nddump(NoteData *nd, NoteData *nd2)
-{
-    for (int i = 0; i < nd->ref.size(); i++) {
-        float f = nd->ref.at(i).rowTime - nd2->ref.at(i).rowTime;
-        if (fabs(f) > 1e-6) {
-            printf("f %d %.7f %.7f %.7f\n", i, f,  nd->ref.at(i).rowTime, nd2->ref.at(i).rowTime);
-        }
-        int d = nd->ref.at(i).notes - nd2->ref.at(i).notes;
-        if (d) {
-            printf("d %d %d\n", i, d);
-        }
-    }
-    exit(1);
 }
