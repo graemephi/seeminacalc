@@ -35,7 +35,7 @@ build $builddir/debug/cpp.o: obj src/cpp.cpp
 
 build $builddir/debug/cminacalc.o: obj src/cminacalc.cpp
   description = $cxx cminacalc.cpp
-  cflags = -DDEBUG -O0 $cppflags
+  cflags = -DDEBUG -O2 $cppflags
   cxx = clang++
 
 build $builddir/debug/seeminacalc.exe: bin src/seeminacalc.c $builddir/debug/sqlite3.o $builddir/debug/cpp.o $builddir/debug/cminacalc.o

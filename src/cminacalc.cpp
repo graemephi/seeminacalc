@@ -44,6 +44,9 @@ T clamp(T t, T a, T b)
 //   - pointer to flat params array added to MinaCalc and distributed to ulbu by calling stupud_hack
 //   - float literals are marked up with macros to make them accessible at runtime
 //      - these are updated by writing into the same flat params array before calling the calc
+//      - the calc needed to call stupud_hack because it used to re-init ulbu, and we change ulbu
+//        params, but this doesn't happen anymore, so this could be redone
+//   - axe taken to initadjdiff and guts sprewn about MinaCalc members
 #include "Etterna/MinaCalc/MinaCalc.h"
 #include "Etterna/MinaCalc/Ulbu.h"
 static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor);
@@ -401,15 +404,53 @@ CalcInfo calc_info()
         }
     }
 
+    size_t pmods_used_count = NUM_CalcPatternMod * NUM_Skillset;
+    bool *pmods_used = (bool *)calloc(pmods_used_count, sizeof(bool));
+    size_t pmod_used_index = 0;
+    size_t ss_index = 0;
+    for (auto& ss : dummy_calc->pmods_used) {
+        for (auto pmod : ss) {
+            pmods_used[(pmod * NUM_Skillset) + ss_index] = true;
+        }
+        ss_index++;
+    }
+
+    size_t op_count = 0;
+    for (auto& ss : dummy_calc->adj_diff_ops) {
+        for (AdjDiff& op : ss) {
+            op_count++;
+        }
+    }
+
+    AdjDiff *ops = (AdjDiff *)calloc(op_count, sizeof(AdjDiff));
+    size_t op_index = 0;
+    ss_index = 0;
+    for (auto& ss : dummy_calc->adj_diff_ops) {
+        for (AdjDiff& op : ss) {
+            ops[op_index] = op;
+            ops[op_index].ss = (Skillset)ss_index;
+            ops[op_index].enabled = true;
+            op_index++;
+        }
+        ss_index++;
+    }
+
     ParamSet defaults = {};
     defaults.params = (float *)calloc(num_params, sizeof(float));
     defaults.min = (float *)calloc(num_params, sizeof(float));
     defaults.max = (float *)calloc(num_params, sizeof(float));
     defaults.num_params = num_params;
+    defaults.pmods_used = pmods_used;
+    defaults.num_pmods_used = pmods_used_count;
+    defaults.ops = ops;
+    defaults.num_ops = op_count;
     for (size_t i = 0; i < num_params; i++) {
         defaults.params[i] = param_info[i].default_value;
         defaults.min[i] = param_info[i].min;
         defaults.max[i] = param_info[i].max;
+    }
+    for (size_t i = 0; i < NumSkillsets; i++) {
+        defaults.adj_diff_base[i] = dummy_calc->adj_diff_bases[i];
     }
 
     CalcInfo result = {};
@@ -478,6 +519,28 @@ InlineConstantInfo *info_for_inline_constant(CalcInfo *info, size_t param_index)
     return &where_u_at[param_index - m->index];
 }
 
+void copy_param_set_to_calc(Calc *c, ParamSet *params)
+{
+    memcpy(c->mod_params, params->params, params->num_params * sizeof(float));
+    memcpy(c->adj_diff_bases.data(), params->adj_diff_base, NumSkillsets * sizeof(CalcDiffValue));
+    for (ptrdiff_t ss = 1; ss < NUM_Skillset; ss++) {
+        c->pmods_used[ss].clear();
+        for (ptrdiff_t mod = 0; mod < NUM_CalcPatternMod; mod++) {
+            if (params->pmods_used[(mod * NUM_Skillset) + ss]) {
+                c->pmods_used[ss].push_back(mod);
+            }
+        }
+    }
+    for (ptrdiff_t i = 0; i < NumSkillsets; i++) {
+        c->adj_diff_ops[i].clear();
+    }
+    for (ptrdiff_t i = 0; i < params->num_ops; i++) {
+        if (params->ops[i].enabled) {
+            c->adj_diff_ops[params->ops[i].ss].push_back(params->ops[i]);
+        }
+    }
+}
+
 auto
 CMinaCalc_MinaSDCalc(const std::vector<NoteInfo>& note_info,
 		   float musicrate,
@@ -508,7 +571,7 @@ SeeCalc calc_init(CalcInfo *info)
 SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal)
 {
     SkillsetRatings result = {};
-    memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
+    copy_param_set_to_calc(calc->handle, params);
     vector<float> ratings = CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, params->params[0]), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
         result.E[i] = ratings[i];
@@ -519,7 +582,7 @@ SkillsetRatings calc_go(SeeCalc *calc, ParamSet *params, NoteData *note_data, fl
 SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, int param, float value)
 {
     SkillsetRatings result = {};
-    memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
+    copy_param_set_to_calc(calc->handle, params);
     calc->handle->mod_params[param] = value;
     vector<float> ratings = CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, param == 0 ? value : params->params[0]), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {
@@ -531,7 +594,7 @@ SkillsetRatings calc_go_with_param(SeeCalc *calc, ParamSet *params, NoteData *no
 SkillsetRatings calc_go_with_rate_and_param(SeeCalc *calc, ParamSet *params, NoteData *note_data, float goal, float rate, int param, float value)
 {
     SkillsetRatings result = {};
-    memcpy(calc->handle->mod_params, params->params, params->num_params * sizeof(float));
+    copy_param_set_to_calc(calc->handle, params);
     calc->handle->mod_params[param] = value;
     vector<float> ratings = CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, rate), goal, calc->handle);
     for (int i = 0; i < NumSkillsets; i++) {

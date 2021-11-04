@@ -17,7 +17,7 @@ thread_local float minacalc_constant[] = {
      0x1.63736cp-1, 0x1.e66666p-1, 0x1.e66666p-1, 0x1.1c28f6p+0, 0x1.000000p+1, 0x1.000000p+0, 0x1.e66666p-1, 0x1.e66666p-1,
      0x1.0d6628p+0, 0x1.700000p+4, 0x1.770000p+9, 0x1.fa1a0cp-2, 0x1.e66666p-1, 0x1.000000p+0, 0x1.028f5cp+0, 0x1.000000p+1,
      0x1.000000p+0, 0x1.e66666p-1, 0x1.e66666p-1, 0x1.47ae14p-5, 0x0.000000p+0, 0x0.000000p+0, 0x1.b33334p+0, 0x1.b33334p+0,
-     0x1.99999ap-4, 0x1.800000p-1, 0x1.b33334p-1, 0x1.000000p+0, 0x1.e66666p-1, 0x1.99999ap-4, 0x1.000000p+1, 0x1.000000p+0,
+     0x1.99999ap-4, 0x1.800000p-1, 0x1.b33334p-1,
 };
 
 thread_local std::vector<std::pair<std::string, float*>> MinaCalcConstants {
@@ -124,11 +124,6 @@ thread_local std::vector<std::pair<std::string, float*>> MinaCalcConstants {
     { "MinaCalc.cpp(555)", &minacalc_constant[120] },
     { "MinaCalc.cpp(596)", &minacalc_constant[121] },
     { "MinaCalc.cpp(597)", &minacalc_constant[122] },
-    { "MinaCalc.cpp(852)", &minacalc_constant[123] },
-    { "MinaCalc.cpp(854)", &minacalc_constant[124] },
-    { "MinaCalc.cpp(859)", &minacalc_constant[125] },
-    { "MinaCalc.cpp(886)", &minacalc_constant[126] },
-    { "MinaCalc.cpp(887)", &minacalc_constant[127] },
 };
 
 static InlineConstantInfo where_u_at[] = {
@@ -235,11 +230,6 @@ static InlineConstantInfo where_u_at[] = {
     { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 555, 0, 100, 0x1.99999ap-4, 1 },
     { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 596, 0, 101, 0x1.800000p-1, 1 },
     { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 597, 0, 102, 0x1.b33334p-1, 1 },
-    { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 852, 0, 103, 0x1.000000p+0, 1 },
-    { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 854, 0, 104, 0x1.e66666p-1, 1 },
-    { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 859, 0, 105, 0x1.99999ap-4, 1 },
-    { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 886, 0, 106, 0x1.000000p+1, 1 },
-    { "etterna/Etterna/MinaCalc/MinaCalc.cpp", 887, 0, 107, 0x1.000000p+0, 1 },
 };
 
 static int minacalc_constant_prev_fixup[] = {
@@ -258,5 +248,6 @@ static int minacalc_constant_prev_fixup[] = {
       0,  0,  0,  0,  0,  0,  0, 102,
       0,  0,  0,  0,  0,  0,  0,  0,
       0,  0, 113,  0,  0,  0,  0,  0,
-      0,  0,  0,  0,  0,  0,  0,  0,
+      0,  0,  0,
 };
+

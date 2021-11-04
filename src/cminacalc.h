@@ -6,6 +6,10 @@ typedef struct TheGreatBazoinkazoinkInTheSky TheGreatBazoinkazoinkInTheSky;
 
 #include "Etterna/Models/NoteData/NoteDataStructures.h"
 
+typedef enum CalcPatternMod CalcPatternMod;
+typedef enum CalcDiffValue CalcDiffValue;
+typedef enum Skillset Skillset;
+
 #ifdef __cplusplus
 class Calc;
 #else
@@ -42,6 +46,24 @@ static const char *SkillsetNames[] = {
     "Technical",
 };
 
+typedef enum AdjDiffOp
+{
+    AdjDiffOp_Mul,
+    AdjDiffOp_Div,
+    AdjDiffOp_Stam
+} AdjDiffOp;
+
+typedef struct AdjDiff
+{
+    AdjDiffOp op;
+    CalcPatternMod mod;
+    float scale, offset, pow;
+    float lo, hi;
+    CalcDiffValue stam_base;
+    Skillset stam_ss;
+    Skillset ss;  // hack cause lazy, ignored by minacalc
+    bool enabled; // hack cause lazy, ignored by minacalc
+} AdjDiff;
 typedef struct NoteInfo NoteInfo;
 
 typedef struct ParamSet
@@ -50,6 +72,11 @@ typedef struct ParamSet
     float *min;
     float *max;
     size_t num_params;
+    bool *pmods_used;
+    size_t num_pmods_used;
+    CalcDiffValue adj_diff_base[NumSkillsets];
+    AdjDiff *ops;
+    size_t num_ops;
 } ParamSet;
 
 typedef struct ModInfo

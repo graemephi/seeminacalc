@@ -44,6 +44,32 @@
 
 #include "calcconstants.h"
 
+static char const *DiffValueStrings[] = { "NPSBase", "TechBase", "RMABase", "MSD" };
+static char const *BigListOfModNamesInPatternModEnumOrder[] = {
+    "Stream",
+	"JS",
+    "HS",
+    "CJ",
+    "CJDensity",
+	"HSDensity",
+	"CJOHAnchor",
+	"OHJumpMod",
+    "CJOHJump",
+    "Balance",
+    "Roll",
+    "OHTrill",
+	"VOHTrill",
+	"Chaos",
+	"FlamJam",
+	"WideRangeRoll",
+	"WideRangeJumptrill",
+	"WideRangeBalance",
+	"WideRangeAnchor",
+	"TheThing",
+	"TheThing2",
+	"RanMan",
+};
+
 typedef struct {
     u8 bytes[20];
 } ChartKey;
@@ -91,6 +117,9 @@ String chartkey_to_string(ChartKey ck)
 typedef struct {
     u8 *name;
     f32 *params;
+    bool *pmods;
+    i32 adj_diff_base[NumSkillsets];
+    AdjDiff *ops;
     u32 generation;
 } OptimizationCheckpoint;
 
@@ -307,6 +336,8 @@ typedef struct State
     SimFileInfo *previews[2];
 
     ModInfo *inline_mods;
+    AdjDiff *adj_diff[NumSkillsets];
+    i32 calc_pattern_mod_to_info_mod[NUM_CalcPatternMod];
 
     sg_image dbz_tex[array_length(dbz.luts)][4];
 
@@ -363,6 +394,34 @@ typedef struct State
 } State;
 static State state = {0};
 
+ParamSet copy_param_set(ParamSet *ps)
+{
+    ParamSet result = {0};
+    result.num_params = ps->num_params;
+    result.num_pmods_used = ps->num_pmods_used;
+    result.num_ops = ps->num_ops;
+    buf_reserve(result.params, ps->num_params);
+    buf_reserve(result.min, ps->num_params);
+    buf_reserve(result.max, ps->num_params);
+    buf_reserve(result.pmods_used, ps->num_pmods_used);
+    buf_reserve(result.ops, ps->num_ops);
+    for (size_t i = 0; i < ps->num_params; i++) {
+        result.params[i] = ps->params[i];
+        result.min[i] = ps->min[i];
+        result.max[i] = ps->max[i];
+    }
+    for (size_t i = 0; i < array_length(ps->adj_diff_base); i++) {
+        result.adj_diff_base[i] = ps->adj_diff_base[i];
+    }
+    for (size_t i = 0; i < ps->num_pmods_used; i++) {
+        result.pmods_used[i] = ps->pmods_used[i];
+    }
+    for (size_t i = 0; i < ps->num_ops; i++) {
+        result.ops[i] = ps->ops[i];
+    }
+    return result;
+}
+
 #include "cachedb.c"
 char const *db_path = 0;
 char const *test_list_path = 0;
@@ -374,21 +433,46 @@ OptimizationCheckpoint make_checkpoint(u8 *name)
     OptimizationCheckpoint result = {0};
 
     buf_printf(result.name, "%s", name);
+
     for (isize i = 0; i < state.info.num_params; i++) {
         buf_push(result.params, state.ps.params[i]);
     }
+    for (isize p = 0; p < state.ps.num_pmods_used; p++) {
+        buf_push(result.pmods, state.ps.pmods_used[p]);
+    }
+    for (usize p = 0; p < NumSkillsets; p++) {
+        result.adj_diff_base[p] = state.ps.adj_diff_base[p];
+    }
+    for (usize p = 0; p < state.ps.num_ops; p++) {
+        buf_push(result.ops, state.ps.ops[p]);
+    }
 
+    result.generation = state.generation;
     return result;
 }
 
 void save_checkpoints_to_disk(void)
 {
     u8 *str = 0;
-    buf_printf(str, "checkpoints v1. calc version: %d\n\n", state.info.version);
+    buf_printf(str, "checkpoints v2. calc version: %d\n\n", state.info.version);
     for (isize i = 0; i < buf_len(state.checkpoints); i++) {
         buf_printf(str, "#name: %s;\n#params: ", state.checkpoints[i].name);
-        for (usize p = 0; p < state.ps.num_params; p++) {
+        for (isize p = 0; p < state.ps.num_params; p++) {
             buf_printf(str, "%.8g,", (f64)state.checkpoints[i].params[p]);
+        }
+        buf_printf(str, ";\n#pmods: ");
+        for (isize p = 0; p < state.ps.num_pmods_used; p++) {
+            buf_printf(str, "%d,", state.checkpoints[i].pmods[p]);
+        }
+        buf_printf(str, ";\n#adj_diff_base: ");
+        for (isize p = 0; p < NumSkillsets; p++) {
+            buf_printf(str, "%d,", state.checkpoints[i].adj_diff_base[p]);
+        }
+        buf_printf(str, ";\n#ops: ");
+        for (isize p = 0; p < state.ps.num_ops; p++) {
+            AdjDiff *ad = state.ps.ops + p;
+            buf_printf(str, "%d %d %.8g %.8g %.8g %.8g %.8g %d %d %d %d,",
+                            ad->op, ad->mod, (f64)ad->scale, (f64)ad->offset, (f64)ad->pow, (f64)ad->lo, (f64)ad->hi, ad->stam_base, ad->stam_ss, ad->ss, ad->enabled);
         }
         buf_printf(str, ";\n\n");
     }
@@ -397,51 +481,42 @@ void save_checkpoints_to_disk(void)
 }
 
 // Reusing sm parser code because why not
-static SmTagValue parse_checkpoint_tag(SmParser *ctx)
+static SmTagValue parse_checkpoint_tag(SmParser *ctx, String tag)
 {
-    static String tag_strings[] = {
-        SS("name"),
-        SS("params"),
-    };
     consume_char(ctx, '#');
-    i32 tag = array_length(tag_strings);
-    for (i32 i = 0; i < array_length(tag_strings); i++) {
-        if (try_consume_string(ctx, tag_strings[i])) {
-            tag = i;
-            break;
-        }
-    }
-    if (tag == array_length(tag_strings)) {
-        die(ctx, "tag");
-    }
-
+    try_consume_string(ctx, tag);
     consume_char(ctx, ':');
     isize start = parser_position(ctx);
     advance_to(ctx, ';');
     isize end = parser_position(ctx);
     consume_char(ctx, ';');
     return (SmTagValue) {
-        .tag = tag,
+        .tag = 0,
         .str.index = (i32)start,
         .str.len = (i32)(end - start)
     };
 }
 
-static i32 parse_checkpoint_version(SmParser *ctx)
+static i32 parse_checkpoint_version(SmParser *ctx, i32 *v)
 {
     if (try_consume_string(ctx, S("checkpoints v1. calc version:"))) {
+        *v = 1;
+        return (i32)parse_f32(ctx);
+    }
+    if (try_consume_string(ctx, S("checkpoints v2. calc version:"))) {
+        *v = 2;
         return (i32)parse_f32(ctx);
     }
     return 0;
 }
 
-static b32 try_advance_to_and_parse_checkpoint_tag(SmParser *ctx, SmTagValue *out_tag)
+static b32 try_advance_to_and_parse_checkpoint_tag(SmParser *ctx, String tag, SmTagValue *out_tag)
 {
     consume_whitespace_and_comments(ctx);
     if (*ctx->p != '#') {
         return false;
     }
-    *out_tag = parse_checkpoint_tag(ctx);
+    *out_tag = parse_checkpoint_tag(ctx, tag);
     return true;
 }
 
@@ -462,31 +537,86 @@ void load_checkpoints_from_disk(void)
             return;
         }
         consume_whitespace_and_comments(ctx);
-        i32 v = parse_checkpoint_version(ctx);
-        if (v == 0) {
+        i32 v = 0;
+        i32 calc_v = parse_checkpoint_version(ctx, &v);
+        if (calc_v == 0) {
             printf("checkpoints error: checkpoints has no version string\n");
             return;
         }
-        if (v != state.info.version) {
-            printf("checkpoints error: seeminacalc has calc version %d, checkpoints is for %d\n", state.info.version, v);
+        if (calc_v != state.info.version) {
+            printf("checkpoints error: seeminacalc has calc version %d, checkpoints is for %d\n", state.info.version, calc_v);
             return;
         }
 
-        SmTagValue s, t;
-        while (try_advance_to_and_parse_checkpoint_tag(ctx, &s)) {
-            b32 t_ok = try_advance_to_and_parse_checkpoint_tag(ctx, &t);
-            if (t_ok == false) {
-                break;
+        if (v == 1) {
+            SmTagValue name_tag, params_tag;
+            while (try_advance_to_and_parse_checkpoint_tag(ctx, S("name"), &name_tag)) {
+                b32 ok = try_advance_to_and_parse_checkpoint_tag(ctx, S("params"), &params_tag);
+                if (ok == false) {
+                    break;
+                }
+                OptimizationCheckpoint cp = {0};
+                buf_printf(cp.name, "%.*s", name_tag.str.len, f.buf + name_tag.str.index);
+                SmParser this_ctx = *ctx;
+                this_ctx.p = f.buf + params_tag.str.index;
+                for (usize i = 0; i < state.ps.num_params; i++) {
+                    buf_push(cp.params, parse_f32(&this_ctx));
+                    consume_char(&this_ctx, ',');
+                }
+                buf_push(state.checkpoints, cp);
             }
-            OptimizationCheckpoint cp = {0};
-            buf_printf(cp.name, "%.*s", s.str.len, f.buf + s.str.index);
-            SmParser param_ctx = *ctx;
-            param_ctx.p = f.buf + t.str.index;
-            for (usize i = 0; i < state.ps.num_params; i++) {
-                buf_push(cp.params, parse_f32(&param_ctx));
-                consume_char(&param_ctx, ',');
+        } else if (v == 2) {
+            SmTagValue tag = {0};
+            while (try_advance_to_and_parse_checkpoint_tag(ctx, S("name"), &tag)) {
+                OptimizationCheckpoint cp = {0};
+                buf_printf(cp.name, "%.*s", tag.str.len, f.buf + tag.str.index);
+                SmParser this_ctx = *ctx;
+                try_advance_to_and_parse_checkpoint_tag(&this_ctx, S("params"), &tag);
+                this_ctx.p = f.buf + tag.str.index;
+                for (usize i = 0; i < state.ps.num_params; i++) {
+                    buf_push(cp.params, parse_f32(&this_ctx));
+                    consume_char(&this_ctx, ',');
+                }
+                consume_char(&this_ctx, ';');
+                try_advance_to_and_parse_checkpoint_tag(&this_ctx, S("pmods"), &tag);
+                this_ctx.p = f.buf + tag.str.index;
+                for (usize i = 0; i < state.ps.num_pmods_used; i++) {
+                    buf_push(cp.pmods, parse_f32(&this_ctx) == 1.0f);
+                    consume_char(&this_ctx, ',');
+                }
+                consume_char(&this_ctx, ';');
+                try_advance_to_and_parse_checkpoint_tag(&this_ctx, S("adj_diff_base"), &tag);
+                this_ctx.p = f.buf + tag.str.index;
+                for (usize i = 0; i < NumSkillsets; i++) {
+                    cp.adj_diff_base[i] = (i32)parse_f32(&this_ctx);
+                    consume_char(&this_ctx, ',');
+                }
+                consume_char(&this_ctx, ';');
+                try_advance_to_and_parse_checkpoint_tag(&this_ctx, S("ops"), &tag);
+                this_ctx.p = f.buf + tag.str.index;
+                do {
+                    if (try_consume_char(&this_ctx, ';')) {
+                        break;
+                    }
+                    AdjDiff ad = {0};
+                    ad.op = clamp(0, 3, (AdjDiffOp)parse_f32(&this_ctx));
+                    ad.mod = clamp(0, NUM_CalcPatternMod, (CalcPatternMod)parse_f32(&this_ctx));
+                    ad.scale = parse_f32(&this_ctx);
+                    ad.offset = parse_f32(&this_ctx);
+                    ad.pow = parse_f32(&this_ctx);
+                    ad.lo = parse_f32(&this_ctx);
+                    ad.hi = parse_f32(&this_ctx);
+                    ad.stam_base = clamp(0, 3, (CalcDiffValue)parse_f32(&this_ctx));
+                    ad.stam_ss = clamp(1, 7, (Skillset)parse_f32(&this_ctx));
+                    ad.ss = clamp(1, 7, (Skillset)parse_f32(&this_ctx));
+                    ad.enabled = (bool)parse_f32(&this_ctx);
+                    buf_push(cp.ops, ad);
+                } while (try_consume_char(&this_ctx, ','));
+                buf_push(state.checkpoints, cp);
+                ctx->p = this_ctx.p;
             }
-            buf_push(state.checkpoints, cp);
+        } else {
+            printf("unknown checkpoints version %d\n", v);
         }
     } else {
         printf("checkpoints: No checkpoints to load\n");
@@ -498,39 +628,37 @@ void checkpoint(void)
     if (buf_len(state.checkpoints) > 0 && buf_last(state.checkpoints).generation == state.generation) {
         return;
     }
-    OptimizationCheckpoint cp = { .generation = state.generation };
     time_t t = time(0);
     u8 *date = (u8 *)asctime(localtime(&t));
     date[strlen(date)-1] = 0; // null out new line
-    buf_printf(cp.name, "%s", date);
-    for (isize i = 0; i < state.info.num_params; i++) {
-        buf_push(cp.params, state.ps.params[i]);
-    }
-    buf_push(state.checkpoints, cp);
-
+    buf_push(state.checkpoints, make_checkpoint(date));
     save_checkpoints_to_disk();
 }
 
 void checkpoint_default(void)
 {
-    buf_clear(state.default_checkpoint.name);
-    buf_clear(state.default_checkpoint.params);
-
-    buf_printf(state.default_checkpoint.name, "%s", "Default");
-    for (isize i = 0; i < state.info.num_params; i++) {
-        buf_push(state.default_checkpoint.params, state.ps.params[i]);
-    }
-    state.default_checkpoint.generation = state.generation;
+    state.default_checkpoint = make_checkpoint("Default");
 }
 
 void checkpoint_latest(void)
 {
     buf_clear(state.latest_checkpoint.name);
     buf_clear(state.latest_checkpoint.params);
+    buf_clear(state.latest_checkpoint.pmods);
+    buf_clear(state.latest_checkpoint.ops);
 
     buf_printf(state.latest_checkpoint.name, "%s", "Latest");
     for (isize i = 0; i < state.info.num_params; i++) {
         buf_push(state.latest_checkpoint.params, state.ps.params[i]);
+    }
+    for (isize p = 0; p < state.ps.num_pmods_used; p++) {
+        buf_push(state.latest_checkpoint.pmods, state.ps.pmods_used[p]);
+    }
+    for (isize p = 0; p < NumSkillsets; p++) {
+        state.latest_checkpoint.adj_diff_base[p] = state.ps.adj_diff_base[p];
+    }
+    for (isize p = 0; p < state.ps.num_ops; p++) {
+        buf_push(state.latest_checkpoint.ops, state.ps.ops[p]);
     }
     state.latest_checkpoint.generation = state.generation;
 }
@@ -539,9 +667,30 @@ void restore_checkpoint(OptimizationCheckpoint cp)
 {
     for (isize i = 0; i < state.info.num_params; i++) {
         state.ps.params[i] = cp.params[i];
-        state.generation++;
     }
 
+    buf_clear(state.ps.pmods_used);
+    buf_clear(state.ps.ops);
+    for (isize p = 0; p < buf_len(cp.pmods); p++) {
+        buf_push(state.ps.pmods_used, cp.pmods[p]);
+    }
+    for (isize p = 0; p < NumSkillsets; p++) {
+        state.ps.adj_diff_base[p] = cp.adj_diff_base[p];
+    }
+    for (isize p = 0; p < buf_len(cp.ops); p++) {
+        buf_push(state.ps.ops, cp.ops[p]);
+    }
+    state.ps.num_pmods_used = buf_len(cp.pmods);
+    state.ps.num_ops = buf_len(cp.ops);
+
+    for (isize p = 0; p < NumSkillsets; p++) {
+        buf_clear(state.adj_diff[p]);
+    }
+    for (isize i = 0; i < state.ps.num_ops; i++) {
+        buf_push(state.adj_diff[state.ps.ops[i].ss], state.ps.ops[i]);
+    }
+
+    state.generation++;
     state.optimizing = false;
     calculate_skillsets_in_background(&state.low_prio_work, state.generation);
 }
@@ -623,21 +772,6 @@ static ImVec4 msd_color(f32 x)
     }
 
     return color;
-}
-
-ParamSet copy_param_set(ParamSet *ps)
-{
-    ParamSet result = {0};
-    result.num_params = ps->num_params;
-    buf_reserve(result.params, ps->num_params);
-    buf_reserve(result.min, ps->num_params);
-    buf_reserve(result.max, ps->num_params);
-    for (size_t i = 0; i < ps->num_params; i++) {
-        result.params[i] = ps->params[i];
-        result.min[i] = ps->min[i];
-        result.max[i] = ps->max[i];
-    }
-    return result;
 }
 
 i32 make_skillsets_graph(void)
@@ -1513,6 +1647,15 @@ void init(void)
         }
     }
 
+    for (isize i = 0; i < state.ps.num_ops; i++) {
+        AdjDiff *op = state.ps.ops + i;
+        buf_push(state.adj_diff[op->ss], *op);
+    }
+
+    for (i32 i = 0; i < state.info.num_mods; i++) {
+        state.calc_pattern_mod_to_info_mod[debuginfo_mod_index(i)] = i;
+    }
+
     if (db_path) {
         Buffer db = read_file_malloc(db_path);
         if (db.buf) {
@@ -2143,7 +2286,6 @@ void frame(void)
                     igSameLine(0,-1); igCheckbox("jack loss", &jack_loss);
 
                     static i32 const diff_values[] = { NPSBase, TechBase, RMABase, MSD };
-                    static char const *diff_values_strings[] = { "NPSBase", "TechBase", "RMABase", "MSD" };
                     static bool diff_values_enabled[array_length(diff_values)] = {0};
 
                     static i32 const misc[] = { Pts, PtLoss, StamMod };
@@ -2151,7 +2293,7 @@ void frame(void)
                     static bool misc_enabled[array_length(misc)] = {0};
 
                     for (isize i = 0; i < array_length(diff_values); i++) {
-                        igCheckbox(diff_values_strings[i], diff_values_enabled + i);
+                        igCheckbox(DiffValueStrings[i], diff_values_enabled + i);
                         igSameLine(0,-1);
                     }
                     for (isize i = 0; i < array_length(misc); i++) {
@@ -2231,6 +2373,7 @@ void frame(void)
                                     f32 start_time = scroll_y_time_lo * sfi->target.rate - 0.5f;
                                     for (isize i = end_row - 1; i >= 0 && rows[i].rowTime > start_time; i--) {
                                         isize snap = sfi->snaps[i];
+                                        assert(snap < array_length(dbz.luts));
                                         for (isize c = 0; c < 4; c++) {
                                             if (rows[i].notes & (1 << c)) {
                                                 f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
@@ -2313,7 +2456,7 @@ void frame(void)
                                         for (i32 i = 0; i < array_length(diff_values); i++) {
                                             if (diff_values_enabled[i]) {
                                                 igPushID_Int(100+i);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr(diff_values_strings[i], d->interval_hand[0].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                                ImPlot_PlotStairs_FloatPtrFloatPtr(DiffValueStrings[i], d->interval_hand[0].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
                                                 ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
                                                 ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
                                                 igPopID();
@@ -2432,6 +2575,203 @@ void frame(void)
                 igEndTabItem();
             }
 
+            if (igBeginTabItem("Pattern Mods", 0,0)) {
+                if (igBeginTable("PMods", NumSkillsets - 2, ImGuiTableRowFlags_Headers, V2Zero, 0)) {
+                    b32 any = false;
+                    static i32 column_to_skillset[] = { 1,2,3,5,6,7 };
+                    // PMods table
+                    for (isize i = 0; i < array_length(column_to_skillset); i++) {
+                        igTableSetupColumn(SkillsetNames[column_to_skillset[i]], 0, 0, 0);
+                    }
+                    // NPSBase/TechBase
+                    igTableNextRow(0, 0);
+                    for (isize c = 0; c < array_length(column_to_skillset); c++) {
+                        i32 ss = column_to_skillset[c];
+                        igTableSetColumnIndex(c);
+                        igPushID_Str(SkillsetNames[ss]);
+                        igSetNextItemWidth(-1);
+                        if (igCombo_Str_arr("##Base", &state.ps.adj_diff_base[ss], DiffValueStrings, array_length(DiffValueStrings) - 1, 0)) {
+                            any = true;
+                        }
+                        igPopID();
+                    }
+                    igTableHeadersRow();
+                    // The PMods
+                    for (isize i = 0; i < state.info.num_mods; i++) {
+                        size_t mod = debuginfo_mod_index(i);
+                        if (mod != CalcPatternMod_Invalid) {
+                            igTableNextRow(0, 0);
+                            for (i32 c = 0; c < array_length(column_to_skillset); c++) {
+                                igTableSetColumnIndex(c);
+                                i32 pmod_index = (mod * NumSkillsets) + column_to_skillset[c];
+                                assert(pmod_index < state.ps.num_pmods_used);
+                                igPushID_Int(pmod_index);
+                                if (igSelectable_BoolPtr(state.info.mods[i].name, state.ps.pmods_used + pmod_index, 0, V2Zero)) {
+                                    any = true;
+                                }
+                                igPopID();
+                            }
+                        }
+                    }
+                    igEndTable();
+
+                    igSeparator();
+
+                    static isize editing_group = 2;
+                    static isize editing_line = 0;
+                    TextString(S("Add new adjustment to"));
+                    igSameLine(0,4);
+                    igSetNextItemWidth(80.0f);
+                    static i32 new_ss = 0;
+                    if (igCombo_Str("##newss", &new_ss, " \0Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0)) {
+                        if (new_ss != 0) {
+                            i32 ss = column_to_skillset[new_ss - 1];
+                            editing_group = ss;
+                            editing_line = buf_len(state.adj_diff[ss]);
+                            buf_push(state.adj_diff[ss], (AdjDiff) {
+                                .op = 0,
+                                .mod = 0,
+                                .scale = 1.0f,
+                                .offset = 0.0f,
+                                .pow = 1.0f,
+                                .lo = -INFINITY,
+                                .hi = INFINITY,
+                                .ss = ss,
+                                .enabled = false
+                            });
+                            new_ss = 0;
+                            any = true;
+                        }
+                    }
+                    // Pmod adjustments
+                    push_allocator(scratch);
+                    for (isize i = 0; i < array_length(column_to_skillset); i++) {
+                        i32 ss = column_to_skillset[i];
+                        if (igCollapsingHeader_TreeNodeFlags(SkillsetNames[ss], ImGuiTreeNodeFlags_CollapsingHeader|ImGuiTreeNodeFlags_DefaultOpen)) {
+                            for (isize j = 0; j < buf_len(state.adj_diff[ss]); j++) {
+                                u8 *str = 0;
+                                AdjDiff ad = state.adj_diff[ss][j];
+                                if (ad.enabled == false) {
+                                    buf_printf(str, "// ");
+                                }
+                                if (ad.op != AdjDiffOp_Stam) {
+                                    buf_printf(str, "*adj_diff %c= ", (ad.op == AdjDiffOp_Mul) ? '*' : '/');
+                                    if (ad.lo != -INFINITY) {
+                                        buf_printf(str, "max(%.2f, ", (f64)ad.lo);
+                                    }
+                                    if (ad.hi != INFINITY) {
+                                        buf_printf(str, "min(%.2f, ", (f64)ad.hi);
+                                    }
+                                    if (ad.pow == 0.5f) {
+                                        buf_printf(str, "sqrt");
+                                    }
+                                    if (ad.pow != 1.0f) {
+                                        buf_printf(str, "(");
+                                    }
+                                    buf_printf(str, "%s", state.info.mods[state.calc_pattern_mod_to_info_mod[ad.mod]].name);
+                                    if (ad.scale != 1.0f) {
+                                        buf_printf(str, " * %.2f", (f64)ad.scale);
+                                    }
+                                    if (ad.offset != 0.0f) {
+                                        buf_printf(str, " + %.2f", (f64)ad.offset);
+                                    }
+                                    if (ad.pow == 0.5f) {
+                                        buf_printf(str, ")");
+                                    } else if (ad.pow != 1.0f) {
+                                        buf_printf(str, ")^%.2f", (f64)ad.pow);
+                                    }
+                                    if (ad.hi != INFINITY) {
+                                        buf_printf(str, ")");
+                                    }
+                                    if (ad.lo != -INFINITY) {
+                                        buf_printf(str, ")");
+                                    }
+                                    buf_printf(str, "\n");
+                                } else {
+                                    buf_printf(str, "*stam_base = max(*adj_diff, %s * %s)\n", DiffValueStrings[ad.stam_base], SkillsetNames[ad.stam_ss]);
+                                }
+                                b32 active = (ss == editing_group) && (j == editing_line);
+                                igPushStyleColor_U32(ImGuiCol_Header, 0xff504040);
+                                if (igSelectable_Bool(str, active, 0, V2Zero)) {
+                                    editing_group = ss;
+                                    editing_line = j;
+                                    igOpenPopup_Str("PModAdjustor", 0);
+                                }
+                                igPopStyleColor(1);
+                                if (igIsItemActive() && !igIsItemHovered(0)) {
+                                    ImVec2 m = {0};
+                                    igGetMouseDragDelta(&m, 0, 0);
+                                    isize j_next = j + (m.y < 0.f ? -1 : 1);
+                                    if (j_next >= 0 && j_next < buf_len(state.adj_diff[ss])) {
+                                        AdjDiff temp = state.adj_diff[ss][j];
+                                        state.adj_diff[ss][j] = state.adj_diff[ss][j_next];
+                                        state.adj_diff[ss][j_next] = temp;
+                                        any = true;
+                                        igResetMouseDragDelta(0);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    pop_allocator();
+
+                    // Pmod adjustor
+                    if (igBeginPopup("PModAdjustor", 0)) {
+                        igPushItemWidth(180.f);
+                        if (editing_group >= 0 && editing_line >= 0 && editing_line < buf_len(state.adj_diff[editing_group])) {
+                            AdjDiff *ad = &state.adj_diff[editing_group][editing_line];
+                            igBeginGroup();
+                            f32 y = igGetCursorPosY();
+                            any |= igCombo_Str("Op", &ad->op, "*=\0/=\0stam\0\0", 0);
+                            if (ad->op != AdjDiffOp_Stam) {
+                                any |= igCombo_Str_arr("Pattern Mod", &ad->mod, BigListOfModNamesInPatternModEnumOrder, array_length(BigListOfModNamesInPatternModEnumOrder), 0);
+                                any |= igInputFloat("##scale", &ad->scale, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                                igSameLine(0,4); if (igButton("off##scale", V2Zero)) { any = true; ad->scale = 1.0f; } igSameLine(0,4); TextString(S("scale"));
+                                any |= igInputFloat("##offset", &ad->offset, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                                igSameLine(0,4); if (igButton("off##offset", V2Zero)) { any = true; ad->offset = 0.0f; } igSameLine(0,4); TextString(S("offset"));
+                                any |= igInputFloat("##pow", &ad->pow, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                                igSameLine(0,4); if (igButton("off##pow", V2Zero)) { any = true; ad->pow = 1.0f; } igSameLine(0,4); TextString(S("pow"));
+                                any |= igInputFloat("##max", &ad->hi, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                                igSameLine(0,4); if (igButton("off##max", V2Zero)) { any = true; ad->hi = INFINITY; } igSameLine(0,4); TextString(S("max"));
+                                any |= igInputFloat("##min", &ad->lo, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                                igSameLine(0,4); if (igButton("off##min", V2Zero)) { any = true; ad->lo = -INFINITY; } igSameLine(0,4); TextString(S("min"));
+                            } else {
+                                any |= igCombo_Str_arr("Base", &ad->stam_base, DiffValueStrings, array_length(DiffValueStrings) - 1, 0);
+                                any |= igCombo_Str("Skillset", &ad->stam_ss, "Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0);
+                            }
+                            any |= igCheckbox("Enabled", &ad->enabled);
+                            igBeginDisabled(ad->enabled);
+                            if (igButton("Remove", V2Zero)) {
+                                buf_remove_sorted_index(state.adj_diff[editing_group], editing_line);
+                                any = true;
+                            }
+                            igEndDisabled();
+                            igDummy(V2(0, 210 - (igGetCursorPosY() - y)));
+                            igEndGroup();
+                        } else {
+                            igDummy(V2(0, 210));
+                        }
+                        igPopItemWidth();
+
+                        igEndPopup();
+                    }
+
+                    if (any) {
+                        buf_clear(state.ps.ops);
+                        for (isize ss = 0; ss < NumSkillsets; ss++) {
+                            for (isize i = 0; i < buf_len(state.adj_diff[ss]); i++) {
+                                AdjDiff ad = state.adj_diff[ss][i];
+                                assert(ad.ss == ss);
+                                buf_push(state.ps.ops, ad);
+                            }
+                        }
+                        state.ps.num_ops = buf_len(state.ps.ops);
+                        state.generation++;
+                    }
+                }
+                igEndTabItem();
+            }
+
             if (igBeginTabItem("Optimize", 0,0)) {
                 f32 err_limit = 2.5f;
                 f32 loss_limit = 1e-4f;
@@ -2499,6 +2839,7 @@ void frame(void)
                     for (isize i = buf_len(state.checkpoints) - 1; i >= 0; i--) {
                         if (igSelectable_Bool(state.checkpoints[i].name, 0, ImGuiSelectableFlags_None, V2Zero)) {
                             restore_checkpoint(state.checkpoints[i]);
+                            break;
                         }
                     }
                 }

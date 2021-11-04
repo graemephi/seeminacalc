@@ -94,6 +94,136 @@ class Calc
 	// Stupud hack
 	float *mod_params;
 
+	std::array<std::vector<int>, NUM_Skillset> pmods_used = { {
+	  // overall, nothing, don't handle here
+	  {},
+
+	  // stream
+	  {
+		Stream,
+		OHTrill,
+		VOHTrill,
+		// Roll,
+		Chaos,
+		WideRangeRoll,
+		WideRangeJumptrill,
+		FlamJam,
+		OHJumpMod,
+		Balance,
+		// RanMan,
+		WideRangeBalance,
+	  },
+
+	  // js
+	  {
+		JS,
+		OHJumpMod,
+		Chaos,
+		Balance,
+		TheThing,
+		TheThing2,
+		WideRangeBalance,
+		WideRangeJumptrill,
+		// WideRangeRoll,
+		// OHTrill,
+		VOHTrill,
+		RanMan,
+		FlamJam,
+		// Roll,
+		// WideRangeAnchor,
+	  },
+
+	  // hs
+	  {
+		HS,
+		OHJumpMod,
+		TheThing,
+		WideRangeAnchor,
+		WideRangeRoll,
+		WideRangeJumptrill,
+		OHTrill,
+		VOHTrill,
+		// Roll
+		// RanMan,
+		FlamJam,
+	  	HSDensity,
+	  },
+
+	  // stam, nothing, don't handle here
+	  {},
+
+	  // jackspeed, doesn't use pmods (atm)
+	  {},
+
+	  // chordjack
+	  {
+		CJ,
+		CJDensity,
+		// CJOHJump // SQRTD BELOW
+		CJOHAnchor,
+		VOHTrill,
+		WideRangeAnchor,
+	  	FlamJam, // you may say, why? why not?
+	  },
+
+	  // tech, duNNO wat im DOIN
+	  {
+		OHTrill,
+		VOHTrill,
+		Balance,
+		// Roll,
+		OHJumpMod,
+		Chaos,
+		WideRangeJumptrill,
+		WideRangeBalance,
+		WideRangeRoll,
+		FlamJam,
+		RanMan,
+		// WideRangeAnchor,
+		TheThing,
+		TheThing2,
+	  },
+	} };
+	std::array<CalcDiffValue, NUM_Skillset> adj_diff_bases = {
+		CalcDiffValue_Invalid,
+		NPSBase,
+		NPSBase,
+		NPSBase,
+		CalcDiffValue_Invalid,
+		NPSBase,
+		NPSBase,
+		TechBase
+	};
+	std::array<std::vector<AdjDiff>, NUM_Skillset> adj_diff_ops = { {
+	  // overall, nothing, don't handle here
+	  {},
+	  // stream
+	  {},
+	  // js
+	  {
+		{ AdjDiffOp_Div,  HS,                     1.0f,  0.0f, 1.0f, 1.0f, 		INFINITY, CalcDiffValue_Invalid,  Skillset_Invalid },
+	    { AdjDiffOp_Div,  OHJumpMod,              0.95f, 0.0f, 0.5f, -INFINITY, INFINITY, CalcDiffValue_Invalid,  Skillset_Invalid },
+	    { AdjDiffOp_Mul,  WideRangeRoll,          1.0f,  0.1f, 0.5f, -INFINITY, 1.0f,     CalcDiffValue_Invalid,  Skillset_Invalid },
+	    { AdjDiffOp_Stam, CalcPatternMod_Invalid, 1.0f,  0.0f, 1.0f, -INFINITY, INFINITY, NPSBase,                Skill_Handstream },
+	  },
+	  // hs
+	  {
+	    { AdjDiffOp_Stam, CalcPatternMod_Invalid, 1.0f,  0.0f, 1.0f, 1.0f,      INFINITY, NPSBase,                Skill_Jumpstream },
+	  },
+	  // stam, nothing, don't handle here
+	  {},
+	  // jackspeed, doesn't use pmods (atm)
+	  {},
+	  // chordjack
+	  {
+	    { AdjDiffOp_Mul,  CJOHJump,                1.0f,  0.0f, 0.5f, -INFINITY, INFINITY, CalcDiffValue_Invalid, Skillset_Invalid },
+	  },
+	  // tech, duNNO wat im DOIN
+	  {
+		{ AdjDiffOp_Div,  CJ,                      1.0f,  0.0f, 2.0f, 1.0f,      INFINITY, CalcDiffValue_Invalid, Skillset_Invalid },
+	    { AdjDiffOp_Div,  OHJumpMod,               1.0f,  0.0f, 0.5f, -INFINITY, INFINITY, CalcDiffValue_Invalid, Skillset_Invalid },
+	  },
+	} };
 
 	/// Set true for score related output, and false for MSD caching.
 	bool ssr = true;

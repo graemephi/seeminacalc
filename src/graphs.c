@@ -655,17 +655,8 @@ i32 calc_thread(void *userdata)
     ParamSet *ps = ct->ps;
     DoneQueue *done = ct->done;
 
-    ParamSet participation_test_ps = (ParamSet) {
-        .params = calloc(ps->num_params, sizeof(float)),
-        .min = calloc(ps->num_params, sizeof(float)),
-        .max = calloc(ps->num_params, sizeof(float)),
-        .num_params = ps->num_params
-    };
-    for (isize i = 0; i < ps->num_params; i++) {
-        participation_test_ps.params[i] = ps->params[i];
-        participation_test_ps.min[i] = ps->min[i];
-        participation_test_ps.max[i] = ps->max[i];
-    }
+    Stack participation_stack = stack_make(malloc(8*1024*1024), 8*1024*1024);
+    push_allocator(&participation_stack);
 
     while (true) {
         CalcWork work = {0};
@@ -711,32 +702,33 @@ i32 calc_thread(void *userdata)
                     now = stm_now();
                 } break;
                 case Work_Participation: {
-                    memcpy(participation_test_ps.params, ps->params, participation_test_ps.num_params * sizeof(float));
-                    SkillsetRatings ssr_a = calc_go_with_param(&calc, &participation_test_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                    stack_reset(&participation_stack);
+                    ParamSet p_ps = copy_param_set(ps);
+                    SkillsetRatings ssr_a = calc_go_with_param(&calc, &p_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
                     ssr_a = rating_floor_skillsets(ssr_a);
 
-                    for (isize i = 0; i < participation_test_ps.num_params; i++) {
+                    for (isize i = 0; i < p_ps.num_params; i++) {
                         if (state.opt_cfg.enabled[i]) {
                             // Lerp instead of going to fully max because setting many parameters fully max
                             // can blow out the returned values into useless ranges, i.e. where we don't
                             // want the optimizer to be searching anyway. Hard to say how much we can pull
                             // back on this without introducing too much bias
-                            participation_test_ps.params[i] = lerp(participation_test_ps.params[i], participation_test_ps.max[i], 0.25f);
+                            p_ps.params[i] = lerp(p_ps.params[i], p_ps.max[i], 0.25f);
                         }
                     }
-                    SkillsetRatings ssr_b = calc_go_with_param(&calc, &participation_test_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                    SkillsetRatings ssr_b = calc_go_with_param(&calc, &p_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
                     ssr_b = rating_floor_skillsets(ssr_b);
 
                     b32 participating = ssr_a.E[work.sfi->target.skillset] != ssr_b.E[work.sfi->target.skillset];
 
                     if (participating == false) {
                         // Again but min, just in case
-                        for (isize i = 0; i < participation_test_ps.num_params; i++) {
+                        for (isize i = 0; i < p_ps.num_params; i++) {
                             if (state.opt_cfg.enabled[i]) {
-                                participation_test_ps.params[i] = participation_test_ps.min[i];
+                                p_ps.params[i] = p_ps.min[i];
                             }
                         }
-                        SkillsetRatings ssr_c = calc_go_with_param(&calc, &participation_test_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
+                        SkillsetRatings ssr_c = calc_go_with_param(&calc, &p_ps, work.sfi->notes, 0.93f, 0, work.sfi->target.rate);
                         ssr_c = rating_floor_skillsets(ssr_c);
 
                         participating = ssr_a.overall - ssr_c.overall

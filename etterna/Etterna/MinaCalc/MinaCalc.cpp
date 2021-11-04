@@ -705,6 +705,7 @@ Calc::Chisel(const float player_skill,
 inline void
 Calc::InitAdjDiff(Calc& calc, const int& hand)
 {
+#if 0
 	static const std::array<std::vector<int>, NUM_Skillset> pmods_used = { {
 	  // overall, nothing, don't handle here
 	  {},
@@ -881,17 +882,102 @@ Calc::InitAdjDiff(Calc& calc, const int& hand)
 				case Skill_Technical:
 					*adj_diff =
 					  calc.init_base_diff_vals.at(hand).at(TechBase).at(i) *
-					  pmod_product_cur_interval.at(ss) * basescalers.at(ss) /
-					  max<float>(
-						fastpow(calc.pmod_vals.at(hand).at(CJ).at(i), P(2.F)),
-						P(1.F)) /
-					  fastsqrt(calc.pmod_vals.at(hand).at(OHJumpMod).at(i));
+					  pmod_product_cur_interval.at(ss) * basescalers.at(ss)
+					  / max<float>(fastpow(calc.pmod_vals.at(hand).at(CJ).at(i), P(2.F)), P(1.F))
+					  / fastsqrt(calc.pmod_vals.at(hand).at(OHJumpMod).at(i));
 					break;
 				default:
 					break;
 			}
 		}
 	}
+#else
+	std::array<float, NUM_Skillset> pmod_product_cur_interval = {};
+
+	size_t jack_diff_index = 0;
+
+	// ok this loop is pretty wack i know, for each interval
+	for (size_t i = 0; i < static_cast<size_t>(calc.numitv); ++i) {
+		pmod_product_cur_interval.fill(1.F);
+
+		/* total pattern mods for each skillset, we want this to be
+		 * calculated before the main skillset loop because we might
+		 * want access to the total js mod while on stream, or
+		 * something */
+		for (auto ss = 0; ss < NUM_Skillset; ++ss) {
+
+			// is this even faster than multiplying 1.f by 1.f a billion times?
+			if (ss == Skill_Overall || ss == Skill_Stamina) {
+				continue;
+			}
+
+			for (const auto& pmod : calc.pmods_used.at(ss)) {
+				pmod_product_cur_interval.at(ss) *=
+				  calc.pmod_vals.at(hand).at(pmod).at(i);
+			}
+		}
+
+		// main loop, for each skillset that isn't overall or stam
+		for (auto ss = 0; ss < NUM_Skillset; ++ss) {
+			if (ss == Skill_Overall || ss == Skill_Stamina) {
+				continue;
+			}
+
+			// reference to diff values in vectors
+			auto* adj_diff = &(calc.base_adj_diff.at(hand).at(ss).at(i));
+			auto* stam_base =
+			  &(calc.base_diff_for_stam_mod.at(hand).at(ss).at(i));
+
+			// nps adjusted by pmods
+			auto adj_npsbase = 0;
+			if (ss == Skill_JackSpeed) {
+				adj_npsbase = pmod_product_cur_interval.at(ss);
+			} else {
+				adj_npsbase = calc.init_base_diff_vals.at(hand).at(calc.adj_diff_bases[ss]).at(i)
+			  	* pmod_product_cur_interval.at(ss)
+			  	* basescalers.at(ss);
+			}
+
+			auto adj_stambase = adj_npsbase;
+
+			// start diff values at adjusted nps base
+			for (auto op : calc.adj_diff_ops[ss]) {
+				switch (op.op) {
+					case AdjDiffOp_Mul:
+					case AdjDiffOp_Div: {
+						auto val = calc.pmod_vals.at(hand).at(op.mod).at(i) * op.scale + op.offset;
+						if (op.pow == 0.5f) {
+							val = fastsqrt(val);
+						} else if (op.pow != 1.0f) {
+							val = fastpow((double)val, (double)op.pow);
+						}
+						if (op.op == AdjDiffOp_Mul) {
+							adj_npsbase *= std::clamp(val, op.lo, op.hi);
+						} else {
+							adj_npsbase /= std::clamp(val, op.lo, op.hi);
+						}
+					} break;
+					case AdjDiffOp_Stam: {
+						auto a = adj_npsbase;
+						auto b = calc.init_base_diff_vals.at(hand).at(op.stam_base).at(i)
+								* pmod_product_cur_interval[op.stam_ss];
+						adj_stambase = max<float>(a, b);
+					} break;
+					default: assert(0);
+				}
+			}
+
+			*adj_diff = adj_npsbase;
+			*stam_base = adj_stambase;
+		}
+
+		float t_begin = (float)i * 0.5f;
+		float t_end = t_begin + 0.5f;
+		while (jack_diff_index < calc.jack_diff[hand].size() && calc.jack_diff[hand][jack_diff_index].first < t_end) {
+			calc.jack_diff[hand][jack_diff_index++].second *= calc.base_adj_diff[hand][Skill_JackSpeed][i];
+		}
+	}
+#endif
 }
 
 inline void
