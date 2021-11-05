@@ -563,6 +563,7 @@ void calculate_debug_graphs(CalcWork *work[], SimFileInfo *sfi, u32 generation)
 {
     if (sfi->debug_generation != generation) {
         sfi->debug_generation = generation;
+        sfi->debug_generation_is_current = false;
         buf_push(*work, (CalcWork) {
             .sfi = sfi,
             .type = Work_DebugGraphs,
@@ -877,7 +878,11 @@ void finish_work(void)
             case Work_DebugGraphs: {
                 if (done.work.generation >= done.work.sfi->debug_generation) {
                     assert(done.work.generation == done.work.sfi->debug_generation);
+                    if (done.work.sfi->debug_info.buffers) {
+                        debuginfo_free(&done.work.sfi->debug_info);
+                    }
                     done.work.sfi->debug_info = done.debug_info;
+                    done.work.sfi->debug_generation_is_current = true;
                 } else {
                     debuginfo_free(&done.debug_info);
                 }
@@ -1036,7 +1041,7 @@ void finish_work(void)
         f32 min_error = 40.0f;
         i32 targets[NumSkillsets] = {0};
         for (isize i = 0; i < buf_len(state.files); i++) {
-            if (state.files[i].target.got_msd != 0.0f) {
+            if (state.files[i].target.got_msd != 0.0f && state.files[i].opt_participating) {
                 // In principle, the target skillset could be 0 (overall), but we use the first index
                 // for the error over all skillsets
                 assert(state.files[i].target.skillset != 0);

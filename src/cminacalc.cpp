@@ -608,6 +608,7 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
     DebugInfo result = {};
     result.buffers = new DebugBuffers;
     calc->handle->debugmode = true;
+    copy_param_set_to_calc(calc->handle, params);
     CMinaCalc_MinaSDCalc(note_data->ref, clamp_low(1e-5f, rate), 0.93f, calc->handle);
 
     for (ptrdiff_t h = 0; h < 2; h++) {
@@ -678,7 +679,9 @@ DebugInfo calc_go_debuginfo(SeeCalc *calc, ParamSet *params, NoteData *note_data
 
 void debuginfo_free(DebugInfo *info)
 {
-    info->buffers = {};
+    *info->buffers = {};
+    delete info->buffers;
+    info->buffers = 0;
 }
 
 size_t debuginfo_mod_index(size_t mod)

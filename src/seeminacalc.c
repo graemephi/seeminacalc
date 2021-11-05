@@ -173,6 +173,7 @@ typedef struct SimFileInfo
 
     DebugInfo debug_info;
     u32 debug_generation;
+    bool debug_generation_is_current;
 
     bool open;
     bool stops;
@@ -367,6 +368,8 @@ typedef struct State
         } map;
     } opt_cfg;
 
+    char const *optimizer_error_message;
+
     OptimizationCheckpoint *checkpoints;
     OptimizationCheckpoint latest_checkpoint;
     OptimizationCheckpoint default_checkpoint;
@@ -391,6 +394,8 @@ typedef struct State
     Buffer *dropped_files;
     FileLoader loader;
     Search search;
+
+    i32 tab_window;
 } State;
 static State state = {0};
 
@@ -1440,6 +1445,890 @@ void gen_mips(u32 *mips[], u32 *pixels, isize dim)
     }
 }
 
+enum {
+    Tab_None,
+    Tab_Files,
+    Tab_Search,
+    Tab_Graphs,
+    Tab_Preview,
+    Tab_Patternmods,
+    Tab_Optimize,
+};
+
+SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
+{
+    SimFileInfo *next_active = 0;
+    if (buf_len(state.files) == 0) {
+        TextString(S("No files :("));
+    } else if (igBeginTable("FileTable", 8, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
+        igTableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 20.0f, 0);
+        igTableSetupColumn("File", 0, 1.0f, 0);
+        igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 105.0f, 0);
+        igTableSetupColumn("Rate", ImGuiTableColumnFlags_WidthFixed, 56.0f, 0);
+        igTableSetupColumn("WantMSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+        igTableSetupColumn("Meight", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+        igTableSetupColumn("Message", ImGuiTableColumnFlags_WidthFixed, 15.0f, 0);
+        igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, -FLT_MIN, 0);
+        ImGuiListClipper clip = {0};
+        ImGuiListClipper_Begin(&clip, buf_len(state.files), 0.0f);
+        while (ImGuiListClipper_Step(&clip)) {
+            for (i32 sfi_index = clip.DisplayStart; sfi_index < clip.DisplayEnd; sfi_index++) {
+                SimFileInfo *sfi = state.files + sfi_index;
+                f32 weight_before_user_interaction = sfi->target.weight;
+                calculate_skillsets(update_visible_skillsets ? &state.high_prio_work : &state.low_prio_work, sfi, false, state.generation);
+                if (sfi == active) {
+                    igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
+                }
+                igPushID_Int(sfi_index);
+                igTableNextRow(0, 0);
+
+                igTableSetColumnIndex(0);
+                igBeginDisabled(sfi->target.last_user_set_weight == 0.0f);
+                b8 enabled = (sfi->target.weight != 0.0f);
+                if (igCheckbox("##enabled", &enabled)) {
+                    sfi->target.weight = enabled ? sfi->target.last_user_set_weight : 0.0f;
+                }
+                tooltip("optimize on this file");
+                igEndDisabled();
+
+                igTableSetColumnIndex(1);
+                if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+                    if (sfi->open && sfi == active) {
+                        sfi->open = false;
+                    } else {
+                        sfi->open = true;
+                        next_active = sfi;
+                    }
+                }
+
+                igTableSetColumnIndex(2);
+                igPushItemWidth(-FLT_MIN);
+                if (igBeginCombo("##Skillset", SkillsetNames[sfi->target.skillset], 0)) {
+                    for (isize ss = 1; ss < NumSkillsets; ss++) {
+                        b32 is_selected = (ss == sfi->target.skillset);
+                        if (igSelectable_Bool(SkillsetNames[ss], is_selected, 0, V2Zero)) {
+                            sfi->target.skillset = ss;
+                            buf_clear(sfi->id.buf);
+                            sfi->id.len = 0;
+                            make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
+                            sfi->display_id.len = 0;
+                            make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                            if (state.optimizing) state.generation++;
+                        }
+                        if (is_selected) {
+                            igSetItemDefaultFocus();
+                        }
+                    }
+                    igEndCombo();
+                }
+                igSameLine(0,4);
+
+                igTableSetColumnIndex(3);
+                igPushItemWidth(-FLT_MIN);
+                static char const *rates[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2.0" };
+                static float rates_f[] = { 0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f, 1.8f, 1.9f, 2.0f };
+                for (isize r_find_selected = 0; r_find_selected < array_length(rates); r_find_selected++) {
+                    if ((absolute_value(rates_f[r_find_selected] - sfi->target.rate) < 0.05f)
+                        && igBeginCombo("##Rate", rates[r_find_selected], 0)) {
+                        for (isize r = 0; r < array_length(rates); r++) {
+                            b32 is_selected = (absolute_value(rates_f[r] - sfi->target.rate) < 0.05f);
+                            if (igSelectable_Bool(rates[r], is_selected, 0, V2Zero)) {
+                                sfi->target.rate = rates_f[r];
+                                buf_clear(sfi->id.buf);
+                                sfi->id.len = 0;
+                                make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
+                                sfi->display_id.len = 0;
+                                make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                                state.generation++;
+                            }
+                            if (is_selected) {
+                                igSetItemDefaultFocus();
+                            }
+                        }
+                        igEndCombo();
+                    }
+                }
+
+                igTableSetColumnIndex(4);
+                igPushItemWidth(-FLT_MIN);
+                igDragFloat("##target", &sfi->target.want_msd, 0.1f, 0.0f, 40.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp);
+                tooltip("target msd for skillset");
+
+                igTableSetColumnIndex(5);
+                igPushItemWidth(-FLT_MIN);
+                if (igDragFloat("##weight", &sfi->target.weight, 0.1f, 0.0f, 20.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp)) {
+                    sfi->target.last_user_set_weight = sfi->target.weight;
+                }
+                tooltip("weight");
+
+                igTableSetColumnIndex(6);
+                if (absolute_value(sfi->target.delta) > 5.0f) {
+                    igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "!");
+                    tooltip("calc is off by %02.02f\n\nthis might not be the file you think it is", (f64)sfi->target.delta);
+                    igSameLine(0,4);
+                }
+                for (isize i = 1; i < NumSkillsets; i++) {
+                    if (sfi->aa_rating.E[i] * 0.9f > sfi->aa_rating.E[sfi->target.skillset]) {
+                        igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "?");
+                        tooltip("calc doesn't think this file is %s\n\nthis might not be the file you think it is", SkillsetNames[sfi->target.skillset]);
+                        break;
+                    }
+                }
+
+                igTableSetColumnIndex(7);
+                for (isize ss = 0; ss < NumSkillsets; ss++) {
+                    igTextColored(msd_color(sfi->aa_rating.E[ss]), "%s%02.2f", sfi->aa_rating.E[ss] < 10.f ? "0" : "", (f64)sfi->aa_rating.E[ss]);
+                    tooltip(SkillsetNames[ss]);
+                    igSameLine(0, 4);
+                }
+
+                if (sfi == active) {
+                    igPopStyleColor(1);
+                }
+                igPopID();
+
+                if (sfi->target.weight != weight_before_user_interaction) {
+                    state.reset_optimizer_flag = true;
+                }
+            }
+        }
+        igEndTable();
+    }
+
+    return next_active;
+}
+
+void tab_search(void)
+{
+    static char q[512] = "";
+    static bool have_query = false;
+    bool have_new_query = false;
+    if (igInputText("##Search", q, 512, 0,0,0)) {
+        have_query = (q[0] != 0);
+        if (have_query) {
+            state.search.id = db_search((String) { q, strlen(q) });
+            have_new_query = true;
+        }
+    }
+    if (have_query) {
+        igSameLine(0, 4);
+        igText("%lld matches", buf_len(state.search.results));
+    }
+    if (igBeginTable("Search Results", 7, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
+        igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 65.0f, 0);
+        igTableSetupColumn("Author", 0, 2, 0);
+        igTableSetupColumn("Title", 0, 5, 0);
+        igTableSetupColumn("Subtitle", 0, 3, 0);
+        igTableSetupColumn("Artist", 0, 2, 0);
+        igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
+        igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 75.0f, 0);
+        igTableHeadersRow();
+        ImGuiListClipper clip = {0};
+        ImGuiListClipper_Begin(&clip, buf_len(state.search.results), 0.0f);
+        while (ImGuiListClipper_Step(&clip)) {
+            for (isize i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
+                DBFile *f = &state.search.results[i];
+                dbfile_set_skillset_and_rating_from_all_msds(f);
+                igTableNextRow(0, 0);
+                igTableSetColumnIndex(0);
+                TextString(SmDifficultyStrings[f->difficulty]);
+                igTableSetColumnIndex(1);
+                TextString(f->author);
+                igTableSetColumnIndex(2);
+                if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
+                    load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
+                }
+                igTableSetColumnIndex(3);
+                TextString(f->subtitle);
+                igTableSetColumnIndex(4);
+                TextString(f->artist);
+                igTableSetColumnIndex(5);
+                igTextColored(msd_color(f->rating), "%02.2f", (f64)f->rating);
+                igTableSetColumnIndex(6);
+                igText("%s", SkillsetNames[f->skillset]);
+            }
+        }
+
+        igEndTable();
+    }
+    if (have_new_query) {
+        // Delaying clearing the old search's results one frame looks a bit nicer
+        buf_clear(state.search.results);
+    }
+}
+
+SimFileInfo *tab_graphs(SimFileInfo *active, bool ss_highlight[NumSkillsets], ParamSliderChange *changed_param)
+{
+    SimFileInfo *next_active = 0;
+    if (buf_len(state.files) == 0) {
+        igTextWrapped("No files to graph :(");
+    } else if (active == null_sfi) {
+        next_active = state.files;
+    } else {
+        SimFileInfo *sfi = active;
+
+        // File difficulty + chartkey text
+        igTextColored(msd_color(sfi->aa_rating.overall), "%02.2f", (f64)sfi->aa_rating.overall);
+        igSameLine(0, 8);
+        igSelectable_Bool(sfi->id.buf, false, ImGuiSelectableFlags_Disabled, V2Zero);
+        igSameLine(clamp_low(GetContentRegionAvailWidth() - 275.f, 100), 0);
+        igText(sfi->chartkey.buf);
+
+        // Plots. Weird rendering order: first 0, then backwards from the end. This keeps the main graph at the top and the rest most-to-least recent.
+        FnGraph *fng = &state.graphs[sfi->graphs[0]];
+        ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+        if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
+            calculate_file_graph(&state.high_prio_work, sfi, fng, state.generation);
+            for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
+            }
+            ImPlot_EndPlot();
+        }
+        for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
+            fng = &state.graphs[sfi->graphs[fungi]];
+            if (fng->param == changed_param->param && (changed_param->type == ParamSlider_LowerBoundChanged || changed_param->type == ParamSlider_UpperBoundChanged)) {
+                calculate_parameter_graph_force(&state.high_prio_work, sfi, fng, state.generation);
+            }
+
+            i32 mp = fng->param;
+            ParamInfo *p = &state.info.params[mp];
+            u8 full_name[64] = {0};
+            snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
+            igPushID_Str(full_name);
+            ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
+            if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
+                calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
+                for (i32 ss = 0; ss < NumSkillsets; ss++) {
+                    skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
+                }
+                ImPlot_EndPlot();
+            }
+            igPopID();
+        }
+    }
+    return next_active;
+}
+
+SimFileInfo *tab_preview(SimFileInfo *active)
+{
+    SimFileInfo *next_active = 0;
+    if (buf_len(state.files) == 0) {
+        igTextWrapped("No files to preview :(");
+    } else if (active == null_sfi) {
+        next_active = state.files;
+    } else {
+        igBeginChild_Str("##no scroll", V2(-1,-1), 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
+        igBeginGroup();
+        static f32 cmod = 600.0f;
+        static f32 mini = 0.5f;
+        f32 old_y_scale = cmod * mini;
+        igSetNextItemWidth(100.0f);
+        bool cmod_changed = igSliderFloat("cmod", &cmod, 1.0f, 2000, "%f", 0);
+        igSetNextItemWidth(100.0f);
+        bool mini_changed = igSliderFloat("mini", &mini, 0.01f, 2.0f, "%f", 0);
+        igEndGroup();
+
+        igSameLine(0,-1);
+        igBeginGroup();
+        static f32 x_scale = 1.0f;
+        static f32 x_nps_scale = 1.0f;
+        igSetNextItemWidth(100.0f);
+        igSliderFloat("scale (pmod)", &x_scale, 0.01f, 2.0f, "%f", 0);
+        igSetNextItemWidth(100.0f);
+        igSliderFloat("scale (nps)", &x_nps_scale, 0.01f, 2.0f, "%f", 0);
+        igEndGroup();
+
+        igSameLine(0,-1);
+        igBeginGroup();
+        f32 scroll_max[2] = {0.0f, 0.0f};
+        static f32 scroll[2] = {0.0f, 0.0f};
+        static f32 ig_scroll[2] = {0.0f, 0.0f};
+        static f32 scroll_difference = 0.0f;
+        static bool link_scroll = true;
+        static bool diff = false;
+        if (igCheckbox("link scroll", &link_scroll)) {
+            scroll_difference = scroll[1] - scroll[0];
+        }
+        igCheckbox("abs diff", &diff);
+        igEndGroup();
+        igSameLine(0, 50.0f);
+        igBeginGroup();
+        static bool jack_diff = false;
+        static bool jack_stam = false;
+        static bool jack_loss = false;
+        igCheckbox("jack diff", &jack_diff);
+        igSameLine(0,-1); igCheckbox("jack stam", &jack_stam);
+        igSameLine(0,-1); igCheckbox("jack loss", &jack_loss);
+
+        static i32 const diff_values[] = { NPSBase, TechBase, RMABase, MSD };
+        static bool diff_values_enabled[array_length(diff_values)] = {0};
+
+        static i32 const misc[] = { Pts, PtLoss, StamMod };
+        static char const *misc_strings[] = { "Pts", "PtLoss", "StamMod" };
+        static bool misc_enabled[array_length(misc)] = {0};
+
+        for (isize i = 0; i < array_length(diff_values); i++) {
+            igCheckbox(DiffValueStrings[i], diff_values_enabled + i);
+            igSameLine(0,-1);
+        }
+        for (isize i = 0; i < array_length(misc); i++) {
+            igCheckbox(misc_strings[i], misc_enabled + i);
+            igSameLine(0,-1);
+        }
+        igEndGroup();
+
+        f32 y_scale = cmod * mini;
+
+        ImVec2 dbz_dim = V2((f32)dbz.width * mini, (f32)dbz.height * mini);
+        ImVec2 uv_min = V2(0.0f, 0.0f);
+        ImVec2 uv_max = V2(1.0f, 1.0f);
+        ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
+        ImVec4 border_col = (ImVec4) {0};
+        static f32 plot_window_height = 0.0f;
+
+        if (cmod_changed || mini_changed) {
+            scroll[0] = (scroll[0] + (plot_window_height*0.5f)) * (y_scale / old_y_scale) - (plot_window_height*0.5f);
+            scroll[1] = (scroll[1] + (plot_window_height*0.5f)) * (y_scale / old_y_scale) - (plot_window_height*0.5f);
+            scroll_difference *= y_scale / old_y_scale;
+        }
+
+        f64 linked_ymin = 0.0;
+        f64 linked_ymax = 0.0;
+
+        ImGuiIO *io = igGetIO();
+
+        for (i32 preview_index = 0; preview_index < 2; preview_index++) {
+            SimFileInfo *sfi = state.previews[preview_index];
+            if (sfi && ALWAYS(sfi->notes)) {
+                calculate_debug_graphs(&state.debug_graph_work, sfi, state.generation);
+
+                DebugInfo *d = &sfi->debug_info;
+                isize n_rows = sfi->n_rows;
+                NoteInfo const *rows = note_data_rows(sfi->notes);
+                f32 last_row_time = rows[n_rows - 1].rowTime / sfi->target.rate;
+                f32 last_row_time_scroll = last_row_time * y_scale;
+                scroll_max[preview_index] = last_row_time_scroll;
+                igPushID_Int(preview_index);
+                igSetNextWindowScroll(V2(0, clamp(0, last_row_time_scroll, scroll[preview_index])));
+                igSetNextWindowSize(V2(-1.0f, last_row_time_scroll), ImGuiCond_Always);
+                if (igBeginChild_Str("##same id to keep the scroll", V2(450.0f, 0), true, ImGuiWindowFlags_MenuBar)) {
+                    igBeginMenuBar();
+                    igText(sfi->display_id.buf);
+                    igEndMenuBar();
+
+                    plot_window_height = igGetWindowHeight();
+
+                    sfi_set_snaps_from_bpms(sfi);
+
+                    f32 scroll_y = igGetScrollY();
+                    ImGuiWindow *window = igGetCurrentWindow();
+                    ImGuiID active_id = igGetActiveID();
+                    if (igIsWindowHovered(0) && io->MouseWheel) {
+                        scroll[preview_index] -= io->MouseWheel*5.0f*ImGuiWindow_CalcFontSize(window);
+                        if (link_scroll) {
+                            scroll[(preview_index + 1) & 1] -= io->MouseWheel*5.0f*ImGuiWindow_CalcFontSize(window);
+                        }
+                    }
+                    if (active_id == igGetWindowScrollbarID(window, ImGuiAxis_Y)) {
+                        scroll[preview_index] = scroll_y;
+                        if (link_scroll) {
+                            if (preview_index == 0) {
+                                scroll[1] = scroll[0] + scroll_difference;
+                            } else {
+                                scroll[0] = scroll[1] - scroll_difference;
+                            }
+                        }
+                    }
+                    ig_scroll[preview_index] = scroll_y;
+
+                    f32 x = 64.0f;
+                    f32 scroll_y_time_lo = (scroll_y / y_scale);
+                    f32 scroll_y_time_hi = clamp_high(last_row_time, ((scroll_y + igGetWindowHeight()) / y_scale));
+                    f32 x_offset = 450.0f / 4.0f;
+                    isize end_row = sfi_row_at_time(sfi, 0.5f + scroll_y_time_hi * sfi->target.rate);
+                    f32 start_time = scroll_y_time_lo * sfi->target.rate - 0.5f;
+                    for (isize i = end_row - 1; i >= 0 && rows[i].rowTime > start_time; i--) {
+                        isize snap = sfi->snaps[i];
+                        assert(snap < array_length(dbz.luts));
+                        for (isize c = 0; c < 4; c++) {
+                            if (rows[i].notes & (1 << c)) {
+                                f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
+                                f32 y_pos = y_scale * (rows[i].rowTime / sfi->target.rate);
+                                igSetCursorPos(V2(x_pos, y_pos));
+                                igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
+                            }
+                        }
+                    }
+                    {
+                        isize i = n_rows - 1;
+                        isize snap = sfi->snaps[i];
+                        for (isize c = 0; c < 4; c++) {
+                            if (rows[i].notes & (1 << c)) {
+                                f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
+                                f32 y_pos = y_scale * (rows[i].rowTime / sfi->target.rate);
+                                igSetCursorPos(V2(x_pos, y_pos));
+                                igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
+                            }
+                        }
+                    }
+                    isize scroll_y_interval_index_lo = (isize)(scroll_y_time_lo * 2.0f);
+                    isize scroll_y_interval_index_hi = (isize)((scroll_y_time_hi + 1.0f) * 2.0f);
+                    isize interval_offset = clamps(0, d->n_intervals, scroll_y_interval_index_lo);
+                    isize n_intervals = clamps(0, d->n_intervals - interval_offset, scroll_y_interval_index_hi - scroll_y_interval_index_lo);
+                    assert(interval_offset >= 0);
+                    assert(interval_offset + n_intervals <= d->n_intervals);
+                    igSetCursorPos(V2(0, scroll_y));
+                    ImPlot_PushColormap_PlotColormap(3);
+                    ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
+                    ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
+                    ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
+                    ImPlot_SetNextPlotLimitsX(-2.18 / (f64)x_scale, 2.0 / (f64)x_scale, ImGuiCond_Always);
+                    ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
+                    ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
+                    ImPlot_SetNextPlotFormatY("%06.2f", 0);
+                    if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
+                        (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
+                        ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoLabel|ImPlotAxisFlags_NoGridLines,
+                        ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
+                        ImPlot_SetLegendLocation(ImPlotLocation_South, ImPlotOrientation_Vertical, 0);
+                        for (isize i = 0; i < state.info.num_mods; i++) {
+                            i32 mi = debuginfo_mod_index(i);
+                            if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
+                                igPushID_Int(mi);
+                                ImPlot_PlotStairs_FloatPtrFloatPtr(state.info.mods[i].name, d->interval_hand[0].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                igPopID();
+                            }
+                        }
+                        if (jack_stam) {
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_stam L", d->jack_hand[0].jack_stam, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
+                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_stam R", d->jack_hand[1].jack_stam, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
+                        }
+                        if (jack_loss) {
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_loss L", d->jack_hand[0].jack_loss, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
+                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_loss R", d->jack_hand[1].jack_loss, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
+                        }
+                        ImPlot_EndPlot();
+                    }
+
+                    igSetCursorPos(V2(0, scroll_y));
+                    ImPlot_PushColormap_PlotColormap(2);
+                    ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
+                    ImPlot_SetNextPlotLimitsX(-75.0 / (f64)x_nps_scale, 50.0 / (f64)x_nps_scale, ImGuiCond_Always);
+                    ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
+                    if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
+                        (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & ~ImPlotFlags_NoLegend,
+                        ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
+                        ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
+                        ImPlot_SetLegendLocation(ImPlotLocation_North, ImPlotOrientation_Vertical, 0);
+                        if (jack_diff) {
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_diff L", d->jack_hand[0].jack_diff, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
+                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_diff R", d->jack_hand[1].jack_diff, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
+                        }
+                        for (i32 i = 0; i < array_length(diff_values); i++) {
+                            if (diff_values_enabled[i]) {
+                                igPushID_Int(100+i);
+                                ImPlot_PlotStairs_FloatPtrFloatPtr(DiffValueStrings[i], d->interval_hand[0].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                igPopID();
+                            }
+                        }
+                        for (i32 i = 0; i < array_length(misc); i++) {
+                            if (misc_enabled[i]) {
+                                igPushID_Int(200+i);
+                                ImPlot_PlotStairs_FloatPtrFloatPtr(misc_strings[i], d->interval_hand[0].misc[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].misc[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                                igPopID();
+                            }
+                        }
+                        ImPlot_EndPlot();
+                    }
+                    ImPlot_PopStyleColor(3);
+                    ImPlot_PopColormap(2);
+                }
+                igEndChild();
+                igPopID();
+            }
+            igSameLine(0,-1);
+        }
+
+        // pmod diffs
+        if (diff && state.previews[1] != 0) {
+            if ((state.previews[0]->debug_generation == state.generation) && (state.previews[1]->debug_generation == state.generation)) {
+                static DebugInfo diff_data = {0};
+                static struct { SimFileInfo *a, *b; f32 scroll_difference; i32 generation; } current = {0};
+                f32 ba_scroll_difference = ig_scroll[0] - ig_scroll[1];
+                isize scroll_intervals = (isize)(2 * ba_scroll_difference / y_scale);
+                b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ba_scroll_difference || current.generation != state.generation;
+                invalidated |= !link_scroll && (ba_scroll_difference != current.scroll_difference);
+                b32 can_redraw = state.previews[0]->debug_generation_is_current && state.previews[1]->debug_generation_is_current;
+                if (can_redraw && invalidated) {
+                    DebugInfo *da = &state.previews[0]->debug_info;
+                    DebugInfo *db = &state.previews[1]->debug_info;
+                    isize n_intervals = maxs(da->n_intervals, db->n_intervals);
+                    for (isize i = 0; i < NUM_CalcPatternMod; i++) {
+                        buf_clear(diff_data.interval_hand[0].pmod[i]);
+                        buf_clear(diff_data.interval_hand[1].pmod[i]);
+                        buf_pushn(diff_data.interval_hand[0].pmod[i], maxs(2*60*20, n_intervals));
+                        buf_pushn(diff_data.interval_hand[1].pmod[i], maxs(2*60*20, n_intervals));
+
+                        for (isize j = 0; j < n_intervals; j++) {
+                            f32 bl = (j < db->n_intervals) ? db->interval_hand[0].pmod[i][j] : 0.0f;
+                            f32 br = (j < db->n_intervals) ? db->interval_hand[1].pmod[i][j] : 0.0f;
+                            isize clamped = clamps(0, da->n_intervals - 1, j + scroll_intervals);
+                            f32 al = da->interval_hand[0].pmod[i][clamped];
+                            f32 ar = da->interval_hand[1].pmod[i][clamped];
+                            diff_data.interval_hand[0].pmod[i][j] = -absolute_value(bl - al);
+                            diff_data.interval_hand[1].pmod[i][j] = absolute_value(br - ar);
+                        }
+                    }
+                    buf_reserve(diff_data.interval_times, 2*60*20);
+                    for (isize i = buf_len(diff_data.interval_times); i < n_intervals; i++) {
+                        buf_push(diff_data.interval_times, (f32)i * 0.5f);
+                    }
+                    diff_data.n_intervals = n_intervals;
+                    current.a = state.previews[0];
+                    current.b = state.previews[1];
+                    current.scroll_difference = ba_scroll_difference;
+                    current.generation = state.generation;
+                }
+                // manually positioned like an animal
+                igSetCursorPos(V2(255.0f, 55.0f));
+                plot_window_height -= 16.0f;
+                f64 scroll_y_time_lo = (f64)(ig_scroll[1] / y_scale);
+                f64 scroll_y_time_hi = scroll_y_time_lo + (f64)(plot_window_height / y_scale);
+                isize interval_offset = (isize)(scroll_y_time_lo * 2);
+                isize n_intervals = clamp_highs((isize)((scroll_y_time_hi - scroll_y_time_lo + 1.0) * 2.0) , diff_data.n_intervals - interval_offset);
+                f64 x_min = -2 * (f64)x_scale;
+                f64 x_max =  2 * (f64)x_scale;
+                ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
+                ImPlot_SetNextPlotLimitsX(x_min, x_max, ImGuiCond_Always);
+                ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
+                ImPlot_PushColormap_PlotColormap(3);
+                ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
+                ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
+                ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
+                if (ImPlot_BeginPlot("##diff", "p", "t", V2(0, plot_window_height),
+                    ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly,
+                    ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
+                    ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
+                    for (isize i = 0; i < state.info.num_mods; i++) {
+                        i32 mi = debuginfo_mod_index(i);
+                        if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
+                            igPushID_Int(mi);
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("##left", diff_data.interval_hand[0].pmod[mi] + interval_offset, diff_data.interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
+                            ImPlot_PlotStairs_FloatPtrFloatPtr("##right", diff_data.interval_hand[1].pmod[mi] + interval_offset, diff_data.interval_times + interval_offset, n_intervals, 0, sizeof(float));
+                            igPopID();
+                        }
+                    }
+
+                    ImPlot_EndPlot();
+                }
+                ImPlot_PopStyleColor(3);
+                ImPlot_PopColormap(1);
+            }
+        }
+
+        if (link_scroll) {
+            if (scroll_difference > 0) {
+                scroll[0] = clamp(-scroll_difference, scroll_max[0], scroll[0]);
+                scroll[1] = clamp(0, scroll_max[1] + scroll_difference, scroll[1]);
+            } else {
+                scroll[0] = clamp(0, scroll_max[0] - scroll_difference, scroll[0]);
+                scroll[1] = clamp(scroll_difference, scroll_max[1], scroll[1]);
+            }
+        }
+
+        igEndChild();
+    }
+
+    return next_active;
+}
+
+void tab_patternmods(void)
+{
+    if (igBeginTable("PMods", NumSkillsets - 2, ImGuiTableRowFlags_Headers, V2Zero, 0)) {
+        b32 any = false;
+        static i32 column_to_skillset[] = { 1,2,3,5,6,7 };
+        // PMods table
+        for (isize i = 0; i < array_length(column_to_skillset); i++) {
+            igTableSetupColumn(SkillsetNames[column_to_skillset[i]], 0, 0, 0);
+        }
+        // NPSBase/TechBase
+        igTableNextRow(0, 0);
+        for (isize c = 0; c < array_length(column_to_skillset); c++) {
+            i32 ss = column_to_skillset[c];
+            igTableSetColumnIndex(c);
+            igPushID_Str(SkillsetNames[ss]);
+            igSetNextItemWidth(-1);
+            if (igCombo_Str_arr("##Base", &state.ps.adj_diff_base[ss], DiffValueStrings, array_length(DiffValueStrings) - 1, 0)) {
+                any = true;
+            }
+            igPopID();
+        }
+        igTableHeadersRow();
+        // The PMods
+        for (isize i = 0; i < state.info.num_mods; i++) {
+            size_t mod = debuginfo_mod_index(i);
+            if (mod != CalcPatternMod_Invalid) {
+                igTableNextRow(0, 0);
+                for (i32 c = 0; c < array_length(column_to_skillset); c++) {
+                    igTableSetColumnIndex(c);
+                    i32 pmod_index = (mod * NumSkillsets) + column_to_skillset[c];
+                    assert(pmod_index < state.ps.num_pmods_used);
+                    igPushID_Int(pmod_index);
+                    if (igSelectable_BoolPtr(state.info.mods[i].name, state.ps.pmods_used + pmod_index, 0, V2Zero)) {
+                        any = true;
+                    }
+                    igPopID();
+                }
+            }
+        }
+        igEndTable();
+
+        igSeparator();
+
+        static isize editing_group = 2;
+        static isize editing_line = 0;
+        static b32 editing = false;
+        TextString(S("Add new adjustment to"));
+        igSameLine(0,4);
+        igSetNextItemWidth(80.0f);
+        static i32 new_ss = 0;
+        if (igCombo_Str("##newss", &new_ss, " \0Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0)) {
+            if (new_ss != 0) {
+                i32 ss = column_to_skillset[new_ss - 1];
+                editing_group = ss;
+                editing_line = buf_len(state.adj_diff[ss]);
+                buf_push(state.adj_diff[ss], (AdjDiff) {
+                    .op = 0,
+                    .mod = 0,
+                    .scale = 1.0f,
+                    .offset = 0.0f,
+                    .pow = 1.0f,
+                    .lo = -INFINITY,
+                    .hi = INFINITY,
+                    .ss = ss,
+                    .enabled = false
+                });
+                new_ss = 0;
+                any = true;
+            }
+        }
+        // Pmod adjustments
+        push_allocator(scratch);
+        for (isize i = 0; i < array_length(column_to_skillset); i++) {
+            i32 ss = column_to_skillset[i];
+            if (igCollapsingHeader_TreeNodeFlags(SkillsetNames[ss], ImGuiTreeNodeFlags_CollapsingHeader|ImGuiTreeNodeFlags_DefaultOpen)) {
+                for (isize j = 0; j < buf_len(state.adj_diff[ss]); j++) {
+                    u8 *str = 0;
+                    AdjDiff ad = state.adj_diff[ss][j];
+                    if (ad.enabled == false) {
+                        buf_printf(str, "// ");
+                    }
+                    if (ad.op != AdjDiffOp_Stam) {
+                        buf_printf(str, "*adj_diff %c= ", (ad.op == AdjDiffOp_Mul) ? '*' : '/');
+                        if (ad.lo != -INFINITY) {
+                            buf_printf(str, "max(%.2f, ", (f64)ad.lo);
+                        }
+                        if (ad.hi != INFINITY) {
+                            buf_printf(str, "min(%.2f, ", (f64)ad.hi);
+                        }
+                        if (ad.pow == 0.5f) {
+                            buf_printf(str, "sqrt");
+                        }
+                        if (ad.pow != 1.0f) {
+                            buf_printf(str, "(");
+                        }
+                        buf_printf(str, "%s", state.info.mods[state.calc_pattern_mod_to_info_mod[ad.mod]].name);
+                        if (ad.scale != 1.0f) {
+                            buf_printf(str, " * %.2f", (f64)ad.scale);
+                        }
+                        if (ad.offset != 0.0f) {
+                            buf_printf(str, " + %.2f", (f64)ad.offset);
+                        }
+                        if (ad.pow == 0.5f) {
+                            buf_printf(str, ")");
+                        } else if (ad.pow != 1.0f) {
+                            buf_printf(str, ")^%.2f", (f64)ad.pow);
+                        }
+                        if (ad.hi != INFINITY) {
+                            buf_printf(str, ")");
+                        }
+                        if (ad.lo != -INFINITY) {
+                            buf_printf(str, ")");
+                        }
+                        buf_printf(str, "\n");
+                    } else {
+                        buf_printf(str, "*stam_base = max(*adj_diff, %s * %s)\n", DiffValueStrings[ad.stam_base], SkillsetNames[ad.stam_ss]);
+                    }
+                    b32 active = editing && (ss == editing_group) && (j == editing_line);
+                    igPushStyleColor_U32(ImGuiCol_Header, 0xff504040);
+                    if (igSelectable_Bool(str, active, 0, V2Zero)) {
+                        editing_group = ss;
+                        editing_line = j;
+                        editing = true;
+                        igOpenPopup_Str("PModAdjustor", 0);
+                    }
+                    igPopStyleColor(1);
+                    if (igIsItemActive() && !igIsItemHovered(0)) {
+                        ImVec2 m = {0};
+                        igGetMouseDragDelta(&m, 0, 0);
+                        isize j_next = j + (m.y < 0.f ? -1 : 1);
+                        if (j_next >= 0 && j_next < buf_len(state.adj_diff[ss])) {
+                            AdjDiff temp = state.adj_diff[ss][j];
+                            state.adj_diff[ss][j] = state.adj_diff[ss][j_next];
+                            state.adj_diff[ss][j_next] = temp;
+                            any = true;
+                            igResetMouseDragDelta(0);
+                        }
+                    }
+                }
+            }
+        }
+        pop_allocator();
+
+        // Pmod adjustor
+        if (igBeginPopup("PModAdjustor", 0)) {
+            igPushItemWidth(180.f);
+            if (editing_group >= 0 && editing_line >= 0 && editing_line < buf_len(state.adj_diff[editing_group])) {
+                AdjDiff *ad = &state.adj_diff[editing_group][editing_line];
+                igBeginGroup();
+                f32 y = igGetCursorPosY();
+                any |= igCombo_Str("Op", &ad->op, "*=\0/=\0stam\0\0", 0);
+                if (ad->op != AdjDiffOp_Stam) {
+                    any |= igCombo_Str_arr("Pattern Mod", &ad->mod, BigListOfModNamesInPatternModEnumOrder, array_length(BigListOfModNamesInPatternModEnumOrder), 0);
+                    any |= igInputFloat("##scale", &ad->scale, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                    igSameLine(0,4); if (igButton("off##scale", V2Zero)) { any = true; ad->scale = 1.0f; } igSameLine(0,4); TextString(S("scale"));
+                    any |= igInputFloat("##offset", &ad->offset, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                    igSameLine(0,4); if (igButton("off##offset", V2Zero)) { any = true; ad->offset = 0.0f; } igSameLine(0,4); TextString(S("offset"));
+                    any |= igInputFloat("##pow", &ad->pow, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                    igSameLine(0,4); if (igButton("off##pow", V2Zero)) { any = true; ad->pow = 1.0f; } igSameLine(0,4); TextString(S("pow"));
+                    any |= igInputFloat("##max", &ad->hi, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                    igSameLine(0,4); if (igButton("off##max", V2Zero)) { any = true; ad->hi = INFINITY; } igSameLine(0,4); TextString(S("max"));
+                    any |= igInputFloat("##min", &ad->lo, 0.25f, 0.25f * 0.25f, "%.2f", 0);
+                    igSameLine(0,4); if (igButton("off##min", V2Zero)) { any = true; ad->lo = -INFINITY; } igSameLine(0,4); TextString(S("min"));
+                } else {
+                    any |= igCombo_Str_arr("Base", &ad->stam_base, DiffValueStrings, array_length(DiffValueStrings) - 1, 0);
+                    any |= igCombo_Str("Skillset", &ad->stam_ss, "Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0);
+                }
+                any |= igCheckbox("Enabled", &ad->enabled);
+                igBeginDisabled(ad->enabled);
+                if (igButton("Remove", V2Zero)) {
+                    buf_remove_sorted_index(state.adj_diff[editing_group], editing_line);
+                    any = true;
+                    editing = false;
+                }
+                igEndDisabled();
+                igDummy(V2(0, 210 - (igGetCursorPosY() - y)));
+                igEndGroup();
+            } else {
+                igDummy(V2(0, 210));
+            }
+            igPopItemWidth();
+
+            igEndPopup();
+        } else {
+            editing = false;
+        }
+
+        if (any) {
+            buf_clear(state.ps.ops);
+            for (isize ss = 0; ss < NumSkillsets; ss++) {
+                for (isize i = 0; i < buf_len(state.adj_diff[ss]); i++) {
+                    AdjDiff ad = state.adj_diff[ss][i];
+                    assert(ad.ss == ss);
+                    buf_push(state.ps.ops, ad);
+                }
+            }
+            state.ps.num_ops = buf_len(state.ps.ops);
+            state.generation++;
+        }
+    }
+}
+
+void tab_optimize(void)
+{
+    f32 err_limit = 2.5f;
+    f32 loss_limit = 1e-4f;
+    for (isize i = 0; i < NumGraphSamples; i++) {
+        err_limit = max(err_limit, state.optimization_graph->ys[0][i]);
+        err_limit = max(err_limit, state.optimization_graph->ys[1][i]);
+        loss_limit = max(loss_limit, state.optimization_graph->ys[2][i]);
+    }
+    ImPlot_SetNextPlotLimitsX(state.opt.iter - NumGraphSamples, state.opt.iter, ImGuiCond_Always);
+    ImPlot_SetNextPlotLimitsY(0, (f64)err_limit * 1.1, ImGuiCond_Always, 0);
+    ImPlot_SetNextPlotLimitsY(0, (f64)loss_limit * 1.1, ImGuiCond_Always, 1);
+    if (BeginPlotOptimizer("##OptGraph")) {
+        ImPlot_PlotLine_FloatPtrInt("Avg Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
+        ImPlot_PlotLine_FloatPtrInt("Max Positive Error", state.optimization_graph->ys[1], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
+        ImPlot_SetPlotYAxis(ImPlotYAxis_2);
+        ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[2], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
+        ImPlot_EndPlot();
+    }
+
+    if (igButton(state.optimizing ? "Stop" : "Start", V2Zero)) {
+        state.optimizing = !state.optimizing;
+    }
+    igSameLine(0, 4);
+    if (igButton("Checkpoint", V2Zero)) {
+        checkpoint();
+    }
+    if (state.optimizer_error_message) {
+        igSameLine(0, 4);
+        igTextUnformatted(state.optimizer_error_message, 0);
+    }
+
+    if (igBeginChild_Str("Hyperparameters", V2(GetContentRegionAvailWidth() / 2.0f, 250.0f), 0, 0)) {
+        igSliderFloat("h", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
+        tooltip("coarseness of the derivative approximation\n\nfinite differences baybee");
+        igSliderFloat("Step Size", &StepSize, 1.0e-8f, 0.1f, "%g", ImGuiSliderFlags_None);
+        tooltip("how fast to change parameters. large values can be erratic");
+        igSliderInt("Sample Batch Size", &SampleBatchSize, 1, maxs(1, state.opt.n_samples), "%d", ImGuiSliderFlags_AlwaysClamp);
+        tooltip("random sample of n files for each step");
+        igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, maxs(1, state.opt.n_params), "%d", ImGuiSliderFlags_AlwaysClamp);
+        tooltip("random sample of n parameters for each step");
+        igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
+        tooltip("0 = train only on skillset\n1 = train only on overall");
+        igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
+        tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
+        igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
+        tooltip("weights higher MSDs heavier automatically\n0 = train on msd\n1 = train on exp(msd)\n\nmsd is zero centered and normalized so dw about it");
+        igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", ImGuiSliderFlags_Logarithmic);
+        tooltip("penalise moving parameters very far away from the defaults");
+        igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
+        tooltip("0 = prefer large changes to few parameters\n1 = prefer small changes to many parameters\n...theoretically");
+        igSliderFloat("Loss function", &LossFunction, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
+        tooltip("0 = optimise average error (squared loss)\n1 = optimize for correct order (quantile loss)\ndon't know how well this works. just an idea");
+    }
+    igEndChild();
+    igSameLine(0, 4);
+
+
+    if (igBeginChild_Str("Checkpoints", V2(GetContentRegionAvailWidth(), 250.0f), 0, 0)) {
+        if (igSelectable_Bool(state.latest_checkpoint.name, 0, ImGuiSelectableFlags_None, V2Zero)) {
+            restore_checkpoint(state.latest_checkpoint);
+        }
+        if (igSelectable_Bool(state.default_checkpoint.name, 0, ImGuiSelectableFlags_None, V2Zero)) {
+            restore_checkpoint(state.default_checkpoint);
+        }
+        for (isize i = buf_len(state.checkpoints) - 1; i >= 0; i--) {
+            if (igSelectable_Bool(state.checkpoints[i].name, 0, ImGuiSelectableFlags_None, V2Zero)) {
+                restore_checkpoint(state.checkpoints[i]);
+                break;
+            }
+        }
+    }
+    igEndChild();
+}
+
 void init(void)
 {
     push_allocator(scratch);
@@ -1653,7 +2542,10 @@ void init(void)
     }
 
     for (i32 i = 0; i < state.info.num_mods; i++) {
-        state.calc_pattern_mod_to_info_mod[debuginfo_mod_index(i)] = i;
+        i32 mod = debuginfo_mod_index(i);
+        if (mod != CalcPatternMod_Invalid) {
+            state.calc_pattern_mod_to_info_mod[mod] = i;
+        }
     }
 
     if (db_path) {
@@ -1717,7 +2609,7 @@ void frame(void)
     state.reset_optimizer_flag |= process_target_files(&state.loader, db_results.of[DBRequest_File]);
 
     // Search stuff
-    buf_reserve(state.search.results, 1024);
+    buf_reserve(state.search.results, 1024*64);
     for (isize i = 0; i < buf_len(db_results.of[DBRequest_Search]); i++) {
         DBResult *r = db_results.of[DBRequest_Search] + i;
         if (r->id == state.search.id) {
@@ -1726,7 +2618,6 @@ void frame(void)
     }
 
     // Optimization stuff
-    static char const *optimizer_error_message = 0;
     {
         if (!state.optimization_graph) {
             state.optimization_graph = &state.graphs[make_optimization_graph()];
@@ -1789,10 +2680,10 @@ void frame(void)
             }
 
             if (state.opt.n_params == 0) {
-                optimizer_error_message = "No parameters are enabled for optimizing.";
+                state.optimizer_error_message = "No parameters are enabled for optimizing.";
                 state.optimizing = false;
             } else if (state.opt.n_samples == 0) {
-                optimizer_error_message = "No files to optimize.";
+                state.optimizer_error_message = "No files to optimize.";
                 state.optimizing = false;
             }
         }
@@ -1808,7 +2699,7 @@ void frame(void)
             for (isize i = 0; i < state.opt.n_params; i++) {
                 if (isnan(state.opt.x[i])) {
                     state.optimizing = false;
-                    optimizer_error_message = "Cannot optimize due to NaNs. Reset to a good state.";
+                    state.optimizer_error_message = "Cannot optimize due to NaNs. Reset to a good state.";
                     break;
                 }
             }
@@ -1824,10 +2715,10 @@ void frame(void)
             }
 
             if (state.optimizing) {
-                if (!optimizer_error_message) {
+                if (!state.optimizer_error_message) {
                     checkpoint_latest();
                 }
-                optimizer_error_message = 0;
+                state.optimizer_error_message = 0;
 
                 for (isize i = 0; i < req.n_samples; i++) {
                     i32 sample = state.opt.active.samples[i];
@@ -1886,7 +2777,7 @@ void frame(void)
     igSetNextWindowSizeConstraints(V2(0, -1), V2(FLT_MAX, -1), 0, 0);
     igSetNextWindowPos(V2(-1.0f, 0), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(left_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
-    if (igBegin("Mod Parameters", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar)) {
+    if (igBegin("Mod Parameters", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoBringToFrontOnFocus)) {
         left_width = igGetWindowWidth() - 1.0f;
         u32 effect_mask = 0;
         isize clear_selections_to = -1;
@@ -1969,9 +2860,10 @@ void frame(void)
     igSetNextWindowSizeConstraints(V2(0, -1), V2(ds.x - left_width, -1), 0, 0);
     igSetNextWindowPos(V2(left_width + 2.0f, 2.0f), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(centre_width - 4.0f, ds.y - 52.0f), ImGuiCond_Always);
-    if (igBegin("SeeMinaCalc", 0, ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoMove)) {
+    if (igBegin("SeeMinaCalc", 0, ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoBringToFrontOnFocus)) {
         centre_width = igGetWindowWidth() + 4.0f;
         if (igBeginTabBar("main", ImGuiTabBarFlags_None)) {
+            SimFileInfo *next = 0;
             if (igBeginTabItem("Halp", 0,0)) {
                 igTextWrapped("There are two ways to get files into this thing: drag and drop simfiles, or drag and drop a cache.db and use the search tab. You can also drag on a CalcTestList.xml once cache.db is loaded.\n\n"
                     "Alternatively for the native binary only:\n"
@@ -1980,872 +2872,68 @@ void frame(void)
                     "You can set the ratings you want files to have for particular skillsets and the optimizer will fiddle with numerical values in the calc and try to make it happen. "
                     "I left it in here so people could mess around with it if they want. If you do find a good set, checkpoint it and it will save to persistent storage, you don't have to worry about losing it.\n\n"
                     "There isn't any way to get values out of it--talk to me if you want to do that.\n\n"
-                    "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n");
+                    "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n\n"
+                    "Changes\n"
+                    " - 2021/11/5\n"
+                    "   - Double click tab headers to open that one in a window\n"
+                    "   - Pattern mod tab\n"
+                    "   - Automatically disable dead files in optimizer");
                 igEndTabItem();
             }
 
             if (igBeginTabItem("Files", 0,0)) {
-                if (buf_len(state.files) == 0) {
-                    TextString(S("No files :("));
-                } else if (igBeginTable("FileTable", 8, ImGuiTableFlags_SizingStretchProp, V2Zero, 0)) {
-                    igTableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 20.0f, 0);
-                    igTableSetupColumn("File", 0, 1.0f, 0);
-                    igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 105.0f, 0);
-                    igTableSetupColumn("Rate", ImGuiTableColumnFlags_WidthFixed, 56.0f, 0);
-                    igTableSetupColumn("WantMSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
-                    igTableSetupColumn("Meight", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
-                    igTableSetupColumn("Message", ImGuiTableColumnFlags_WidthFixed, 15.0f, 0);
-                    igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, -FLT_MIN, 0);
-                    ImGuiListClipper clip = {0};
-                    ImGuiListClipper_Begin(&clip, buf_len(state.files), 0.0f);
-                    while (ImGuiListClipper_Step(&clip)) {
-                        for (i32 sfi_index = clip.DisplayStart; sfi_index < clip.DisplayEnd; sfi_index++) {
-                            SimFileInfo *sfi = state.files + sfi_index;
-                            f32 weight_before_user_interaction = sfi->target.weight;
-                            calculate_skillsets(update_visible_skillsets ? &state.high_prio_work : &state.low_prio_work, sfi, false, state.generation);
-                            if (sfi == active) {
-                                igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
-                            }
-                            igPushID_Int(sfi_index);
-                            igTableNextRow(0, 0);
-
-                            igTableSetColumnIndex(0);
-                            igBeginDisabled(sfi->target.last_user_set_weight == 0.0f);
-                            b8 enabled = (sfi->target.weight != 0.0f);
-                            if (igCheckbox("##enabled", &enabled)) {
-                                sfi->target.weight = enabled ? sfi->target.last_user_set_weight : 0.0f;
-                            }
-                            tooltip("optimize on this file");
-                            igEndDisabled();
-
-                            igTableSetColumnIndex(1);
-                            if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
-                                if (sfi->open && sfi == active) {
-                                    sfi->open = false;
-                                } else {
-                                    sfi->open = true;
-                                    next_active = sfi;
-                                }
-                            }
-
-                            igTableSetColumnIndex(2);
-                            igPushItemWidth(-FLT_MIN);
-                            if (igBeginCombo("##Skillset", SkillsetNames[sfi->target.skillset], 0)) {
-                                for (isize ss = 1; ss < NumSkillsets; ss++) {
-                                    b32 is_selected = (ss == sfi->target.skillset);
-                                    if (igSelectable_Bool(SkillsetNames[ss], is_selected, 0, V2Zero)) {
-                                        sfi->target.skillset = ss;
-                                        buf_clear(sfi->id.buf);
-                                        sfi->id.len = 0;
-                                        make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
-                                        sfi->display_id.len = 0;
-                                        make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
-                                        if (state.optimizing) state.generation++;
-                                    }
-                                    if (is_selected) {
-                                        igSetItemDefaultFocus();
-                                    }
-                                }
-                                igEndCombo();
-                            }
-                            igSameLine(0,4);
-
-                            igTableSetColumnIndex(3);
-                            igPushItemWidth(-FLT_MIN);
-                            static char const *rates[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2.0" };
-                            static float rates_f[] = { 0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f, 1.8f, 1.9f, 2.0f };
-                            for (isize r_find_selected = 0; r_find_selected < array_length(rates); r_find_selected++) {
-                                if ((absolute_value(rates_f[r_find_selected] - sfi->target.rate) < 0.05f)
-                                 && igBeginCombo("##Rate", rates[r_find_selected], 0)) {
-                                    for (isize r = 0; r < array_length(rates); r++) {
-                                        b32 is_selected = (absolute_value(rates_f[r] - sfi->target.rate) < 0.05f);
-                                        if (igSelectable_Bool(rates[r], is_selected, 0, V2Zero)) {
-                                            sfi->target.rate = rates_f[r];
-                                            buf_clear(sfi->id.buf);
-                                            sfi->id.len = 0;
-                                            make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
-                                            sfi->display_id.len = 0;
-                                            make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
-                                            state.generation++;
-                                        }
-                                        if (is_selected) {
-                                            igSetItemDefaultFocus();
-                                        }
-                                    }
-                                    igEndCombo();
-                                }
-                            }
-
-                            igTableSetColumnIndex(4);
-                            igPushItemWidth(-FLT_MIN);
-                            igDragFloat("##target", &sfi->target.want_msd, 0.1f, 0.0f, 40.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp);
-                            tooltip("target msd for skillset");
-
-                            igTableSetColumnIndex(5);
-                            igPushItemWidth(-FLT_MIN);
-                            if (igDragFloat("##weight", &sfi->target.weight, 0.1f, 0.0f, 20.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp)) {
-                                sfi->target.last_user_set_weight = sfi->target.weight;
-                            }
-                            tooltip("weight");
-
-                            igTableSetColumnIndex(6);
-                            if (absolute_value(sfi->target.delta) > 5.0f) {
-                                igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "!");
-                                tooltip("calc is off by %02.02f\n\nthis might not be the file you think it is", (f64)sfi->target.delta);
-                                igSameLine(0,4);
-                            }
-                            for (isize i = 1; i < NumSkillsets; i++) {
-                                if (sfi->aa_rating.E[i] * 0.9f > sfi->aa_rating.E[sfi->target.skillset]) {
-                                    igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "?");
-                                    tooltip("calc doesn't think this file is %s\n\nthis might not be the file you think it is", SkillsetNames[sfi->target.skillset]);
-                                    break;
-                                }
-                            }
-
-                            igTableSetColumnIndex(7);
-                            for (isize ss = 0; ss < NumSkillsets; ss++) {
-                                igTextColored(msd_color(sfi->aa_rating.E[ss]), "%s%02.2f", sfi->aa_rating.E[ss] < 10.f ? "0" : "", (f64)sfi->aa_rating.E[ss]);
-                                tooltip(SkillsetNames[ss]);
-                                igSameLine(0, 4);
-                            }
-
-                            if (sfi == active) {
-                                igPopStyleColor(1);
-                            }
-                            igPopID();
-
-                            if (sfi->target.weight != weight_before_user_interaction) {
-                                state.reset_optimizer_flag = true;
-                            }
-                        }
-                    }
-                    igEndTable();
+                if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
+                    state.tab_window = Tab_Files;
                 }
+                next = tab_files(active, update_visible_skillsets);
                 igEndTabItem();
             }
 
             if (db_ready() && igBeginTabItem("Search", 0,0)) {
-                static char q[512] = "";
-                static bool have_query = false;
-                bool have_new_query = false;
-                if (igInputText("##Search", q, 512, 0,0,0)) {
-                    have_query = (q[0] != 0);
-                    if (have_query) {
-                        state.search.id = db_search((String) { q, strlen(q) });
-                        have_new_query = true;
-                    }
+                if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
+                    state.tab_window = Tab_Search;
                 }
-                if (have_query) {
-                    igSameLine(0, 4);
-                    igText("%lld matches", buf_len(state.search.results));
-                }
-                if (igBeginTable("Search Results", 7, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
-                    igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 65.0f, 0);
-                    igTableSetupColumn("Author", 0, 2, 0);
-                    igTableSetupColumn("Title", 0, 5, 0);
-                    igTableSetupColumn("Subtitle", 0, 3, 0);
-                    igTableSetupColumn("Artist", 0, 2, 0);
-                    igTableSetupColumn("MSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
-                    igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 75.0f, 0);
-                    igTableHeadersRow();
-                    ImGuiListClipper clip = {0};
-                    ImGuiListClipper_Begin(&clip, buf_len(state.search.results), 0.0f);
-                    while (ImGuiListClipper_Step(&clip)) {
-                        for (isize i = clip.DisplayStart; i < clip.DisplayEnd; i++) {
-                            DBFile *f = &state.search.results[i];
-                            dbfile_set_skillset_and_rating_from_all_msds(f);
-                            igTableNextRow(0, 0);
-                            igTableSetColumnIndex(0);
-                            TextString(SmDifficultyStrings[f->difficulty]);
-                            igTableSetColumnIndex(1);
-                            TextString(f->author);
-                            igTableSetColumnIndex(2);
-                            if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
-                                load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
-                            }
-                            igTableSetColumnIndex(3);
-                            TextString(f->subtitle);
-                            igTableSetColumnIndex(4);
-                            TextString(f->artist);
-                            igTableSetColumnIndex(5);
-                            igTextColored(msd_color(f->rating), "%02.2f", (f64)f->rating);
-                            igTableSetColumnIndex(6);
-                            igText("%s", SkillsetNames[f->skillset]);
-                        }
-                    }
-
-                    igEndTable();
-                }
-                if (have_new_query) {
-                    // Delaying clearing the old search's results one frame looks a bit nicer
-                    buf_clear(state.search.results);
-                }
+                tab_search();
                 igEndTabItem();
             }
 
             if (igBeginTabItem("Graphs", 0,0)) {
-                if (buf_len(state.files) == 0) {
-                    igTextWrapped("No files to graph :(");
-                } else if (active == null_sfi) {
-                    next_active = state.files;
-                    next_active->open = true;
-                } else {
-                    SimFileInfo *sfi = active;
-
-                    // File difficulty + chartkey text
-                    igTextColored(msd_color(sfi->aa_rating.overall), "%02.2f", (f64)sfi->aa_rating.overall);
-                    igSameLine(0, 8);
-                    igSelectable_Bool(sfi->id.buf, false, ImGuiSelectableFlags_Disabled, V2Zero);
-                    igSameLine(clamp_low(GetContentRegionAvailWidth() - 275.f, 100), 0);
-                    igText(sfi->chartkey.buf);
-
-                    // Plots. Weird rendering order: first 0, then backwards from the end. This keeps the main graph at the top and the rest most-to-least recent.
-                    FnGraph *fng = &state.graphs[sfi->graphs[0]];
-                    ImPlot_SetNextPlotLimits((f64)WifeXs[0] * 100, (f64)WifeXs[Wife965Index + 1] * 100, (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
-                    if (BeginPlotDefaults("Rating", "Wife%", "SSR")) {
-                        calculate_file_graph(&state.high_prio_work, sfi, fng, state.generation);
-                        for (i32 ss = 0; ss < NumSkillsets; ss++) {
-                            skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
-                        }
-                        ImPlot_EndPlot();
-                    }
-                    for (isize fungi = buf_len(sfi->graphs) - 1; fungi >= 1; fungi--) {
-                        fng = &state.graphs[sfi->graphs[fungi]];
-                        if (fng->param == changed_param.param && (changed_param.type == ParamSlider_LowerBoundChanged || changed_param.type == ParamSlider_UpperBoundChanged)) {
-                            calculate_parameter_graph_force(&state.high_prio_work, sfi, fng, state.generation);
-                        }
-
-                        i32 mp = fng->param;
-                        ParamInfo *p = &state.info.params[mp];
-                        u8 full_name[64] = {0};
-                        snprintf(full_name, sizeof(full_name), "%s.%s", state.info.mods[p->mod].name, p->name);
-                        igPushID_Str(full_name);
-                        ImPlot_SetNextPlotLimits((f64)state.ps.min[mp], (f64)state.ps.max[mp], (f64)fng->min - 1.0, (f64)fng->max + 2.0, ImGuiCond_Always);
-                        if (BeginPlotDefaults("##AA", full_name, "AA Rating")) {
-                            calculate_parameter_graph(&state.high_prio_work, sfi, fng, state.generation);
-                            for (i32 ss = 0; ss < NumSkillsets; ss++) {
-                                skillset_line_plot(ss, ss_highlight[ss], fng, fng->ys[ss]);
-                            }
-                            ImPlot_EndPlot();
-                        }
-                        igPopID();
-                    }
+                if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
+                    state.tab_window = Tab_Graphs;
                 }
-
+                next = tab_graphs(active, ss_highlight, &changed_param);
                 igEndTabItem();
             }
 
             if (igBeginTabItem("Song Preview", 0,0)) {
-                if (buf_len(state.files) == 0) {
-                    igTextWrapped("No files to preview :(");
-                } else if (active == null_sfi) {
-                    next_active = state.files;
-                    next_active->open = true;
-                } else {
-                    igBeginChild_Str("##no scroll", V2(-1,-1), 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoScrollbar|ImGuiWindowFlags_NoScrollWithMouse);
-                    igBeginGroup();
-                    static f32 cmod = 600.0f;
-                    static f32 mini = 0.5f;
-                    f32 old_y_scale = cmod * mini;
-                    igSetNextItemWidth(100.0f);
-                    bool cmod_changed = igSliderFloat("cmod", &cmod, 1.0f, 2000, "%f", 0);
-                    igSetNextItemWidth(100.0f);
-                    bool mini_changed = igSliderFloat("mini", &mini, 0.01f, 2.0f, "%f", 0);
-                    igEndGroup();
-
-                    igSameLine(0,-1);
-                    igBeginGroup();
-                    static f32 x_scale = 1.0f;
-                    static f32 x_nps_scale = 1.0f;
-                    igSetNextItemWidth(100.0f);
-                    igSliderFloat("scale (pmod)", &x_scale, 0.01f, 2.0f, "%f", 0);
-                    igSetNextItemWidth(100.0f);
-                    igSliderFloat("scale (nps)", &x_nps_scale, 0.01f, 2.0f, "%f", 0);
-                    igEndGroup();
-
-                    igSameLine(0,-1);
-                    igBeginGroup();
-                    f32 scroll_max[2] = {0.0f, 0.0f};
-                    static f32 scroll[2] = {0.0f, 0.0f};
-                    static f32 ig_scroll[2] = {0.0f, 0.0f};
-                    static f32 scroll_difference = 0.0f;
-                    static bool link_scroll = true;
-                    static bool diff = false;
-                    if (igCheckbox("link scroll", &link_scroll)) {
-                        scroll_difference = scroll[1] - scroll[0];
-                    }
-                    igCheckbox("abs diff", &diff);
-                    igEndGroup();
-                    igSameLine(0, 50.0f);
-                    igBeginGroup();
-                    static bool jack_diff = false;
-                    static bool jack_stam = false;
-                    static bool jack_loss = false;
-                    igCheckbox("jack diff", &jack_diff);
-                    igSameLine(0,-1); igCheckbox("jack stam", &jack_stam);
-                    igSameLine(0,-1); igCheckbox("jack loss", &jack_loss);
-
-                    static i32 const diff_values[] = { NPSBase, TechBase, RMABase, MSD };
-                    static bool diff_values_enabled[array_length(diff_values)] = {0};
-
-                    static i32 const misc[] = { Pts, PtLoss, StamMod };
-                    static char const *misc_strings[] = { "Pts", "PtLoss", "StamMod" };
-                    static bool misc_enabled[array_length(misc)] = {0};
-
-                    for (isize i = 0; i < array_length(diff_values); i++) {
-                        igCheckbox(DiffValueStrings[i], diff_values_enabled + i);
-                        igSameLine(0,-1);
-                    }
-                    for (isize i = 0; i < array_length(misc); i++) {
-                        igCheckbox(misc_strings[i], misc_enabled + i);
-                        igSameLine(0,-1);
-                    }
-                    igEndGroup();
-
-                    f32 y_scale = cmod * mini;
-
-                    ImVec2 dbz_dim = V2((f32)dbz.width * mini, (f32)dbz.height * mini);
-                    ImVec2 uv_min = V2(0.0f, 0.0f);
-                    ImVec2 uv_max = V2(1.0f, 1.0f);
-                    ImVec4 tint_col = (ImVec4) {0.8f, 0.8f, 0.8f, 1.0f};
-                    ImVec4 border_col = (ImVec4) {0};
-                    static f32 plot_window_height = 0.0f;
-
-                    if (cmod_changed || mini_changed) {
-                        scroll[0] = (scroll[0] + (plot_window_height*0.5f)) * (y_scale / old_y_scale) - (plot_window_height*0.5f);
-                        scroll[1] = (scroll[1] + (plot_window_height*0.5f)) * (y_scale / old_y_scale) - (plot_window_height*0.5f);
-                        scroll_difference *= y_scale / old_y_scale;
-                    }
-
-                    f64 linked_ymin = 0.0;
-                    f64 linked_ymax = 0.0;
-
-                    for (i32 preview_index = 0; preview_index < 2; preview_index++) {
-                        SimFileInfo *sfi = state.previews[preview_index];
-                        if (sfi && ALWAYS(sfi->notes)) {
-                            calculate_debug_graphs(&state.debug_graph_work, sfi, state.generation);
-
-                            if (sfi->debug_generation == state.generation) {
-                                DebugInfo *d = &sfi->debug_info;
-                                isize n_rows = sfi->n_rows;
-                                NoteInfo const *rows = note_data_rows(sfi->notes);
-                                f32 last_row_time = rows[n_rows - 1].rowTime / sfi->target.rate;
-                                f32 last_row_time_scroll = last_row_time * y_scale;
-                                scroll_max[preview_index] = last_row_time_scroll;
-                                igPushID_Int(preview_index);
-                                igSetNextWindowScroll(V2(0, clamp(0, last_row_time_scroll, scroll[preview_index])));
-                                igSetNextWindowSize(V2(-1.0f, last_row_time_scroll), ImGuiCond_Always);
-                                if (igBeginChild_Str("##same id to keep the scroll", V2(450.0f, 0), true, ImGuiWindowFlags_MenuBar)) {
-                                    igBeginMenuBar();
-                                    igText(sfi->display_id.buf);
-                                    igEndMenuBar();
-
-                                    plot_window_height = igGetWindowHeight();
-
-                                    sfi_set_snaps_from_bpms(sfi);
-
-                                    f32 scroll_y = igGetScrollY();
-                                    ImGuiWindow *window = igGetCurrentWindow();
-                                    ImGuiID active_id = igGetActiveID();
-                                    if (igIsWindowHovered(0) && io->MouseWheel) {
-                                        scroll[preview_index] -= io->MouseWheel*5.0f*ImGuiWindow_CalcFontSize(window);
-                                        if (link_scroll) {
-                                            scroll[(preview_index + 1) & 1] -= io->MouseWheel*5.0f*ImGuiWindow_CalcFontSize(window);
-                                        }
-                                    }
-                                    if (active_id == igGetWindowScrollbarID(window, ImGuiAxis_Y)) {
-                                        scroll[preview_index] = scroll_y;
-                                        if (link_scroll) {
-                                            if (preview_index == 0) {
-                                                scroll[1] = scroll[0] + scroll_difference;
-                                            } else {
-                                                scroll[0] = scroll[1] - scroll_difference;
-                                            }
-                                        }
-                                    }
-                                    ig_scroll[preview_index] = scroll_y;
-
-                                    f32 x = 64.0f;
-                                    f32 scroll_y_time_lo = (scroll_y / y_scale);
-                                    f32 scroll_y_time_hi = clamp_high(last_row_time, ((scroll_y + igGetWindowHeight()) / y_scale));
-                                    f32 x_offset = 450.0f / 4.0f;
-                                    isize end_row = sfi_row_at_time(sfi, 0.5f + scroll_y_time_hi * sfi->target.rate);
-                                    f32 start_time = scroll_y_time_lo * sfi->target.rate - 0.5f;
-                                    for (isize i = end_row - 1; i >= 0 && rows[i].rowTime > start_time; i--) {
-                                        isize snap = sfi->snaps[i];
-                                        assert(snap < array_length(dbz.luts));
-                                        for (isize c = 0; c < 4; c++) {
-                                            if (rows[i].notes & (1 << c)) {
-                                                f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
-                                                f32 y_pos = y_scale * (rows[i].rowTime / sfi->target.rate);
-                                                igSetCursorPos(V2(x_pos, y_pos));
-                                                igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
-                                            }
-                                        }
-                                    }
-                                    {
-                                        isize i = n_rows - 1;
-                                        isize snap = sfi->snaps[i];
-                                        for (isize c = 0; c < 4; c++) {
-                                            if (rows[i].notes & (1 << c)) {
-                                                f32 x_pos = mini * ((f32)c * x - 2.f*x) + 2.f*x + x_offset;
-                                                f32 y_pos = y_scale * (rows[i].rowTime / sfi->target.rate);
-                                                igSetCursorPos(V2(x_pos, y_pos));
-                                                igImage((ImTextureID)(uintptr_t)state.dbz_tex[snap][c].id, dbz_dim, uv_min, uv_max, tint_col, border_col);
-                                            }
-                                        }
-                                    }
-                                    isize scroll_y_interval_index_lo = (isize)(scroll_y_time_lo * 2.0f);
-                                    isize scroll_y_interval_index_hi = (isize)((scroll_y_time_hi + 1.0f) * 2.0f);
-                                    isize interval_offset = clamps(0, d->n_intervals, scroll_y_interval_index_lo);
-                                    isize n_intervals = clamps(0, d->n_intervals - interval_offset, scroll_y_interval_index_hi - scroll_y_interval_index_lo);
-                                    assert(interval_offset >= 0);
-                                    assert(interval_offset + n_intervals <= d->n_intervals);
-                                    igSetCursorPos(V2(0, scroll_y));
-                                    ImPlot_PushColormap_PlotColormap(3);
-                                    ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
-                                    ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
-                                    ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                                    ImPlot_SetNextPlotLimitsX(-2.18 / (f64)x_scale, 2.0 / (f64)x_scale, ImGuiCond_Always);
-                                    ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
-                                    ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
-                                    ImPlot_SetNextPlotFormatY("%06.2f", 0);
-                                    if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
-                                      (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & (~ImPlotFlags_NoLegend & ~ImPlotFlags_NoMousePos),
-                                      ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoLabel|ImPlotAxisFlags_NoGridLines,
-                                      ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoGridLines, 0,0,0,0)) {
-                                        ImPlot_SetLegendLocation(ImPlotLocation_South, ImPlotOrientation_Vertical, 0);
-                                        for (isize i = 0; i < state.info.num_mods; i++) {
-                                            i32 mi = debuginfo_mod_index(i);
-                                            if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
-                                                igPushID_Int(mi);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr(state.info.mods[i].name, d->interval_hand[0].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].pmod[mi] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                igPopID();
-                                            }
-                                        }
-                                        if (jack_stam) {
-                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_stam L", d->jack_hand[0].jack_stam, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
-                                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_stam R", d->jack_hand[1].jack_stam, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
-                                        }
-                                        if (jack_loss) {
-                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_loss L", d->jack_hand[0].jack_loss, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
-                                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_loss R", d->jack_hand[1].jack_loss, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
-                                        }
-                                        ImPlot_EndPlot();
-                                    }
-
-                                    igSetCursorPos(V2(0, scroll_y));
-                                    ImPlot_PushColormap_PlotColormap(2);
-                                    ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
-                                    ImPlot_SetNextPlotLimitsX(-75.0 / (f64)x_nps_scale, 50.0 / (f64)x_nps_scale, ImGuiCond_Always);
-                                    ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
-                                    if (ImPlot_BeginPlot(sfi->id.buf, "p", "t", V2(0, (scroll_y_time_hi - scroll_y_time_lo) * y_scale),
-                                      (ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly) & ~ImPlotFlags_NoLegend,
-                                      ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
-                                      ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
-                                        ImPlot_SetLegendLocation(ImPlotLocation_North, ImPlotOrientation_Vertical, 0);
-                                        if (jack_diff) {
-                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_diff L", d->jack_hand[0].jack_diff, d->jack_hand[0].row_time, d->jack_hand[0].length, 0, sizeof(float));
-                                            ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                            ImPlot_PlotStairs_FloatPtrFloatPtr("jack_diff R", d->jack_hand[1].jack_diff, d->jack_hand[1].row_time, d->jack_hand[1].length, 0, sizeof(float));
-                                        }
-                                        for (i32 i = 0; i < array_length(diff_values); i++) {
-                                            if (diff_values_enabled[i]) {
-                                                igPushID_Int(100+i);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr(DiffValueStrings[i], d->interval_hand[0].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].diff[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                igPopID();
-                                            }
-                                        }
-                                        for (i32 i = 0; i < array_length(misc); i++) {
-                                            if (misc_enabled[i]) {
-                                                igPushID_Int(200+i);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr(misc_strings[i], d->interval_hand[0].misc[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                                ImPlot_PlotStairs_FloatPtrFloatPtr("##right", d->interval_hand[1].misc[i] + interval_offset, d->interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                                igPopID();
-                                            }
-                                        }
-                                        ImPlot_EndPlot();
-                                    }
-                                    ImPlot_PopStyleColor(3);
-                                    ImPlot_PopColormap(2);
-                                }
-                                igEndChild();
-                                igPopID();
-                            }
-                        }
-                        igSameLine(0,-1);
-                    }
-
-                    // pmod diffs
-                    if (diff && state.previews[1] != 0) {
-                        if ((state.previews[0]->debug_generation == state.generation) && (state.previews[1]->debug_generation == state.generation)) {
-                            static DebugInfo diff_data = {0};
-                            static struct { SimFileInfo *a, *b; f32 scroll_difference; i32 generation; } current = {0};
-                            f32 ba_scroll_difference = ig_scroll[0] - ig_scroll[1];
-                            isize scroll_intervals = (isize)(2 * ba_scroll_difference / y_scale);
-                            b32 invalidated = current.a != state.previews[0] || current.b != state.previews[1] || current.scroll_difference != ba_scroll_difference || current.generation != state.generation;
-                            if (invalidated || (!link_scroll && (ba_scroll_difference != current.scroll_difference))) {
-                                DebugInfo *da = &state.previews[0]->debug_info;
-                                DebugInfo *db = &state.previews[1]->debug_info;
-                                isize n_intervals = maxs(da->n_intervals, db->n_intervals);
-                                for (isize i = 0; i < NUM_CalcPatternMod; i++) {
-                                    buf_clear(diff_data.interval_hand[0].pmod[i]);
-                                    buf_clear(diff_data.interval_hand[1].pmod[i]);
-                                    buf_pushn(diff_data.interval_hand[0].pmod[i], maxs(2*60*20, n_intervals));
-                                    buf_pushn(diff_data.interval_hand[1].pmod[i], maxs(2*60*20, n_intervals));
-
-                                    for (isize j = 0; j < n_intervals; j++) {
-                                        f32 bl = (j < db->n_intervals) ? db->interval_hand[0].pmod[i][j] : 0.0f;
-                                        f32 br = (j < db->n_intervals) ? db->interval_hand[1].pmod[i][j] : 0.0f;
-                                        isize clamped = clamps(0, da->n_intervals - 1, j + scroll_intervals);
-                                        f32 al = da->interval_hand[0].pmod[i][clamped];
-                                        f32 ar = da->interval_hand[1].pmod[i][clamped];
-                                        diff_data.interval_hand[0].pmod[i][j] = -absolute_value(bl - al);
-                                        diff_data.interval_hand[1].pmod[i][j] = absolute_value(br - ar);
-                                    }
-                                }
-                                buf_reserve(diff_data.interval_times, 2*60*20);
-                                for (isize i = buf_len(diff_data.interval_times); i < n_intervals; i++) {
-                                    buf_push(diff_data.interval_times, (f32)i * 0.5f);
-                                }
-                                diff_data.n_intervals = n_intervals;
-                                current.a = state.previews[0];
-                                current.b = state.previews[1];
-                                current.scroll_difference = ba_scroll_difference;
-                                current.generation = state.generation;
-                            }
-                            // manually positioned like an animal
-                            igSetCursorPos(V2(255.0f, 55.0f));
-                            plot_window_height -= 16.0f;
-                            f64 scroll_y_time_lo = (f64)(ig_scroll[1] / y_scale);
-                            f64 scroll_y_time_hi = scroll_y_time_lo + (f64)(plot_window_height / y_scale);
-                            isize interval_offset = (isize)(scroll_y_time_lo * 2);
-                            isize n_intervals = clamp_highs((isize)((scroll_y_time_hi - scroll_y_time_lo + 1.0) * 2.0) , diff_data.n_intervals - interval_offset);
-                            f64 x_min = -2 * (f64)x_scale;
-                            f64 x_max =  2 * (f64)x_scale;
-                            ImPlot_LinkNextPlotLimits(0, 0, &linked_ymin, &linked_ymax, 0, 0, 0, 0);
-                            ImPlot_SetNextPlotLimitsX(x_min, x_max, ImGuiCond_Always);
-                            ImPlot_SetNextPlotLimitsY((f64)scroll_y_time_lo, (f64)scroll_y_time_hi, ImGuiCond_Always, 0);
-                            ImPlot_PushColormap_PlotColormap(3);
-                            ImPlot_PushStyleColor_U32(ImPlotCol_FrameBg, 0);
-                            ImPlot_PushStyleColor_U32(ImPlotCol_PlotBorder, 0);
-                            ImPlot_PushStyleColor_U32(ImPlotCol_PlotBg, 0);
-                            if (ImPlot_BeginPlot("##diff", "p", "t", V2(0, plot_window_height),
-                              ImPlotFlags_NoChild|ImPlotFlags_CanvasOnly,
-                              ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations,
-                              ImPlotAxisFlags_Invert|ImPlotAxisFlags_Lock|ImPlotAxisFlags_NoDecorations, 0,0,0,0)) {
-                                for (isize i = 0; i < state.info.num_mods; i++) {
-                                    i32 mi = debuginfo_mod_index(i);
-                                    if (mi != CalcPatternMod_Invalid && state.preview_pmod_graphs_enabled[i]) {
-                                        igPushID_Int(mi);
-                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##left", diff_data.interval_hand[0].pmod[mi] + interval_offset, diff_data.interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                        ImVec4 c = {0}; ImPlot_GetLastItemColor(&c); ImPlot_SetNextLineStyle(c, 1.0f);
-                                        ImPlot_PlotStairs_FloatPtrFloatPtr("##right", diff_data.interval_hand[1].pmod[mi] + interval_offset, diff_data.interval_times + interval_offset, n_intervals, 0, sizeof(float));
-                                        igPopID();
-                                    }
-                                }
-
-                                ImPlot_EndPlot();
-                            }
-                            ImPlot_PopStyleColor(3);
-                            ImPlot_PopColormap(1);
-                        }
-                    }
-
-                    if (link_scroll) {
-                        if (scroll_difference > 0) {
-                            scroll[0] = clamp(-scroll_difference, scroll_max[0], scroll[0]);
-                            scroll[1] = clamp(0, scroll_max[1] + scroll_difference, scroll[1]);
-                        } else {
-                            scroll[0] = clamp(0, scroll_max[0] - scroll_difference, scroll[0]);
-                            scroll[1] = clamp(scroll_difference, scroll_max[1], scroll[1]);
-                        }
-                    }
-
-                    igEndChild();
+                if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
+                    state.tab_window = Tab_Preview;
                 }
-
+                next = tab_preview(active);
                 igEndTabItem();
             }
 
-            if (igBeginTabItem("Pattern Mods", 0,0)) {
-                if (igBeginTable("PMods", NumSkillsets - 2, ImGuiTableRowFlags_Headers, V2Zero, 0)) {
-                    b32 any = false;
-                    static i32 column_to_skillset[] = { 1,2,3,5,6,7 };
-                    // PMods table
-                    for (isize i = 0; i < array_length(column_to_skillset); i++) {
-                        igTableSetupColumn(SkillsetNames[column_to_skillset[i]], 0, 0, 0);
-                    }
-                    // NPSBase/TechBase
-                    igTableNextRow(0, 0);
-                    for (isize c = 0; c < array_length(column_to_skillset); c++) {
-                        i32 ss = column_to_skillset[c];
-                        igTableSetColumnIndex(c);
-                        igPushID_Str(SkillsetNames[ss]);
-                        igSetNextItemWidth(-1);
-                        if (igCombo_Str_arr("##Base", &state.ps.adj_diff_base[ss], DiffValueStrings, array_length(DiffValueStrings) - 1, 0)) {
-                            any = true;
-                        }
-                        igPopID();
-                    }
-                    igTableHeadersRow();
-                    // The PMods
-                    for (isize i = 0; i < state.info.num_mods; i++) {
-                        size_t mod = debuginfo_mod_index(i);
-                        if (mod != CalcPatternMod_Invalid) {
-                            igTableNextRow(0, 0);
-                            for (i32 c = 0; c < array_length(column_to_skillset); c++) {
-                                igTableSetColumnIndex(c);
-                                i32 pmod_index = (mod * NumSkillsets) + column_to_skillset[c];
-                                assert(pmod_index < state.ps.num_pmods_used);
-                                igPushID_Int(pmod_index);
-                                if (igSelectable_BoolPtr(state.info.mods[i].name, state.ps.pmods_used + pmod_index, 0, V2Zero)) {
-                                    any = true;
-                                }
-                                igPopID();
-                            }
-                        }
-                    }
-                    igEndTable();
-
-                    igSeparator();
-
-                    static isize editing_group = 2;
-                    static isize editing_line = 0;
-                    TextString(S("Add new adjustment to"));
-                    igSameLine(0,4);
-                    igSetNextItemWidth(80.0f);
-                    static i32 new_ss = 0;
-                    if (igCombo_Str("##newss", &new_ss, " \0Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0)) {
-                        if (new_ss != 0) {
-                            i32 ss = column_to_skillset[new_ss - 1];
-                            editing_group = ss;
-                            editing_line = buf_len(state.adj_diff[ss]);
-                            buf_push(state.adj_diff[ss], (AdjDiff) {
-                                .op = 0,
-                                .mod = 0,
-                                .scale = 1.0f,
-                                .offset = 0.0f,
-                                .pow = 1.0f,
-                                .lo = -INFINITY,
-                                .hi = INFINITY,
-                                .ss = ss,
-                                .enabled = false
-                            });
-                            new_ss = 0;
-                            any = true;
-                        }
-                    }
-                    // Pmod adjustments
-                    push_allocator(scratch);
-                    for (isize i = 0; i < array_length(column_to_skillset); i++) {
-                        i32 ss = column_to_skillset[i];
-                        if (igCollapsingHeader_TreeNodeFlags(SkillsetNames[ss], ImGuiTreeNodeFlags_CollapsingHeader|ImGuiTreeNodeFlags_DefaultOpen)) {
-                            for (isize j = 0; j < buf_len(state.adj_diff[ss]); j++) {
-                                u8 *str = 0;
-                                AdjDiff ad = state.adj_diff[ss][j];
-                                if (ad.enabled == false) {
-                                    buf_printf(str, "// ");
-                                }
-                                if (ad.op != AdjDiffOp_Stam) {
-                                    buf_printf(str, "*adj_diff %c= ", (ad.op == AdjDiffOp_Mul) ? '*' : '/');
-                                    if (ad.lo != -INFINITY) {
-                                        buf_printf(str, "max(%.2f, ", (f64)ad.lo);
-                                    }
-                                    if (ad.hi != INFINITY) {
-                                        buf_printf(str, "min(%.2f, ", (f64)ad.hi);
-                                    }
-                                    if (ad.pow == 0.5f) {
-                                        buf_printf(str, "sqrt");
-                                    }
-                                    if (ad.pow != 1.0f) {
-                                        buf_printf(str, "(");
-                                    }
-                                    buf_printf(str, "%s", state.info.mods[state.calc_pattern_mod_to_info_mod[ad.mod]].name);
-                                    if (ad.scale != 1.0f) {
-                                        buf_printf(str, " * %.2f", (f64)ad.scale);
-                                    }
-                                    if (ad.offset != 0.0f) {
-                                        buf_printf(str, " + %.2f", (f64)ad.offset);
-                                    }
-                                    if (ad.pow == 0.5f) {
-                                        buf_printf(str, ")");
-                                    } else if (ad.pow != 1.0f) {
-                                        buf_printf(str, ")^%.2f", (f64)ad.pow);
-                                    }
-                                    if (ad.hi != INFINITY) {
-                                        buf_printf(str, ")");
-                                    }
-                                    if (ad.lo != -INFINITY) {
-                                        buf_printf(str, ")");
-                                    }
-                                    buf_printf(str, "\n");
-                                } else {
-                                    buf_printf(str, "*stam_base = max(*adj_diff, %s * %s)\n", DiffValueStrings[ad.stam_base], SkillsetNames[ad.stam_ss]);
-                                }
-                                b32 active = (ss == editing_group) && (j == editing_line);
-                                igPushStyleColor_U32(ImGuiCol_Header, 0xff504040);
-                                if (igSelectable_Bool(str, active, 0, V2Zero)) {
-                                    editing_group = ss;
-                                    editing_line = j;
-                                    igOpenPopup_Str("PModAdjustor", 0);
-                                }
-                                igPopStyleColor(1);
-                                if (igIsItemActive() && !igIsItemHovered(0)) {
-                                    ImVec2 m = {0};
-                                    igGetMouseDragDelta(&m, 0, 0);
-                                    isize j_next = j + (m.y < 0.f ? -1 : 1);
-                                    if (j_next >= 0 && j_next < buf_len(state.adj_diff[ss])) {
-                                        AdjDiff temp = state.adj_diff[ss][j];
-                                        state.adj_diff[ss][j] = state.adj_diff[ss][j_next];
-                                        state.adj_diff[ss][j_next] = temp;
-                                        any = true;
-                                        igResetMouseDragDelta(0);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    pop_allocator();
-
-                    // Pmod adjustor
-                    if (igBeginPopup("PModAdjustor", 0)) {
-                        igPushItemWidth(180.f);
-                        if (editing_group >= 0 && editing_line >= 0 && editing_line < buf_len(state.adj_diff[editing_group])) {
-                            AdjDiff *ad = &state.adj_diff[editing_group][editing_line];
-                            igBeginGroup();
-                            f32 y = igGetCursorPosY();
-                            any |= igCombo_Str("Op", &ad->op, "*=\0/=\0stam\0\0", 0);
-                            if (ad->op != AdjDiffOp_Stam) {
-                                any |= igCombo_Str_arr("Pattern Mod", &ad->mod, BigListOfModNamesInPatternModEnumOrder, array_length(BigListOfModNamesInPatternModEnumOrder), 0);
-                                any |= igInputFloat("##scale", &ad->scale, 0.25f, 0.25f * 0.25f, "%.2f", 0);
-                                igSameLine(0,4); if (igButton("off##scale", V2Zero)) { any = true; ad->scale = 1.0f; } igSameLine(0,4); TextString(S("scale"));
-                                any |= igInputFloat("##offset", &ad->offset, 0.25f, 0.25f * 0.25f, "%.2f", 0);
-                                igSameLine(0,4); if (igButton("off##offset", V2Zero)) { any = true; ad->offset = 0.0f; } igSameLine(0,4); TextString(S("offset"));
-                                any |= igInputFloat("##pow", &ad->pow, 0.25f, 0.25f * 0.25f, "%.2f", 0);
-                                igSameLine(0,4); if (igButton("off##pow", V2Zero)) { any = true; ad->pow = 1.0f; } igSameLine(0,4); TextString(S("pow"));
-                                any |= igInputFloat("##max", &ad->hi, 0.25f, 0.25f * 0.25f, "%.2f", 0);
-                                igSameLine(0,4); if (igButton("off##max", V2Zero)) { any = true; ad->hi = INFINITY; } igSameLine(0,4); TextString(S("max"));
-                                any |= igInputFloat("##min", &ad->lo, 0.25f, 0.25f * 0.25f, "%.2f", 0);
-                                igSameLine(0,4); if (igButton("off##min", V2Zero)) { any = true; ad->lo = -INFINITY; } igSameLine(0,4); TextString(S("min"));
-                            } else {
-                                any |= igCombo_Str_arr("Base", &ad->stam_base, DiffValueStrings, array_length(DiffValueStrings) - 1, 0);
-                                any |= igCombo_Str("Skillset", &ad->stam_ss, "Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0);
-                            }
-                            any |= igCheckbox("Enabled", &ad->enabled);
-                            igBeginDisabled(ad->enabled);
-                            if (igButton("Remove", V2Zero)) {
-                                buf_remove_sorted_index(state.adj_diff[editing_group], editing_line);
-                                any = true;
-                            }
-                            igEndDisabled();
-                            igDummy(V2(0, 210 - (igGetCursorPosY() - y)));
-                            igEndGroup();
-                        } else {
-                            igDummy(V2(0, 210));
-                        }
-                        igPopItemWidth();
-
-                        igEndPopup();
-                    }
-
-                    if (any) {
-                        buf_clear(state.ps.ops);
-                        for (isize ss = 0; ss < NumSkillsets; ss++) {
-                            for (isize i = 0; i < buf_len(state.adj_diff[ss]); i++) {
-                                AdjDiff ad = state.adj_diff[ss][i];
-                                assert(ad.ss == ss);
-                                buf_push(state.ps.ops, ad);
-                            }
-                        }
-                        state.ps.num_ops = buf_len(state.ps.ops);
-                        state.generation++;
-                    }
+            if (igBeginTabItem("Pattern Mods", 0, 0)) {
+                if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
+                    state.tab_window = Tab_Patternmods;
                 }
+                tab_patternmods();
                 igEndTabItem();
             }
 
             if (igBeginTabItem("Optimize", 0,0)) {
-                f32 err_limit = 2.5f;
-                f32 loss_limit = 1e-4f;
-                for (isize i = 0; i < NumGraphSamples; i++) {
-                    err_limit = max(err_limit, state.optimization_graph->ys[0][i]);
-                    err_limit = max(err_limit, state.optimization_graph->ys[1][i]);
-                    loss_limit = max(loss_limit, state.optimization_graph->ys[2][i]);
+                if (igIsItemHovered(0) && igIsMouseDoubleClicked(0)) {
+                    state.tab_window = Tab_Optimize;
                 }
-                ImPlot_SetNextPlotLimitsX(state.opt.iter - NumGraphSamples, state.opt.iter, ImGuiCond_Always);
-                ImPlot_SetNextPlotLimitsY(0, (f64)err_limit * 1.1, ImGuiCond_Always, 0);
-                ImPlot_SetNextPlotLimitsY(0, (f64)loss_limit * 1.1, ImGuiCond_Always, 1);
-                if (BeginPlotOptimizer("##OptGraph")) {
-                    ImPlot_PlotLine_FloatPtrInt("Avg Error", state.optimization_graph->ys[0], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
-                    ImPlot_PlotLine_FloatPtrInt("Max Positive Error", state.optimization_graph->ys[1], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
-                    ImPlot_SetPlotYAxis(ImPlotYAxis_2);
-                    ImPlot_PlotLine_FloatPtrInt("Loss", state.optimization_graph->ys[2], state.optimization_graph->len, 1, state.opt.iter - NumGraphSamples, state.opt.iter + 1, sizeof(float));
-                    ImPlot_EndPlot();
-                }
-
-                if (igButton(state.optimizing ? "Stop" : "Start", V2Zero)) {
-                    state.optimizing = !state.optimizing;
-                }
-                igSameLine(0, 4);
-                if (igButton("Checkpoint", V2Zero)) {
-                    checkpoint();
-                }
-                if (optimizer_error_message) {
-                    igSameLine(0, 4);
-                    igTextUnformatted(optimizer_error_message, 0);
-                }
-
-                if (igBeginChild_Str("Hyperparameters", V2(GetContentRegionAvailWidth() / 2.0f, 250.0f), 0, 0)) {
-                    igSliderFloat("h", &H, 1.0e-8f, 0.1f, "%g", 1.0f);
-                    tooltip("coarseness of the derivative approximation\n\nfinite differences baybee");
-                    igSliderFloat("Step Size", &StepSize, 1.0e-8f, 0.1f, "%g", ImGuiSliderFlags_None);
-                    tooltip("how fast to change parameters. large values can be erratic");
-                    igSliderInt("Sample Batch Size", &SampleBatchSize, 1, maxs(1, state.opt.n_samples), "%d", ImGuiSliderFlags_AlwaysClamp);
-                    tooltip("random sample of n files for each step");
-                    igSliderInt("Parameter Batch Size", &ParameterBatchSize, 1, maxs(1, state.opt.n_params), "%d", ImGuiSliderFlags_AlwaysClamp);
-                    tooltip("random sample of n parameters for each step");
-                    igSliderFloat("Skillset/Overall Balance", &SkillsetOverallBalance, 0.0f, 1.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
-                    tooltip("0 = train only on skillset\n1 = train only on overall");
-                    igSliderFloat("Misclass Penalty", &Misclass, 0.0f, 5.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
-                    tooltip("exponentially increases loss proportional to (largest_skillset_ssr - target_skillset_ssr)");
-                    igSliderFloat("Exp Scale", &ExpScale, 0.0f, 1.0f, "%f", ImGuiSliderFlags_AlwaysClamp);
-                    tooltip("weights higher MSDs heavier automatically\n0 = train on msd\n1 = train on exp(msd)\n\nmsd is zero centered and normalized so dw about it");
-                    igSliderFloat("Regularisation", &Regularisation, 0.0f, 1.0f, "%f", ImGuiSliderFlags_Logarithmic);
-                    tooltip("penalise moving parameters very far away from the defaults");
-                    igSliderFloat("Regularisation Alpha", &RegularisationAlpha, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
-                    tooltip("0 = prefer large changes to few parameters\n1 = prefer small changes to many parameters\n...theoretically");
-                    igSliderFloat("Loss function", &LossFunction, 0.0f, 1.0f, "%f", ImGuiSliderFlags_None);
-                    tooltip("0 = optimise average error (squared loss)\n1 = optimize for correct order (quantile loss)\ndon't know how well this works. just an idea");
-                }
-                igEndChild();
-                igSameLine(0, 4);
-
-
-                if (igBeginChild_Str("Checkpoints", V2(GetContentRegionAvailWidth(), 250.0f), 0, 0)) {
-                    if (igSelectable_Bool(state.latest_checkpoint.name, 0, ImGuiSelectableFlags_None, V2Zero)) {
-                        restore_checkpoint(state.latest_checkpoint);
-                    }
-                    if (igSelectable_Bool(state.default_checkpoint.name, 0, ImGuiSelectableFlags_None, V2Zero)) {
-                        restore_checkpoint(state.default_checkpoint);
-                    }
-                    for (isize i = buf_len(state.checkpoints) - 1; i >= 0; i--) {
-                        if (igSelectable_Bool(state.checkpoints[i].name, 0, ImGuiSelectableFlags_None, V2Zero)) {
-                            restore_checkpoint(state.checkpoints[i]);
-                            break;
-                        }
-                    }
-                }
-                igEndChild();
+                tab_optimize();
                 igEndTabItem();
             }
+
+            if (next) {
+                next_active = next;
+                next_active->open = true;
+            }
+
             igEndTabBar();
         }
     }
@@ -2856,7 +2944,7 @@ void frame(void)
     igSetNextWindowSizeConstraints(V2(0, -1), V2(FLT_MAX, -1), 0, 0);
     igSetNextWindowPos(V2(ds.x - right_width, 0.0f), ImGuiCond_Always, V2Zero);
     igSetNextWindowSize(V2(right_width + 1.0f, ds.y + 1.0f), ImGuiCond_Always);
-    if (igBegin("Files", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize)) {
+    if (igBegin("Files", 0, ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoBringToFrontOnFocus)) {
         // Header
         if (state.target.average_delta.E[0] != 0.0f) {
             for (isize i = 0; i < NumSkillsets; i++) {
@@ -2943,7 +3031,7 @@ void frame(void)
 
         igSetNextWindowSize(V2(centre_width - 4.0f, 0), 0);
         igSetNextWindowPos(V2(left_width + 2.f, ds.y - 2.f), 0, V2(0, 1));
-        igBegin("Debug", 0, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs);
+        igBegin("Debug", 0, ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoInputs|ImGuiWindowFlags_NoBringToFrontOnFocus);
 
         igBeginGroup(); {
             isize used = permanent_memory->ptr - permanent_memory->buf;
@@ -2961,6 +3049,79 @@ void frame(void)
         igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%02.2fms", time); igEndGroup();
 
         igEnd();
+    }
+
+    {
+        igPushID_Str("windows");
+        SimFileInfo *next = 0;
+        bool open = false;
+        switch (state.tab_window) {
+            case Tab_None: break;
+            case Tab_Files: {
+                bool this_open = true;
+                igSetNextWindowSize(V2(800, 600), ImGuiCond_Once);
+                if (igBegin("Files##w", &this_open, 0)) {
+                    next = tab_files(active, update_visible_skillsets);
+                }
+                open = this_open;
+                igEnd();
+            } break;
+            case Tab_Search: {
+                bool this_open = true;
+                igSetNextWindowSize(V2(800, 600), ImGuiCond_Once);
+                if (igBegin("Search##w", &this_open, 0)) {
+                    tab_search();
+                }
+                open = this_open;
+                igEnd();
+            } break;
+            case Tab_Graphs: {
+                bool this_open = true;
+                if (igBegin("Graphs##w", &this_open, 0)) {
+                    next = tab_graphs(active, ss_highlight, &changed_param);
+                }
+                open = this_open;
+                igEnd();
+            } break;
+            case Tab_Preview: {
+                bool this_open = true;
+                igSetNextWindowSize(V2(400, 600), ImGuiCond_Once);
+                if (igBegin("Preview##w",&this_open, 0)) {
+                    next = tab_preview(active);
+                }
+                open = this_open;
+                igEnd();
+            } break;
+            case Tab_Patternmods: {
+                bool this_open = true;
+                if (igBegin("Patternmods##w", &this_open, 0)) {
+                    tab_patternmods();
+                }
+                open = this_open;
+                igEnd();
+            } break;
+            case Tab_Optimize: {
+                bool this_open = true;
+                igSetNextWindowSize(V2(800, 600), ImGuiCond_Once);
+                if (igBegin("Optimize##w", &this_open, 0)) {
+                    tab_optimize();
+                }
+                open = this_open;
+                igEnd();
+            } break;
+            default: assert_unreachable();
+        }
+
+        if (open == false) {
+            state.tab_window = Tab_None;
+        }
+
+        if (next) {
+            next_active = next;
+            next_active->open = true;
+        }
+
+        igPopID();
     }
 
     sg_begin_default_pass(&state.pass_action, width, height);

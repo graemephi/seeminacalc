@@ -971,10 +971,12 @@ Calc::InitAdjDiff(Calc& calc, const int& hand)
 			*stam_base = adj_stambase;
 		}
 
-		float t_begin = (float)i * 0.5f;
-		float t_end = t_begin + 0.5f;
-		while (jack_diff_index < calc.jack_diff[hand].size() && calc.jack_diff[hand][jack_diff_index].first < t_end) {
-			calc.jack_diff[hand][jack_diff_index++].second *= calc.base_adj_diff[hand][Skill_JackSpeed][i];
+		if (calc.pmods_used[Skill_JackSpeed].size() > 0 || calc.adj_diff_ops[Skill_JackSpeed].size() > 0) {
+			float t_begin = (float)i * 0.5f;
+			float t_end = t_begin + 0.5f;
+			while (jack_diff_index < calc.jack_diff[hand].size() && calc.jack_diff[hand][jack_diff_index].first < t_end) {
+				calc.jack_diff[hand][jack_diff_index++].second *= calc.base_adj_diff[hand][Skill_JackSpeed][i];
+			}
 		}
 	}
 #endif
