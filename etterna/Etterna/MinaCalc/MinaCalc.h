@@ -162,7 +162,7 @@ class Calc
 		// CJOHJump // SQRTD BELOW
 		CJOHAnchor,
 		VOHTrill,
-		WideRangeAnchor,
+		// WideRangeAnchor,
 	  	FlamJam, // you may say, why? why not?
 	  },
 
