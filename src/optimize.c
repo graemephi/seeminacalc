@@ -200,7 +200,7 @@ OptimizationRequest opt_pump(OptimizationContext *opt, OptimizationEvaluation ev
 
                 f32 penalty = Regularisation * lerp(regularisation_l1, regularisation_l2, RegularisationAlpha);
 
-                f32 g = (penalty + loss_xh - loss_x) / H;
+                f32 g = (penalty + (loss_xh - loss_x)) / H;
                 // AMSGrad. VVDecay is not in the paper but is an obvious extension. vv stops
                 // division by small v from blowing up the step size when it wobbles between
                 // small and large values. But otherwise we want it to be as small as possible
