@@ -335,6 +335,7 @@ typedef struct State
     SimFileInfo *files;
     SimFileInfo *active;
     SimFileInfo *previews[2];
+    i32 *files_order;
 
     ModInfo *inline_mods;
     AdjDiff *adj_diff[NumSkillsets];
@@ -937,6 +938,7 @@ SimFileInfo *parse_and_add_sm(Buffer buf)
             .selected_skillsets[0] = true,
             .opt_participating = true
         });
+        buf_push(state.files_order, (i32)buf_len(state.files_order));
 
         result = sfi;
 
@@ -1068,6 +1070,7 @@ b32 process_target_files(FileLoader *loader, DBResult results[])
                 .selected_skillsets[0] = true,
                 .opt_participating = true
             });
+            buf_push(state.files_order, (i32)buf_len(state.files_order));
 
             buf_push(sfi->graphs, make_skillsets_graph());
             buf_reserve(sfi->effects.masks, state.info.num_params);
@@ -1472,8 +1475,10 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
         ImGuiListClipper clip = {0};
         ImGuiListClipper_Begin(&clip, buf_len(state.files), 0.0f);
         while (ImGuiListClipper_Step(&clip)) {
-            for (i32 sfi_index = clip.DisplayStart; sfi_index < clip.DisplayEnd; sfi_index++) {
-                SimFileInfo *sfi = state.files + sfi_index;
+            for (isize sfi_index = clip.DisplayStart; sfi_index < clip.DisplayEnd; sfi_index++) {
+                SimFileInfo *sfi = state.files + state.files_order[sfi_index];
+                igPushStyleVar_Float(ImGuiStyleVar_Alpha, sfi->opt_participating ? 1.0f : 0.618f);
+
                 f32 weight_before_user_interaction = sfi->target.weight;
                 calculate_skillsets(update_visible_skillsets ? &state.high_prio_work : &state.low_prio_work, sfi, false, state.generation);
                 if (sfi == active) {
@@ -1590,6 +1595,8 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
                 if (sfi->target.weight != weight_before_user_interaction) {
                     state.reset_optimizer_flag = true;
                 }
+
+                igPopStyleVar(1);
             }
         }
         igEndTable();
@@ -1635,9 +1642,11 @@ void tab_search(void)
                 igTableSetColumnIndex(1);
                 TextString(f->author);
                 igTableSetColumnIndex(2);
+                igPushID_Str(f->chartkey.buf);
                 if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
                     load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
                 }
+                igPopID();
                 igTableSetColumnIndex(3);
                 TextString(f->subtitle);
                 igTableSetColumnIndex(4);
@@ -2473,6 +2482,7 @@ void init(void)
 
     // todo: use handles instead
     buf_reserve(state.files, 1024);
+    buf_reserve(state.files_order, 1024);
 
     state.last_frame.right_width = 438.0f;
     state.last_frame.left_width = 322.0f;
@@ -2654,6 +2664,7 @@ void frame(void)
 
                 buf_clear(state.opt_cfg.map.to_file);
                 if (n_params > 0) {
+                    buf_clear(state.files_order);
                     f32 target_m = 0.0f;
                     f32 target_s = 0.0f;
                     for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
@@ -2663,6 +2674,12 @@ void frame(void)
                             target_m = old_m + (sfi->target.want_msd - old_m) / (f32)(buf_len(state.opt_cfg.map.to_file) + 1);
                             target_s = old_s + (sfi->target.want_msd - old_m)*(sfi->target.want_msd - target_m);
                             buf_push(state.opt_cfg.map.to_file, (i32)buf_index_of(state.files, sfi));
+                            buf_push(state.files_order, (i32)buf_index_of(state.files, sfi));
+                        }
+                    }
+                    for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+                        if (sfi->opt_participating == false) {
+                            buf_push(state.files_order, (i32)buf_index_of(state.files, sfi));
                         }
                     }
                     f32 target_var = target_s / (f32)(buf_len(state.files) - 1);
@@ -2967,47 +2984,46 @@ void frame(void)
         igSeparator();
 
         // Optimizing file list
-        for (isize i = 0; i < 2; i++) {
-            igPushStyleVar_Float(ImGuiStyleVar_Alpha, (i == 0) ? 1.0f : 0.618f);
-            for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
-                if (sfi->target.weight > 0 && (sfi->opt_participating ^ i)) {
-                    if (update_visible_skillsets) {
-                        calculate_skillsets(&state.high_prio_work, sfi, false, state.generation);
-                    }
-                    f32 wife93 = sfi->aa_rating.overall;
-                    f32 wife965 = sfi->max_rating.overall;
-                    if (sfi->target.want_msd) {
-                        igTextColored(msd_color(absolute_value(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
-                        tooltip("Optimizer: %02.2f %s, want %02.2f at %02.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
-                    }
-                    igTextColored(msd_color(wife93), "%02.2f", (f64)wife93);
-                    tooltip("Overall at AA"); igSameLine(0, 7.0f);
-                    igTextColored(msd_color(wife965), "%02.2f", (f64)wife965);
-                    tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
-                    igPushID_Str(sfi->id.buf);
-                    if (sfi == active) {
-                        igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
-                    }
-                    if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
-                        if (sfi->open && sfi == active) {
-                            sfi->open = false;
-                        } else {
-                            sfi->open = true;
-                            next_active = sfi;
-                        }
-                    }
-                    if (sfi == active) {
-                        igPopStyleColor(1);
-                    }
-                    if (sfi->stops) {
-                        igSameLine(igGetWindowWidth() - 30.f, 4);
-                        igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
-                        tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
-                                "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
-                    }
-                    igPopID();
-                    igSeparator();
+        for (isize index = 0; index < buf_len(state.files_order); index++) {
+            SimFileInfo *sfi = state.files + state.files_order[index];
+            igPushStyleVar_Float(ImGuiStyleVar_Alpha, sfi->opt_participating ? 1.0f : 0.618f);
+            if (sfi->target.weight > 0) {
+                if (update_visible_skillsets) {
+                    calculate_skillsets(&state.high_prio_work, sfi, false, state.generation);
                 }
+                f32 wife93 = sfi->aa_rating.overall;
+                f32 wife965 = sfi->max_rating.overall;
+                if (sfi->target.want_msd) {
+                    igTextColored(msd_color(absolute_value(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
+                    tooltip("Optimizer: %02.2f %s, want %02.2f at %02.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
+                }
+                igTextColored(msd_color(wife93), "%02.2f", (f64)wife93);
+                tooltip("Overall at AA"); igSameLine(0, 7.0f);
+                igTextColored(msd_color(wife965), "%02.2f", (f64)wife965);
+                tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
+                igPushID_Str(sfi->id.buf);
+                if (sfi == active) {
+                    igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
+                }
+                if (igSelectable_Bool(sfi->id.buf, sfi->open, ImGuiSelectableFlags_None, V2Zero)) {
+                    if (sfi->open && sfi == active) {
+                        sfi->open = false;
+                    } else {
+                        sfi->open = true;
+                        next_active = sfi;
+                    }
+                }
+                if (sfi == active) {
+                    igPopStyleColor(1);
+                }
+                if (sfi->stops) {
+                    igSameLine(igGetWindowWidth() - 30.f, 4);
+                    igTextColored((ImVec4) { 0.85f, 0.85f, 0.0f, 0.95f }, "  !  ");
+                    tooltip("This file has stops or negBPMs. These are not parsed in the same way as Etterna, so the ratings will differ from what you see in game.\n\n"
+                            "Note that the calc is VERY sensitive to tiny variations in ms row times, even if the chartkeys match.");
+                }
+                igPopID();
+                igSeparator();
             }
             igPopStyleVar(1);
         }
@@ -3052,7 +3068,6 @@ void frame(void)
     }
 
     {
-        igPushID_Str("windows");
         SimFileInfo *next = 0;
         bool open = false;
         switch (state.tab_window) {
@@ -3120,8 +3135,6 @@ void frame(void)
             next_active = next;
             next_active->open = true;
         }
-
-        igPopID();
     }
 
     sg_begin_default_pass(&state.pass_action, width, height);
