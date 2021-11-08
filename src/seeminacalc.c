@@ -2205,7 +2205,7 @@ void tab_patternmods(void)
         pop_allocator();
 
         // Pmod adjustor
-        if (igBeginPopup("PModAdjustor", 0)) {
+        if (editing && igBeginPopup("PModAdjustor", 0)) {
             igPushItemWidth(180.f);
             if (editing_group >= 0 && editing_line >= 0 && editing_line < buf_len(state.adj_diff[editing_group])) {
                 AdjDiff *ad = &state.adj_diff[editing_group][editing_line];
@@ -2994,13 +2994,13 @@ void frame(void)
                 f32 wife93 = sfi->aa_rating.overall;
                 f32 wife965 = sfi->max_rating.overall;
                 if (sfi->target.want_msd) {
-                    igTextColored(msd_color(absolute_value(sfi->target.delta) * 3.0f), "%s%02.2f", sfi->target.delta >= 0.0f ? " " : "", (f64)sfi->target.delta);
-                    tooltip("Optimizer: %02.2f %s, want %02.2f at %02.2fx", (f64)sfi->target.got_msd, SkillsetNames[sfi->target.skillset], (f64)sfi->target.want_msd, (f64)sfi->target.rate); igSameLine(0, 7.0f);
+                    igTextColored(msd_color(absolute_value(sfi->target.delta) * 3.0f), "%s%0*.2f", sfi->target.delta >= 0 ? " " : "", sfi->target.delta >= 0 ? 5 : 6, (f64)sfi->target.delta);
+                    tooltip("%s delta", SkillsetNames[sfi->target.skillset]); igSameLine(0, 7.0f);
+                    igTextColored(msd_color(sfi->target.want_msd), "%05.2f", (f64)sfi->target.want_msd);
+                    tooltip("%s target", SkillsetNames[sfi->target.skillset]); igSameLine(0, 7.0f);
                 }
-                igTextColored(msd_color(wife93), "%02.2f", (f64)wife93);
-                tooltip("Overall at AA"); igSameLine(0, 7.0f);
-                igTextColored(msd_color(wife965), "%02.2f", (f64)wife965);
-                tooltip("Overall at max scaling"); igSameLine(0, 7.0f);
+                igTextColored(msd_color(wife93), "%05.2f", (f64)sfi->target.got_msd);
+                tooltip("%05.2f overall at AA, %05.2f at max scaling", (f64)wife93, (f64)wife965); igSameLine(0, 7.0f);
                 igPushID_Str(sfi->id.buf);
                 if (sfi == active) {
                     igPushStyleColor_Vec4(ImGuiCol_Header, msd_color(sfi->aa_rating.overall));
