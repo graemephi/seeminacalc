@@ -44,6 +44,8 @@
 
 #include "calcconstants.h"
 
+static char const *AutoTestListPath = "CalcTestList.auto.xml";
+
 static char const *DiffValueStrings[] = { "NPSBase", "TechBase", "RMABase", "MSD" };
 static char const *BigListOfModNamesInPatternModEnumOrder[] = {
     "Stream",
@@ -322,7 +324,7 @@ typedef struct CalcThread CalcThread;
 typedef struct CalcWork CalcWork;
 typedef struct State
 {
-    u64 last_time;
+    u64 time;
     sg_pass_action pass_action;
 
     CalcThread *threads;
@@ -957,7 +959,30 @@ SimFileInfo *parse_and_add_sm(Buffer buf)
     return result;
 }
 
-void load_file(FileLoader *loader, String key, f32 rate, f32 target, i32 skillset)
+void save_target_files(void)
+{
+    push_allocator(scratch);
+    u8 *xml = 0;
+    buf_printf(xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n");
+    buf_printf(xml, "<CalcTest>\n");
+    for (isize i = 1; i < NumSkillsets; i++) {
+        buf_printf(xml, "<CalcTestList Skillset='%d'>\n", i);
+        buf_printf(xml, "<Chartlist>\n");
+        for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
+            if (sfi->target.skillset == i) {
+                buf_printf(xml, "<Chart aKey='%.*s' bRate='%.2f' cTarget='%.2f' dWeight='%.2f' zSong=''></Chart> <!-- %.*s -->\n",
+                    sfi->chartkey.len, sfi->chartkey.buf, (f64)sfi->target.rate, (f64)sfi->target.want_msd, (f64)sfi->target.weight, sfi->display_id.len, sfi->display_id.buf);
+            }
+        }
+        buf_printf(xml, "</Chartlist>\n");
+        buf_printf(xml, "</CalcTestList>\n");
+    }
+    buf_printf(xml, "</CalcTest>\n");
+    write_file(AutoTestListPath, xml);
+    pop_allocator();
+}
+
+void load_file(FileLoader *loader, String key, f32 rate, f32 target, i32 skillset, f32 weight)
 {
     ChartKey ck = string_to_chartkey(key);
     u64 id = db_get(ck);
@@ -967,7 +992,7 @@ void load_file(FileLoader *loader, String key, f32 rate, f32 target, i32 skillse
         .rate = rate,
         .target = target,
         .skillset = skillset,
-        .weight = 1.0f,
+        .weight = weight,
     });
 }
 
@@ -984,9 +1009,14 @@ void load_target_files(FileLoader *loader, Buffer test_list_xml)
                 String key = xml_attr(&xml, S("aKey"));
                 String rate = xml_attr(&xml, S("bRate"));
                 String target = xml_attr(&xml, S("cTarget"));
+                String weight = xml_attr(&xml, S("dWeight"));
+                f32 weight_value = 1.0f;
+                if (weight.len > 0) {
+                    weight_value = string_to_f32(weight);
+                }
 
                 if (xml.ok) {
-                    load_file(loader, key, string_to_f32(rate), string_to_f32(target), ss);
+                    load_file(loader, key, string_to_f32(rate), string_to_f32(target), ss, weight_value);
                 }
 
                 xml_close(&xml, S("Chart"));
@@ -1460,6 +1490,7 @@ enum {
 
 SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
 {
+    static u64 time_of_target_changed = 0;
     SimFileInfo *next_active = 0;
     if (buf_len(state.files) == 0) {
         TextString(S("No files :("));
@@ -1492,6 +1523,7 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
                 b8 enabled = (sfi->target.weight != 0.0f);
                 if (igCheckbox("##enabled", &enabled)) {
                     sfi->target.weight = enabled ? sfi->target.last_user_set_weight : 0.0f;
+                    time_of_target_changed = state.time;
                 }
                 tooltip("optimize on this file");
                 igEndDisabled();
@@ -1518,7 +1550,8 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
                             make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
                             sfi->display_id.len = 0;
                             make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
-                            if (state.optimizing) state.generation++;
+                            state.generation++;
+                            time_of_target_changed = state.time;
                         }
                         if (is_selected) {
                             igSetItemDefaultFocus();
@@ -1545,6 +1578,7 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
                                 sfi->display_id.len = 0;
                                 make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
                                 state.generation++;
+                                time_of_target_changed = state.time;
                             }
                             if (is_selected) {
                                 igSetItemDefaultFocus();
@@ -1556,13 +1590,17 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
 
                 igTableSetColumnIndex(4);
                 igPushItemWidth(-FLT_MIN);
-                igDragFloat("##target", &sfi->target.want_msd, 0.1f, 0.0f, 40.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp);
+                if (igDragFloat("##target", &sfi->target.want_msd, 0.1f, 0.0f, 40.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp)) {
+                    time_of_target_changed = state.time;
+                    sfi->target.delta = sfi->target.got_msd - sfi->target.want_msd;
+                }
                 tooltip("target msd for skillset");
 
                 igTableSetColumnIndex(5);
                 igPushItemWidth(-FLT_MIN);
                 if (igDragFloat("##weight", &sfi->target.weight, 0.1f, 0.0f, 20.0f, "%02.2f", ImGuiSliderFlags_AlwaysClamp)) {
                     sfi->target.last_user_set_weight = sfi->target.weight;
+                    time_of_target_changed = state.time;
                 }
                 tooltip("weight");
 
@@ -1602,6 +1640,10 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
         igEndTable();
     }
 
+    if (time_of_target_changed != 0 && stm_sec(stm_since(time_of_target_changed)) > 5.0) {
+        time_of_target_changed = 0;
+        save_target_files();
+    }
     return next_active;
 }
 
@@ -1644,7 +1686,7 @@ void tab_search(void)
                 igTableSetColumnIndex(2);
                 igPushID_Str(f->chartkey.buf);
                 if (igSelectable_Bool(f->title.buf, false, ImGuiSelectableFlags_SpanAllColumns, V2Zero)) {
-                    load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset);
+                    load_file(&state.loader, f->chartkey, 1.0, f->rating, f->skillset, 1.0f);
                 }
                 igPopID();
                 igTableSetColumnIndex(3);
@@ -2582,7 +2624,7 @@ void frame(void)
 {
     i32 width = sapp_width();
     i32 height = sapp_height();
-    f64 delta_time = stm_sec(stm_laptime(&state.last_time));
+    f64 delta_time = stm_sec(stm_laptime(&state.time));
     simgui_new_frame(width, height, delta_time);
 
     reset_scratch();
@@ -3296,7 +3338,7 @@ sapp_desc sokol_main(int argc, char **argv)
     });
 
     db_path = sargs_value_def("db", "cache.db");
-    test_list_path = sargs_value_def("list", "CalcTestList.xml");
+    test_list_path = sargs_value_def("list", AutoTestListPath);
 
     return (sapp_desc) {
         .init_cb = init,

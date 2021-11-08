@@ -163,7 +163,7 @@ String xml_attr(XML *x, String key)
             p++;
         }
         if (p == end) {
-            goto bail;
+            goto missing;
         }
         if (!scan_to_char_skip_whitespace(&p, end, '=')) {
             goto bail;
@@ -184,6 +184,7 @@ String xml_attr(XML *x, String key)
         x->ok = false;
     }
 
+missing:
     return result;
 }
 
