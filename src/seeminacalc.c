@@ -959,10 +959,10 @@ SimFileInfo *parse_and_add_sm(Buffer buf)
     return result;
 }
 
-void save_target_files(void)
+u8 *files_to_xml(void)
 {
-    push_allocator(scratch);
     u8 *xml = 0;
+    push_allocator(scratch);
     buf_printf(xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>\n");
     buf_printf(xml, "<CalcTest>\n");
     for (isize i = 1; i < NumSkillsets; i++) {
@@ -978,8 +978,14 @@ void save_target_files(void)
         buf_printf(xml, "</CalcTestList>\n");
     }
     buf_printf(xml, "</CalcTest>\n");
-    write_file(AutoTestListPath, xml);
     pop_allocator();
+    return xml;
+}
+
+void save_target_files(void)
+{
+    u8 *xml = files_to_xml();
+    write_file(AutoTestListPath, xml);
 }
 
 void load_file(FileLoader *loader, String key, f32 rate, f32 target, i32 skillset, f32 weight)
@@ -1117,6 +1123,12 @@ skip:;
     }
 
     buf_remove_first_n(loader->requested_files, n_to_remove);
+
+#if defined(__EMSCRIPTEN__)
+    if (added_count > 0 && buf_len(loader->requested_files) == 0) {
+        save_target_files();
+    }
+#endif
 
     if (0) {
 give_up:
@@ -2933,10 +2945,22 @@ void frame(void)
                     "There isn't any way to get values out of it--talk to me if you want to do that.\n\n"
                     "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n\n"
                     "Changes\n"
+                    " - 2021/11/8\n"
+                    "   - Right files list always shows target msd instead of only on hover\n"
+                    "   - CalcTestList saving\n"
                     " - 2021/11/5\n"
                     "   - Double click tab headers to open that one in a window\n"
                     "   - Pattern mod tab\n"
                     "   - Automatically disable dead files in optimizer");
+#if defined(__EMSCRIPTEN__)
+                    igSetCursorPosY(igGetWindowHeight() - 26.f);
+                    if (buf_len(state.files) > 0) {
+                        if (igButton("Export CalcTestList.xml", V2Zero)) {
+                            u8 *xml = files_to_xml();
+                            emsc_file_dialog("CalcTestList.xml", xml);
+                        }
+                    }
+#endif
                 igEndTabItem();
             }
 

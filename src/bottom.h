@@ -615,12 +615,7 @@ void write_file_really(const char *path, u8 buf[])
     }
 }
 
-
-#if !defined(__EMSCRIPTEN__)
-Buffer read_file(const char *path) { return read_file_really(path); }
-void write_file(const char *path, u8 buf[]) { write_file_really(path, buf); }
-
-Buffer read_file_malloc(const char *path)
+Buffer read_file_malloc_really(const char *path)
 {
     Buffer result = {0};
     FILE *f = fopen(path, "rb");
@@ -664,6 +659,11 @@ bail:
     return result;
 }
 
+#if !defined(__EMSCRIPTEN__)
+Buffer read_file(const char *path) { return read_file_really(path); }
+Buffer read_file_malloc(const char *path) { return read_file_malloc_really(path); }
+void write_file(const char *path, u8 buf[]) { write_file_really(path, buf); }
+
 #else // ^^^^ !defined(__EMSCRIPTEN__)
 Buffer read_file(const char *path) {
     push_allocator(scratch);
@@ -671,6 +671,13 @@ Buffer read_file(const char *path) {
     buf_printf(p, "/seeminacalc/%s", path);
     pop_allocator();
     return read_file_really(p);
+}
+Buffer read_file_malloc(const char *path) {
+    push_allocator(scratch);
+    const char *p = 0;
+    buf_printf(p, "/seeminacalc/%s", path);
+    pop_allocator();
+    return read_file_malloc_really(p);
 }
 void write_file(const char *path, u8 buf[]) {
     push_allocator(scratch);
@@ -684,7 +691,14 @@ void write_file(const char *path, u8 buf[]) {
         });
     );
 }
-Buffer read_file_malloc(const char *path) { return (Buffer) {}; }
+
+EM_JS(void, emsc_file_dialog, (const char* name, const char *buf), {
+    let garbage = document.createElement("a");
+    garbage.href = window.URL.createObjectURL(new Blob([UTF8ToString(buf)], { type: "text/xml" }));
+    garbage.download = UTF8ToString(name);
+    garbage.click();
+    garbage.remove();
+});
 #endif
 
 b32 buffer_begins_with(Buffer *buffer, String s)
