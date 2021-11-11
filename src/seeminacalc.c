@@ -275,11 +275,11 @@ isize sfi_row_at_time(SimFileInfo *sfi, f32 time)
 
 String make_sfi_display_id(String *dest, String title, String author, String diff, f32 rate)
 {
-    dest->len = buf_printf(dest->buf, "%.*s ", title.len, title.buf);
+    dest->len = buf_printf(dest->buf, "%.*s", title.len, title.buf);
     if (rate != 1.0f) {
-        dest->len += buf_printf(dest->buf, "%.1f ", (f64)rate);
+        dest->len += buf_printf(dest->buf, " %g", (f64)rate);
     }
-    dest->len += buf_printf(dest->buf, "(%.*s%.*s%.*s)",
+    dest->len += buf_printf(dest->buf, " (%.*s%.*s%.*s)",
         author.len, author.buf,
         author.len == 0 ? 0 : 2, ", ",
         diff.len, diff.buf);
@@ -1510,7 +1510,7 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
         igTableSetupColumn("Enabled", ImGuiTableColumnFlags_WidthFixed, 20.0f, 0);
         igTableSetupColumn("File", 0, 1.0f, 0);
         igTableSetupColumn("Skillset", ImGuiTableColumnFlags_WidthFixed, 105.0f, 0);
-        igTableSetupColumn("Rate", ImGuiTableColumnFlags_WidthFixed, 56.0f, 0);
+        igTableSetupColumn("Rate", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
         igTableSetupColumn("WantMSD", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
         igTableSetupColumn("Meight", ImGuiTableColumnFlags_WidthFixed, 40.0f, 0);
         igTableSetupColumn("Message", ImGuiTableColumnFlags_WidthFixed, 15.0f, 0);
@@ -1575,29 +1575,14 @@ SimFileInfo *tab_files(SimFileInfo *active, b32 update_visible_skillsets)
 
                 igTableSetColumnIndex(3);
                 igPushItemWidth(-FLT_MIN);
-                static char const *rates[] = { "0.7", "0.8", "0.9", "1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "2.0" };
-                static float rates_f[] = { 0.7f, 0.8f, 0.9f, 1.0f, 1.1f, 1.2f, 1.3f, 1.4f, 1.5f, 1.6f, 1.7f, 1.8f, 1.9f, 2.0f };
-                for (isize r_find_selected = 0; r_find_selected < array_length(rates); r_find_selected++) {
-                    if ((absolute_value(rates_f[r_find_selected] - sfi->target.rate) < 0.05f)
-                        && igBeginCombo("##Rate", rates[r_find_selected], 0)) {
-                        for (isize r = 0; r < array_length(rates); r++) {
-                            b32 is_selected = (absolute_value(rates_f[r] - sfi->target.rate) < 0.05f);
-                            if (igSelectable_Bool(rates[r], is_selected, 0, V2Zero)) {
-                                sfi->target.rate = rates_f[r];
-                                buf_clear(sfi->id.buf);
-                                sfi->id.len = 0;
-                                make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
-                                sfi->display_id.len = 0;
-                                make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
-                                state.generation++;
-                                time_of_target_changed = state.time;
-                            }
-                            if (is_selected) {
-                                igSetItemDefaultFocus();
-                            }
-                        }
-                        igEndCombo();
-                    }
+                if (igDragFloat("##rate", &sfi->target.rate, 0.05f, 0.7f, 3.0f, "%04.02fx", ImGuiSliderFlags_AlwaysClamp)) {
+                    buf_clear(sfi->id.buf);
+                    sfi->id.len = 0;
+                    make_sfi_id(&sfi->id, sfi->chartkey, sfi->title, sfi->author, sfi->diff, sfi->target.rate, sfi->target.skillset);
+                    sfi->display_id.len = 0;
+                    make_sfi_display_id(&sfi->display_id, sfi->title, sfi->author, sfi->diff, sfi->target.rate);
+                    state.generation++;
+                    time_of_target_changed = state.time;
                 }
 
                 igTableSetColumnIndex(4);
@@ -2945,6 +2930,8 @@ void frame(void)
                     "There isn't any way to get values out of it--talk to me if you want to do that.\n\n"
                     "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n\n"
                     "Changes\n"
+                    " - 2021/11/11\n"
+                    "   - Fix rate formatting in file names\n"
                     " - 2021/11/8\n"
                     "   - Right files list always shows target msd instead of only on hover\n"
                     "   - CalcTestList saving\n"
