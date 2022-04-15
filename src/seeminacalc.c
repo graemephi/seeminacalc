@@ -2977,6 +2977,8 @@ void frame(void)
                     "There isn't any way to get values out of it--talk to me if you want to do that.\n\n"
                     "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n\n"
                     "Changes\n"
+                    " - 2022/04/15\n"
+                    "   - Idle when idle\n"
                     " - 2021/11/11\n"
                     "   - Fix rate formatting in file names\n"
                     " - 2021/11/8\n"
