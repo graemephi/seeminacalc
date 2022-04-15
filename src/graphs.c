@@ -785,7 +785,7 @@ void submit_work(WorkQueue *q, CalcWork work[], u32 generation)
     buf_remove_first_n(work, N);
 }
 
-void finish_work(void)
+bool finish_work(void)
 {
     push_allocator(scratch);
     FnGraph **updated_fngs = 0;
@@ -793,9 +793,12 @@ void finish_work(void)
     pop_allocator();
 
     b32 targets_updated = false;
+    b32 anything_updated = false;
 
     DoneWork done = {0};
     while (get_done_work(&done)) {
+        anything_updated = true;
+
         SimFileInfo *sfi = done.work.sfi;
         FnGraph *fng = 0;
         switch (done.work.type) {
@@ -1060,4 +1063,6 @@ void finish_work(void)
             state.target.max_delta = max_error;
         }
     }
+
+    return anything_updated;
 }

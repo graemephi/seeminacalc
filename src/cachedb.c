@@ -286,6 +286,7 @@ typedef struct DBResult
 typedef struct DBResultsByType
 {
     DBResult *of[DBRequestTypeCount];
+    isize num_results;
 } DBResultsByType;
 
 typedef struct DBRequestQueue
@@ -417,6 +418,7 @@ DBResultsByType db_pump(void)
 
     // Read results
     DBResultsByType results = {0};
+    isize num_results = 0;
     push_allocator(scratch);
     {
         usize read = db_result_queue.read;
@@ -427,6 +429,7 @@ DBResultsByType db_pump(void)
             for (usize i = 0; i < n; i++) {
                 DBResult r = db_result_queue.entries[(read + i) & DBResultQueueMask];
                 buf_push(results.of[r.type], r);
+                num_results++;
             }
             memory_barrier();
             db_result_queue.read = read + n;
@@ -435,6 +438,7 @@ DBResultsByType db_pump(void)
     }
     pop_allocator();
 
+    results.num_results = num_results;
     return results;
 }
 

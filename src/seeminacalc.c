@@ -325,6 +325,7 @@ typedef struct CalcWork CalcWork;
 typedef struct State
 {
     u64 time;
+    u64 start_time;
     sg_pass_action pass_action;
 
     CalcThread *threads;
@@ -399,6 +400,8 @@ typedef struct State
     Search search;
 
     i32 tab_window;
+
+    b32 have_event_this_frame;
 } State;
 static State state = {0};
 
@@ -2394,6 +2397,7 @@ void init(void)
     });
     ImPlot_CreateContext();
     state = (State) {
+        .start_time = stm_now(),
         .pass_action = {
             .colors[0] = {
                 .action = SG_ACTION_CLEAR, .value = { 0.0f, 0.0f, 0.0f, 1.0f }
@@ -2617,18 +2621,20 @@ void init(void)
     load_checkpoints_from_disk();
 }
 
-void frame(void)
+typedef struct {
+    bool state_updated;
+    SimFileInfo *added_file;
+} FramePumpResult;
+
+FramePumpResult pump(void)
 {
-    i32 width = sapp_width();
-    i32 height = sapp_height();
-    f64 delta_time = stm_sec(stm_laptime(&state.time));
-    simgui_new_frame(width, height, delta_time);
+    // Per frame work that isn't rendering
 
-    reset_scratch();
-    finish_work();
-
+    b32 have_update = finish_work();
     SimFileInfo *new_sfi = 0;
 
+    // Dropped files stuff
+    isize dropped_files_len = buf_len(state.dropped_files);
     for (isize i = buf_len(state.dropped_files) - 1; i >= 0; i--) {
         Buffer *b = &state.dropped_files[i];
 
@@ -2654,7 +2660,10 @@ void frame(void)
         }
     }
 
+    have_update |= (dropped_files_len != buf_len(state.dropped_files));
+
     DBResultsByType db_results = db_pump();
+    have_update |= (db_results.num_results > 0);
     state.reset_optimizer_flag |= process_target_files(&state.loader, db_results.of[DBRequest_File]);
 
     // Search stuff
@@ -2747,6 +2756,7 @@ void frame(void)
         if (state.optimizing && state.opt_pending_evals == 0 && state.opt_pending_participating == 0) {
             state.generation++;
             last_generation = state.generation;
+            have_update = true;
 
             OptimizationRequest req = opt_pump(&state.opt, state.opt_evaluations);
             assert(req.n_samples > 0);
@@ -2817,6 +2827,29 @@ void frame(void)
             }
         }
     }
+
+
+    return (FramePumpResult) { .state_updated = have_update, .added_file = new_sfi };
+}
+
+void frame(void)
+{
+    i32 width = sapp_width();
+    i32 height = sapp_height();
+    f64 delta_time = stm_sec(stm_laptime(&state.time));
+
+    reset_scratch();
+
+    FramePumpResult pump_result = pump();
+    b32 have_update = pump_result.state_updated || state.have_event_this_frame;
+
+    if (!have_update) {
+        assert(pump_result.added_file == 0);
+        return;
+    }
+
+    state.have_event_this_frame = false;
+    simgui_new_frame(width, height, delta_time);
 
     bool ss_highlight[NumSkillsets] = {0};
     SimFileInfo *next_active = null_sfi;
@@ -3208,8 +3241,8 @@ void frame(void)
         }
     }
 
-    if (next_active == null_sfi && new_sfi) {
-        next_active = new_sfi;
+    if (next_active == null_sfi && pump_result.added_file) {
+        next_active = pump_result.added_file;
         next_active->open = true;
     }
 
@@ -3320,6 +3353,7 @@ static void emsc_load_callback(const sapp_html5_fetch_response *response) {
 void input(const sapp_event* event)
 {
     simgui_handle_event(event);
+    state.have_event_this_frame = true;
     if (event->type == SAPP_EVENTTYPE_FILES_DROPPED) {
         int n = sapp_get_num_dropped_files();
         for (int i = 0; i < n; i++) {
