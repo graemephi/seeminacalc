@@ -9,6 +9,13 @@
 #pragma clang diagnostic ignored "-Wstrict-prototypes"
 #endif
 
+#if defined(__EMSCRIPTEN__)
+// Need to redefine main for emscripten. See emsc_loop.c
+#define SOKOL_NO_ENTRY
+// Undef'd immediately after including Sokol.
+#define sokol_main sokol_main2
+#endif
+
 #define SOKOL_NO_DEPRECATED
 #define SOKOL_IMPL
 #include "sokol/sokol_app.h"
@@ -16,6 +23,12 @@
 #include "sokol/sokol_gfx.h"
 #include "sokol/sokol_time.h"
 #include "sokol/sokol_glue.h"
+
+#if defined(__EMSCRIPTEN__)
+#undef sokol_main
+#endif
+
+#include "emsc_loop.c"
 
 #ifdef _MSC_VER
 #pragma warning(disable : 4201) // nonstandard extension used: nameless struct/union
@@ -2845,6 +2858,7 @@ void frame(void)
 
     if (!have_update) {
         assert(pump_result.added_file == 0);
+        pause_main_loop();
         return;
     }
 
@@ -3371,6 +3385,7 @@ void input(const sapp_event* event)
 #endif
         }
     }
+    resume_main_loop();
 }
 
 sapp_desc sokol_main(int argc, char **argv)
