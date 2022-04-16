@@ -1674,7 +1674,8 @@ void tab_search(void)
     }
     if (have_query) {
         igSameLine(0, 4);
-        igText("%lld matches", buf_len(state.search.results));
+        i32 matches = (i32)buf_len(state.search.results);
+        igText("%d matches", matches);
     }
     if (igBeginTable("Search Results", 7, ImGuiTableFlags_Borders|ImGuiTableFlags_SizingStretchProp|ImGuiTableFlags_Resizable|ImGuiTableFlags_ScrollX, V2Zero, 0)) {
         igTableSetupColumn("Diff", ImGuiTableColumnFlags_WidthFixed, 65.0f, 0);
@@ -2840,7 +2841,6 @@ FramePumpResult pump(void)
             }
         }
     }
-
 
     return (FramePumpResult) { .state_updated = have_update, .added_file = new_sfi };
 }
