@@ -2855,10 +2855,14 @@ void frame(void)
 
     FramePumpResult pump_result = pump();
     b32 have_update = pump_result.state_updated || state.have_event_this_frame;
+    // todo: formalize this more
+    b32 have_pending_work = (state.opt_pending_evals > 0) || (pending_work_count() > 0);
 
-    if (!have_update) {
+    if (have_update == false) {
         assert(pump_result.added_file == 0);
-        pause_main_loop();
+        if (have_pending_work == false) {
+            pause_main_loop();
+        }
         return;
     }
 
@@ -3162,7 +3166,7 @@ void frame(void)
         igBeginGroup(); igText("requested"); igText("%_$d", debug_counters.requested); igEndGroup(); igSameLine(0, 4);
         igBeginGroup(); igText("skipped"); igText("%_$d", debug_counters.skipped); igEndGroup(); igSameLine(0, 4);
         igBeginGroup(); igText("done"); igText("%_$d", debug_counters.done); igEndGroup(); igSameLine(0, 4);
-        igBeginGroup(); igText("pending"); igText("%_$d", debug_counters.requested - (debug_counters.done + debug_counters.skipped)); igEndGroup(); igSameLine(0, 4);
+        igBeginGroup(); igText("pending"); igText("%_$d", pending_work_count()); igEndGroup(); igSameLine(0, 4);
         igSameLine(0, 45.f);
         igBeginGroup(); igText("Average calc time per thousand non-empty rows"); igText("%02.2fms", time); igEndGroup();
 
@@ -3265,8 +3269,7 @@ void frame(void)
     if (next_active != null_sfi) {
         // Allow one file to be open "in the background", and don't free its
         // graphs. For for any older files, free all their parameter graphs.
-        // Combined with the file restore above, this lets you to A/B between
-        // two files.
+        // Combined with the file restore above, this lets you A/B two files.
         for (SimFileInfo *sfi = state.files; sfi != buf_end(state.files); sfi++) {
             if (sfi->open && sfi != active && sfi != next_active) {
                 sfi->open = false;

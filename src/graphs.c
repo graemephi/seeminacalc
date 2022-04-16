@@ -344,6 +344,13 @@ struct {
     usize done;
 } debug_counters = {0};
 
+isize pending_work_count(void)
+{
+    isize result = debug_counters.requested - (debug_counters.done + debug_counters.skipped);
+    assert(result >= 0);
+    return result;
+}
+
 static const usize WorkQueueMask = WorkQueueSize - 1;
 static const usize DoneQueueMask = DoneQueueSize - 1;
 static_assert((WorkQueueSize & (WorkQueueSize - 1)) == 0);
