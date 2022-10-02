@@ -160,7 +160,7 @@ struct WideRangeRollMod
 		} else {
 			seq_ms[0] /= P(2.5F);
 			seq_ms[2] /= PREV(2.5F);
-			last_passed_check = do_timing_thing(P(1.F));
+			last_passed_check = do_timing_thing(1.F);
 			seq_ms[0] *= PREV(2.5F);
 			seq_ms[2] *= PREV(2.5F);
 		}
@@ -182,7 +182,7 @@ struct WideRangeRollMod
 		idk_ms[1] /= P(2.5F);
 		idk_ms[2] /= PREV(2.5F);
 
-		do_other_timing_thing(P(1.25F));
+		do_other_timing_thing(1.25F);
 
 		idk_ms[1] *= PREV(2.5F);
 		idk_ms[2] *= PREV(2.5F);
@@ -195,7 +195,7 @@ struct WideRangeRollMod
 		idk_ms[1] /= P(3.F);
 		idk_ms[2] /= PREV(3.F);
 
-		do_other_timing_thing(P(1.25F));
+		do_other_timing_thing(1.25F);
 
 		idk_ms[1] *= PREV(3.F);
 		idk_ms[2] *= PREV(3.F);

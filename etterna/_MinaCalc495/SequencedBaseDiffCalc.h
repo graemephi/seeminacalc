@@ -13,11 +13,10 @@
 constexpr float min_threshold = 0.65F;
 static const float downscale_logbase = std::log(6.2F);
 
-thread_local float scaler_for_ms_base = 1.175F;
-
+constexpr float scaler_for_ms_base = 1.175F;
 // i do not know a proper name for these
-thread_local float ms_base_finger_weighter_2 = 9.F;
-thread_local float ms_base_finger_weighter = 5.5F;
+constexpr float ms_base_finger_weighter_2 = 9.F;
+constexpr float ms_base_finger_weighter = 5.5F;
 
 static auto
 CalcMSEstimate(std::vector<float>& input, const int& burp) -> float
@@ -43,14 +42,14 @@ CalcMSEstimate(std::vector<float>& input, const int& burp) -> float
 	// looking for a good estimate of the hardest part of this interval
 	// if above 1 and below used_ms_vals, fill up the stuff with dummies
 	// my god i was literally an idiot for doing what i was doing before
-	float ms_dummy = P(360.F);
+	static const float ms_dummy = 360.F;
 
 	// mostly try to push down stuff like jumpjacks, not necessarily to push
 	// up "complex" stuff (this will push up intervals with few fast ms
 	// values kinda hard but it shouldn't matter as their base ms diff
 	// should be extremely low
-	float cv_yo = cv_trunc_fill(input, burp, ms_dummy) + P(0.5F);
-	cv_yo = std::clamp(cv_yo, PREV(0.5F), P(1.25F));
+	float cv_yo = cv_trunc_fill(input, burp, ms_dummy) + 0.5F;
+	cv_yo = std::clamp(cv_yo, 0.5F, 1.25F);
 
 	// basically doing a jank average, bigger m = lower difficulty
 	float m = sum_trunc_fill(input, burp, ms_dummy);
@@ -610,7 +609,7 @@ struct techyo
 
 		const auto left =
 		  get_total_for_windowf(count_left, balance_comp_window);
-		const auto right =
+		const auto right = 
 		  get_total_for_windowf(count_right, balance_comp_window);
 
 		// for this application of balance, dont care about half empty hands
@@ -671,8 +670,8 @@ struct techyo
 		// cv of 0 is 0 sd
 
 		// all of those numbers are clamped to [0.5, 1.5] (or [oioi, ioio])
-		float oioi = P(0.2F);
-		float ioio = P(2.F);
+		const auto oioi = 0.2F;
+		const auto ioio = 2.F;
 		pineapple = std::clamp(pineapple + oioi, oioi, ioio + oioi);
 		porcupine = std::clamp(porcupine + oioi, oioi, ioio + oioi);
 		sequins = std::clamp(sequins + oioi, oioi, ioio + oioi);
@@ -718,7 +717,7 @@ struct techyo
 
 	void advance_trill_base(Calc& calc)
 	{
-		float flamentation = P(.5F);
+		auto flamentation = .5F;
 		auto trill_ms_value = ms_init;
 
 		auto& a = mw_dt.at(0);
@@ -734,11 +733,11 @@ struct techyo
 			if (b.second == 0.F && a.first != b.first) {
 				// first 2 notes form a jump
 				flam_of_the_trill = 0.F;
-				third_tap = c.second * P(2.F);
+				third_tap = c.second * 2.F;
 			} else if (c.second == 0.F && b.first != c.first) {
 				// last 2 notes form a jump
 				flam_of_the_trill = 0.F;
-				third_tap = b.second * P(2.F);
+				third_tap = b.second * 2.F;
 			} else {
 				// determine ... trillflamjackyness
 
@@ -768,16 +767,16 @@ struct techyo
 			if (flam_of_the_trill == 0.F && third_tap == 0.F) {
 				// effectively a forced dropped note
 				flamentation = 0.F;
-				trill_ms_value = P(0.1F);
+				trill_ms_value = 0.1F;
 			} else {
 				// ratio = [0,1]
 				// 0 = flam involved
 				// 1 = straight trill
-				float flam_ms_depressor = P(0.F);
+				const auto flam_ms_depressor = 0.F;
 				auto ratio = div_low_by_high(
 				  std::max(flam_of_the_trill - flam_ms_depressor, 0.F),
 				  third_tap);
-				flamentation = std::clamp(std::pow(ratio, P(0.125F)), 0.F, 1.F);
+				flamentation = std::clamp(std::pow(ratio, 0.125F), 0.F, 1.F);
 				trill_ms_value = (flam_of_the_trill + third_tap) / 2.F;
 			}
 		}

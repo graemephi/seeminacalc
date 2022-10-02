@@ -1420,13 +1420,13 @@ void setup_optimizer(void)
 #if DUMP_CONSTANTS == 0
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("OHJ.h(81)"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("OHJ.h(89)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(76, 2)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(94)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(148)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(148, 2)"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(183, 2)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(183, 4)"))].low = 0.1f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(555)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(73, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(91)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(145)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(145, 2)"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(182, 2)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(182, 4)"))].low = 0.1f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Inline Constants"), S("MinaCalc.cpp(554)"))].low = 0.0f;
 #endif
     for (i32 i = 0; i < state.ps.num_params; i++) {
         state.opt_cfg.bounds[i].low = (state.opt_cfg.bounds[i].low - state.info.defaults.params[i]) / normalization_factors[i];
@@ -2240,7 +2240,7 @@ void tab_patternmods(void)
                         editing_group = ss;
                         editing_line = j;
                         editing = true;
-                        igOpenPopup_Str("PModAdjustor", 0);
+                        igOpenPopup_Str("PModAdjuster", 0);
                     }
                     igPopStyleColor(1);
                     if (igIsItemActive() && !igIsItemHovered(0)) {
@@ -2260,8 +2260,8 @@ void tab_patternmods(void)
         }
         pop_allocator();
 
-        // Pmod adjustor
-        if (editing && igBeginPopup("PModAdjustor", 0)) {
+        // Pmod adjuster
+        if (editing && igBeginPopup("PModAdjuster", 0)) {
             igPushItemWidth(180.f);
             if (editing_group >= 0 && editing_line >= 0 && editing_line < buf_len(state.adj_diff[editing_group])) {
                 AdjDiff *ad = &state.adj_diff[editing_group][editing_line];
@@ -2981,6 +2981,8 @@ void frame(void)
                     "There isn't any way to get values out of it--talk to me if you want to do that.\n\n"
                     "This problem is uh \"ill-conditioned\" so the optimizer does not having a stopping criterion. Have fun\n\n\n"
                     "Changes\n"
+                    " - 2022/10/3\n"
+                    "   - 495\n"
                     " - 2022/04/15\n"
                     "   - Idle when idle\n"
                     " - 2021/11/11\n"

@@ -37,6 +37,9 @@ T clamp(T t, T a, T b)
 }
 #endif
 
+// Building with clang and MSVC headers needs this.
+#include <sstream>
+
 #include "calcconstants.h"
 
 // Changes made to the calc source:
@@ -79,6 +82,9 @@ thread_local ParamJunk ManualConstants {
     { "GenericSequencing.jack_speed_increase_cutoff_factor", &jack_speed_increase_cutoff_factor },
 	{ "GenericSequencing.guaranteed_reset_buffer_ms", &guaranteed_reset_buffer_ms },
     { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
+    { "SequenceBasedDiffCalc.scaler_for_ms_base", &scaler_for_ms_base },
+    { "SequenceBasedDiffCalc.ms_base_finger_weighter_2", &ms_base_finger_weighter_2 },
+    { "SequenceBasedDiffCalc.ms_base_finger_weighter", &ms_base_finger_weighter },
 };
 
 thread_local float anchor_len_cap_float = (float)anchor_len_cap;
@@ -109,6 +115,7 @@ static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
     for (const auto &p : ulbu->_wrb._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_wrr._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_wrjt._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_wrjj._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_wra._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_fj._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_tt._params) *p.second = *mod_cursor++;
@@ -161,10 +168,11 @@ struct {
     { "WideRangeBalanceMod",        "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h", WideRangeBalance },
     { "WideRangeRollMod",           "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h", WideRangeRoll },
     { "WideRangeJumptrillMod",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h", WideRangeJumptrill },
+    { "WideRangeJJ",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJJ.h", WideRangeJJ },
     { "WideRangeAnchorMod",         "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h", WideRangeAnchor },
     { "FlamJamMod",                 "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h", FlamJam,  },
     { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing },
-    { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing2},
+    { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing2 },
     { "Base Scalers",               0, CalcPatternMod_Invalid },
     { "Global Integers",            0, CalcPatternMod_Invalid },
     { "Globals",                    0, CalcPatternMod_Invalid },
@@ -187,6 +195,9 @@ const char *GlobalFiles[] = {
     "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.jack_speed_increase_cutoff_factor", &jack_speed_increase_cutoff_factor },
     "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/GenericSequencing.h",   // { "GenericSequencing.guaranteed_reset_buffer_ms", &guaranteed_reset_buffer_ms },
     "etterna/Etterna/MinaCalc/Dependent/HD_Sequencers/RMSequencing.h",        // { "RMSequencing.rma_diff_scaler", &rma_diff_scaler },
+    "etterna/Etterna/MinaCalc/SequencedBaseDiffCalc.h"                        // { "SequencedBaseDiffCalc.scaler_for_ms_base", &scaler_for_ms_base },
+    "etterna/Etterna/MinaCalc/SequencedBaseDiffCalc.h"                        // { "SequencedBaseDiffCalc.ms_base_finger_weighter_2", &ms_base_finger_weighter_2 },
+    "etterna/Etterna/MinaCalc/SequencedBaseDiffCalc.h"                        // { "SequencedBaseDiffCalc.ms_base_finger_weighter", &ms_base_finger_weighter },
 };
 
 const char *GlobalIntegerFiles[] = {
@@ -281,6 +292,7 @@ CalcInfo calc_info()
         &shalhoub._wrb._params,
         &shalhoub._wrr._params,
         &shalhoub._wrjt._params,
+        &shalhoub._wrjj._params,
         &shalhoub._wra._params,
         &shalhoub._fj._params,
         &shalhoub._tt._params,
@@ -332,7 +344,7 @@ CalcInfo calc_info()
     shalhoub.setup_dependent_mods();
 
     for (isize i = 0; i < num_params; i++) {
-        if (str_eq((char *)param_info[i].name, "window_param")) {
+        if (str_eq((char *)param_info[i].name, "window_param") || str_eq((char *)param_info[i].name, "intervals_to_consider")) {
             param_info[i].integer = true;
             param_info[i].optimizable = false;
             param_info[i].min = 0;
@@ -364,10 +376,10 @@ CalcInfo calc_info()
 
     for (isize i = 0; i < num_params; i++) {
         if (param_info[i].constant &&
-            (  str_eq((char *)param_info[i].name, "MinaCalc.cpp(76, 2)")
-            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(94)")
-            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(183, 2)")
-            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(183, 4)"))) {
+            (  str_eq((char *)param_info[i].name, "MinaCalc.cpp(73, 2)")
+            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(91)")
+            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(182, 2)")
+            || str_eq((char *)param_info[i].name, "MinaCalc.cpp(182, 4)"))) {
             // Hack to fix bad bad no good infinite loop causer
             // chisel P(10.24) and P(0.32). should add P_MIN(10.24, 0.1) or something
             param_info[i].min = 0.1f;

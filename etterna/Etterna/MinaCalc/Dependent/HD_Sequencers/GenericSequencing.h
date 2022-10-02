@@ -17,7 +17,7 @@
 /****** Relevant to anchors ******/
 thread_local float anchor_spacing_buffer_ms = 10.F;
 thread_local float anchor_speed_increase_cutoff_factor = 2.34F;
-thread_local int anchor_len_cap = 5;
+thread_local int anchor_len_cap = 50;
 
 /****** Relevant to jacks ******/
 thread_local float jack_spacing_buffer_ms = 10.F;
@@ -250,6 +250,7 @@ struct Anchor_Sequencing : public Finger_Sequencing
 	}
 
 	/// returns an adjusted MS average value, not converted to nps
+	/// (((currently unused)))
 	inline float get_ms() override
 	{
 		assert(_sc_ms > 0.F);
@@ -260,9 +261,9 @@ struct Anchor_Sequencing : public Finger_Sequencing
 			return _len_cap_ms;
 		}
 
-		const auto avg_ms_mult = P(1.075F);
-		const auto anchor_time_buffer_ms = P(25.F);
-		const auto min_ms = P(82.5F);
+		const auto avg_ms_mult = P(1.F);
+		const auto anchor_time_buffer_ms = P(0.F);
+		const auto min_ms = P(0.F);
 
 		// get total ms
 		const auto total_ms = ms_from(_last, _start);
@@ -514,7 +515,6 @@ struct SequencerGeneral
 									 const bool lower = true) const -> float
 	{
 		if (ct == col_init) {
-
 			return ms_init;
 		}
 
