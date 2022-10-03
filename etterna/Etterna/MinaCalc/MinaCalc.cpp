@@ -868,14 +868,14 @@ Calc::InitAdjDiff(Calc& calc, const int& hand)
 				 * stuff, but it might be one reason why js is more problematic
 				 * than hs? */
 				case Skill_Jumpstream: {
-					*adj_diff /= max<float>(calc.pmod_vals.at(hand).at(HS).at(i), P(1.F));
+					*adj_diff /= max<float>(calc.pmod_vals.at(hand).at(HS).at(i), 1.F);
 					*adj_diff /=
-					  fastsqrt(calc.pmod_vals.at(hand).at(OHJumpMod).at(i) * P(0.95F));
+					  fastsqrt(calc.pmod_vals.at(hand).at(OHJumpMod).at(i) * 0.95F);
 
 					*adj_diff *=
 					  min(1.F,
 						  fastsqrt(calc.pmod_vals.at(hand).at(WideRangeRoll).at(i) +
-								   P(0.1F)));
+								   0.1F));
 
 					auto a = *adj_diff;
 					auto b = calc.init_base_diff_vals.at(hand).at(NPSBase).at(i) *
@@ -906,7 +906,7 @@ Calc::InitAdjDiff(Calc& calc, const int& hand)
 					*adj_diff =
 					  calc.init_base_diff_vals.at(hand).at(TechBase).at(i) *
 					  pmod_product_cur_interval.at(ss) * basescalers.at(ss)
-					  / max<float>(fastpow(calc.pmod_vals.at(hand).at(CJ).at(i), P(2.F)), P(1.F))
+					  / max<float>(fastpow(calc.pmod_vals.at(hand).at(CJ).at(i), 2.F), 1.F)
 					  / fastsqrt(calc.pmod_vals.at(hand).at(OHJumpMod).at(i));
 					break;
 				default:
@@ -952,13 +952,13 @@ Calc::InitAdjDiff(Calc& calc, const int& hand)
 			  &(calc.base_diff_for_stam_mod.at(hand).at(ss).at(i));
 
 			// nps adjusted by pmods
-			auto adj_npsbase = 0;
+			float adj_npsbase = 0.0F;
 			if (ss == Skill_JackSpeed) {
 				adj_npsbase = pmod_product_cur_interval.at(ss);
 			} else {
-				adj_npsbase = calc.init_base_diff_vals.at(hand).at(calc.adj_diff_bases[ss]).at(i)
-			  	* pmod_product_cur_interval.at(ss)
-			  	* basescalers.at(ss);
+			  	adj_npsbase = calc.init_base_diff_vals.at(hand).at(calc.adj_diff_bases[ss]).at(i)
+			  		* pmod_product_cur_interval.at(ss)
+					* basescalers.at(ss);
 			}
 
 			auto adj_stambase = adj_npsbase;

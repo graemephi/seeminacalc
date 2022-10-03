@@ -59,7 +59,11 @@
 
 static char const *AutoTestListPath = "CalcTestList.auto.xml";
 
-static char const *DiffValueStrings[] = { "NPSBase", "TechBase", "RMABase", "MSD" };
+// Must be kept in sync with CalcDiffValue in NoteDataStructures.h
+static char const *DiffValueStrings[] = { "NPSBase", "MSBase", "CJBase", "TechBase", "RMABase", "MSD" };
+
+
+// Must be kept in sync with CalcPatternMod in NoteDataStructures.h
 static char const *BigListOfModNamesInPatternModEnumOrder[] = {
     "Stream",
 	"JS",
@@ -78,6 +82,7 @@ static char const *BigListOfModNamesInPatternModEnumOrder[] = {
 	"FlamJam",
 	"WideRangeRoll",
 	"WideRangeJumptrill",
+    "WideRangeJumpjack",
 	"WideRangeBalance",
 	"WideRangeAnchor",
 	"TheThing",

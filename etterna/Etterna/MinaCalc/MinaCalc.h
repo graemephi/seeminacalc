@@ -207,14 +207,14 @@ class Calc
 	  {},
 	  // js
 	  {
-		{ AdjDiffOp_Div,  HS,                     1.0f,  0.0f, 1.0f, 1.0f, 		INFINITY, CalcDiffValue_Invalid,  Skillset_Invalid },
-	    { AdjDiffOp_Div,  OHJumpMod,              0.95f, 0.0f, 0.5f, -INFINITY, INFINITY, CalcDiffValue_Invalid,  Skillset_Invalid },
-	    { AdjDiffOp_Mul,  WideRangeRoll,          1.0f,  0.1f, 0.5f, -INFINITY, 1.0f,     CalcDiffValue_Invalid,  Skillset_Invalid },
-	    { AdjDiffOp_Stam, CalcPatternMod_Invalid, 1.0f,  0.0f, 1.0f, -INFINITY, INFINITY, NPSBase,                Skill_Handstream },
+		{ AdjDiffOp_Div,  HS,            1.0f,  0.0f, 1.0f,      1.0f, INFINITY, NPSBase,  Skill_Overall },
+	    { AdjDiffOp_Div,  OHJumpMod,     0.95f, 0.0f, 0.5f, -INFINITY, INFINITY, NPSBase,  Skill_Overall },
+	    { AdjDiffOp_Mul,  WideRangeRoll, 1.0f,  0.1f, 0.5f, -INFINITY, 1.0f,     NPSBase,  Skill_Overall },
+	    { AdjDiffOp_Stam, Stream,        1.0f,  0.0f, 1.0f, -INFINITY, INFINITY, NPSBase,  Skill_Handstream },
 	  },
 	  // hs
 	  {
-	    { AdjDiffOp_Stam, CalcPatternMod_Invalid, 1.0f,  0.0f, 1.0f, 1.0f,      INFINITY, NPSBase,                Skill_Jumpstream },
+	    { AdjDiffOp_Stam, Stream,        1.0f,  0.0f, 1.0f, 1.0f,      INFINITY, NPSBase,  Skill_Jumpstream },
 	  },
 	  // stam, nothing, don't handle here
 	  {},
@@ -222,12 +222,12 @@ class Calc
 	  {},
 	  // chordjack
 	  {
-	    // { AdjDiffOp_Mul,  CJOHJump,                1.0f,  0.0f, 0.5f, -INFINITY, INFINITY, CalcDiffValue_Invalid, Skillset_Invalid },
+	    // { AdjDiffOp_Mul,  CJOHJump,                1.0f,  0.0f, 0.5f, -INFINITY, INFINITY, NPSBase, Skill_Overall },
 	  },
 	  // tech, duNNO wat im DOIN
 	  {
-		{ AdjDiffOp_Div,  CJ,                      1.0f,  0.0f, 2.0f, 1.0f,      INFINITY, CalcDiffValue_Invalid, Skillset_Invalid },
-	    { AdjDiffOp_Div,  OHJumpMod,               1.0f,  0.0f, 0.5f, -INFINITY, INFINITY, CalcDiffValue_Invalid, Skillset_Invalid },
+		{ AdjDiffOp_Div,  CJ,            1.0f,  0.0f, 2.0f, 1.0f,      INFINITY, NPSBase, Skill_Overall },
+	    { AdjDiffOp_Div,  OHJumpMod,     1.0f,  0.0f, 0.5f, -INFINITY, INFINITY, NPSBase, Skill_Overall },
 	  },
 	} };
 
