@@ -2287,7 +2287,7 @@ void tab_patternmods(void)
                     igSameLine(0,4); if (igButton("off##min", V2Zero)) { any = true; ad->lo = -INFINITY; } igSameLine(0,4); TextString(S("min"));
                 } else {
                     any |= igCombo_Str_arr("Base", &ad->stam_base, DiffValueStrings, array_length(DiffValueStrings) - 1, 0);
-                    any |= igCombo_Str("Skillset", &ad->stam_ss, "Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0);
+                    any |= igCombo_Str("Skillset", &ad->stam_ss, "Overall\0Stream\0Jumpstrean\0HandStream\0Jackspeed\0Chordjacks\0Technical\0\0", 0);
                 }
                 any |= igCheckbox("Enabled", &ad->enabled);
                 igBeginDisabled(ad->enabled);
