@@ -1409,15 +1409,15 @@ void setup_optimizer(void)
         state.opt_cfg.bounds[i].low = -INFINITY;
         state.opt_cfg.bounds[i].high = INFINITY;
     }
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("StreamMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("StreamMod"), S("jack_comp_min"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("StreamMod"), S("jack_comp_max"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("JSMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("HSMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("CJMod"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("CJMod"), S("total_prop_scaler"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("RunningManMod"), S("offhand_tap_prop_min"))].low = 0.0f;
-    state.opt_cfg.bounds[param_index_by_name(&state.info, S("WideRangeRollMod"), S("max_mod"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Stream"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Stream"), S("jack_comp_min"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("Stream"), S("jack_comp_max"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("JS"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("HS"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("CJ"), S("prop_buffer"))] = (Bound) { 0.0f, 2.0f - 0.0001f };
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("CJ"), S("total_prop_scaler"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("RunningMan"), S("offhand_tap_prop_min"))].low = 0.0f;
+    state.opt_cfg.bounds[param_index_by_name(&state.info, S("WideRangeRoll"), S("max_mod"))].low = 0.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.tech_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.jack_pbm"))].low = 1.0f;
     state.opt_cfg.bounds[param_index_by_name(&state.info, S("Globals"), S("MinaCalc.stream_pbm"))].low = 1.0f;

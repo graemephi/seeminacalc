@@ -112,6 +112,7 @@ static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
     for (const auto &p : ulbu->_ch._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_chain._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_rm._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_mj._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_wrb._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_wrr._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_wrjt._params) *p.second = *mod_cursor++;
@@ -150,27 +151,28 @@ struct {
     CalcPatternMod id;
 } Mods[] = {
     { "Rate",                       0, CalcPatternMod_Invalid },
-    { "StreamMod",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h", Stream },
-    { "JSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h", JS },
-    { "HSMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h", HS },
-    { "CJMod",                      "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h", CJ },
-    { "CJDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h", CJDensity },
-    { "HSDensityMod",               "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HSDensity.h", HSDensity },
+    { "Stream",                     "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/Stream.h", Stream },
+    { "JS",                         "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/JS.h", JS },
+    { "HS",                         "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HS.h", HS },
+    { "CJ",                         "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJ.h", CJ },
+    { "CJDensity",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/CJDensity.h", CJDensity },
+    { "HSDensity",                  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/HSDensity.h", HSDensity },
     { "OHJumpModGuyThing",          "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHJ.h", OHJumpMod },
-    { "CJOHJumpMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h", CJOHJump },
-    { "RollMod",                    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h", Roll },
-    { "BalanceMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h", Balance },
-    { "OHTrillMod",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h", OHTrill, },
-    { "VOHTrillMod",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h", VOHTrill },
-    { "ChaosMod",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h", Chaos },
-    { "CJOHAnchorMod",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHAnchor.h", CJOHAnchor },
-    { "RunningManMod",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h", RanMan },
-    { "WideRangeBalanceMod",        "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h", WideRangeBalance },
-    { "WideRangeRollMod",           "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h", WideRangeRoll },
-    { "WideRangeJumptrillMod",      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h", WideRangeJumptrill },
+    { "CJOHJump",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHJ.h", CJOHJump },
+    { "Roll",                       "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Roll.h", Roll },
+    { "Balance",                    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Balance.h", Balance },
+    { "OHTrill",                    "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/OHT.h", OHTrill, },
+    { "VOHTrill",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/VOHT.h", VOHTrill },
+    { "Chaos",                      "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Chaos.h", Chaos },
+    { "CJOHAnchor",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/CJOHAnchor.h", CJOHAnchor },
+    { "RunningMan",                 "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/RunningMan.h", RanMan },
+    { "Minijack",                   "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/Minijack.h", Minijack },
+    { "WideRangeBalance",           "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeBalance.h", WideRangeBalance },
+    { "WideRangeRoll",              "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeRoll.h", WideRangeRoll },
+    { "WideRangeJumptrill",         "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJumptrill.h", WideRangeJumptrill },
     { "WideRangeJJ",                "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeJJ.h", WideRangeJJ },
-    { "WideRangeAnchorMod",         "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h", WideRangeAnchor },
-    { "FlamJamMod",                 "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h", FlamJam,  },
+    { "WideRangeAnchor",            "etterna/Etterna/MinaCalc/Dependent/HD_PatternMods/WideRangeAnchor.h", WideRangeAnchor },
+    { "FlamJam",                    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h", FlamJam,  },
     { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing },
     { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing2 },
     { "Base Scalers",               0, CalcPatternMod_Invalid },
@@ -289,6 +291,7 @@ CalcInfo calc_info()
         &shalhoub._ch._params,
         &shalhoub._chain._params,
         &shalhoub._rm._params,
+        &shalhoub._mj._params,
         &shalhoub._wrb._params,
         &shalhoub._wrr._params,
         &shalhoub._wrjt._params,

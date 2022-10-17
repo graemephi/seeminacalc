@@ -8,7 +8,7 @@ static const int max_moving_window_size = 6;
 /// applies to acca and cccccc as well
 static const int ccacc_timing_check_size = 3;
 
-/// custom moving window container that can do basic statistical operations on 
+/// custom moving window container that can do basic statistical operations on
 /// a dynamic window
 template<typename T>
 struct CalcMovingWindow
@@ -63,6 +63,19 @@ struct CalcMovingWindow
 		while (i > max_moving_window_size - window) {
 			--i;
 			o = _itv_vals.at(i) > o ? _itv_vals.at(i) : o;
+		}
+
+		return o;
+	}
+
+	/// get the min for the moving window up to a given size
+	[[nodiscard]] auto get_min_for_window(const int& window) const -> T
+	{
+		T o = get_now();
+		auto i = max_moving_window_size;
+		while (i > max_moving_window_size - window) {
+			--i;
+			o = _itv_vals.at(i) < o ? _itv_vals.at(i) : o;
 		}
 
 		return o;
@@ -182,7 +195,7 @@ struct CalcMovingWindow
 		// we can basically just branch to ccacc or acca checks depending on
 		// which value is higher
 		bool o;
-		if (_itv_vals[4] > _itv_vals[5]) {
+		if (any_ms_is_greater(_itv_vals[4], _itv_vals[5])) {
 			// if middle is higher, run the ccacc check that will divide it
 			o = ccacc_timing_check(factor, threshold);
 		} else {

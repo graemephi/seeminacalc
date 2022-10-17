@@ -185,6 +185,7 @@ class Calc
 		WideRangeRoll,
 		FlamJam,
 		RanMan,
+		Minijack,
 		// WideRangeAnchor,
 		TheThing,
 		TheThing2,

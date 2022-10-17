@@ -240,3 +240,4 @@ static int minacalc_constant_prev_fixup[] = {
       0,  0,  0,  0,  0,  0, 109,  0,
       0,  0,  0,  0,  0,  0,  0,
 };
+
