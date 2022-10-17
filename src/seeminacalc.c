@@ -1243,10 +1243,31 @@ u32 param_effective(i32 param_index, u8 *effects, u32 effect_mask)
     return effective + (enabled_for_optimizing << 1);
 }
 
-void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, b32 by_group, ParamSliderChange *changed_param)
+void style_poppy_woppy(b32 *did_pop) {
+    if (*did_pop == false) {
+        igPopStyleColor(1);
+        *did_pop = true;
+    }
+}
+
+void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
 {
+    b32 any_param_effective = false;
+    for (i32 i = 0; i < mod->num_params; i++) {
+        i32 mp = mod->index + i;
+        if (param_effective(mp, effects, effect_mask)) {
+            any_param_effective = true;
+            break;
+        }
+    }
+
+    ImVec4 color = any_param_effective ? *igGetStyleColorVec4(ImGuiCol_Text) : ((ImVec4) { .3f, .3f, .3f, 1.0f });
+    igPushStyleColor_Vec4(ImGuiCol_Text, color);
+    b32 popped = false;
+
     if (mod_index == 0) {
         if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
+            style_poppy_woppy(&popped);
             igSetCursorPosX(52);
             if (igCheckbox("##graph", &state.parameter_graphs_enabled[0])) {
                 changed_param->param = 0;
@@ -1255,52 +1276,43 @@ void mod_param_sliders(ModInfo *mod, i32 mod_index, u8 *effects, u32 effect_mask
             tooltip("graph rate");
             igTreePop();
         }
-    } else if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_DefaultOpen)) {
-        i32 count = 0;
-        for (i32 i = 0; i < mod->num_params; i++) {
-            i32 mp = mod->index + i;
-            if (param_effective(mp, effects, effect_mask)) {
-                count++;
-            }
-        }
-        if (count || state.preview_pmod_graphs_enabled[mod_index]) {
-            if (igButton("##opt_all", V2(19,19))) {
-                b32 all_visible_are_enabled = true;
-                for (i32 i = 0; i < mod->num_params; i++) {
-                    i32 mp = mod->index + i;
-                    b32 visible = by_group ? count > 0 : param_effective(mp, effects, effect_mask);
-                    if (visible && state.info.params[mp].optimizable) {
-                        if (state.opt_cfg.enabled[mp] == false) {
-                            all_visible_are_enabled = false;
-                            break;
-                        }
-                    }
-                }
-
-                b32 new_state = all_visible_are_enabled ? false : true;
-
-                for (i32 i = 0; i < mod->num_params; i++) {
-                    i32 mp = mod->index + i;
-                    b32 visible = by_group ? count > 0 : param_effective(mp, effects, effect_mask);
-                    state.opt_cfg.enabled[mp] = new_state && visible && state.info.params[mp].optimizable;
-                }
-                changed_param->type = ParamSlider_OptimizingToggled;
-            } tooltip("optimize visible");
-            if (debuginfo_mod_index(mod_index) != CalcPatternMod_Invalid) {
-                igSameLine(0, 4);
-                igCheckbox("##pmod graph", &state.preview_pmod_graphs_enabled[mod_index]);
-                tooltip("graph on preview");
-            }
+    } else if (igTreeNodeEx_Str(mod->name, ImGuiTreeNodeFlags_None)) {
+        style_poppy_woppy(&popped);
+        if (igButton("##opt_effective", V2(19,19))) {
+            b32 all_effective_are_enabled = true;
             for (i32 i = 0; i < mod->num_params; i++) {
                 i32 mp = mod->index + i;
                 b32 effective = param_effective(mp, effects, effect_mask);
-                if (effective || by_group) {
-                    param_slider_widget(mp, effective & 1, changed_param);
+                if (effective && state.info.params[mp].optimizable) {
+                    if (state.opt_cfg.enabled[mp] == false) {
+                        all_effective_are_enabled = false;
+                        break;
+                    }
                 }
             }
+
+            b32 new_state = all_effective_are_enabled ? false : true;
+
+            for (i32 i = 0; i < mod->num_params; i++) {
+                i32 mp = mod->index + i;
+                b32 effective = param_effective(mp, effects, effect_mask);
+                state.opt_cfg.enabled[mp] = new_state && effective && state.info.params[mp].optimizable;
+            }
+            changed_param->type = ParamSlider_OptimizingToggled;
+        } tooltip("optimize effective");
+        if (debuginfo_mod_index(mod_index) != CalcPatternMod_Invalid) {
+            igSameLine(0, 4);
+            igCheckbox("##pmod graph", &state.preview_pmod_graphs_enabled[mod_index]);
+            tooltip("graph on preview");
+        }
+        for (i32 i = 0; i < mod->num_params; i++) {
+            i32 mp = mod->index + i;
+            b32 effective = param_effective(mp, effects, effect_mask);
+            param_slider_widget(mp, effective & 1, changed_param);
         }
         igTreePop();
     }
+    style_poppy_woppy(&popped);
 }
 
 
@@ -1314,10 +1326,10 @@ char const *after_last_slash(char const *p)
     return cursor + 1;
 }
 
-void inlines_param_sliders(i32 inlines_mod_index, u8 *effects, u32 effect_mask, b32 by_group, ParamSliderChange *changed_param)
+void inlines_param_sliders(i32 inlines_mod_index, u8 *effects, u32 effect_mask, ParamSliderChange *changed_param)
 {
     for (i32 i = 0; i < buf_len(state.inline_mods); i++) {
-        mod_param_sliders(&state.inline_mods[i], inlines_mod_index + i, effects, effect_mask, by_group, changed_param);
+        mod_param_sliders(&state.inline_mods[i], inlines_mod_index + i, effects, effect_mask, changed_param);
     }
 }
 
@@ -2922,40 +2934,11 @@ void frame(void)
         }
         igNewLine();
 
-        // Tabs for param strength filters
-        if (igBeginTabBar("FilterTabs", ImGuiTabBarFlags_NoTooltip)) {
-            if (igBeginTabItem("By group", 0, ImGuiTabItemFlags_None)) {
-                tooltip("Filter groups that don't affect the active file\nThis only checks the highlighted skillsets above");
-                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, true, &changed_param);
-                }
-                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, true, &changed_param);
-                igEndTabItem();
-            } else {
-                tooltip("Filter groups that don't affect the active file\nThis only checks the highlighted skillsets above");
-            }
-            if (igBeginTabItem("By parameter", 0, ImGuiTabItemFlags_None)) {
-                tooltip("Filter parameters that don't affect the active file\nThis only checks the highlighted skillsets above");
-                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, false, &changed_param);
-                }
-                inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, false, &changed_param);
-                igEndTabItem();
-            } else {
-                tooltip("Filter parameters that don't affect the active file\nThis only checks the highlighted skillsets above");
-            }
-            if (igBeginTabItem("All", 0, ImGuiTabItemFlags_None)) {
-                tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
-                for (i32 i = 0; i < state.info.num_mods - 1; i++) {
-                    mod_param_sliders(&state.info.mods[i], i,  0, 0, false, &changed_param);
-                }
-                inlines_param_sliders((i32)state.info.num_mods - 1,  0, 0, false, &changed_param);
-                igEndTabItem();
-            } else {
-                tooltip("Everything\nPretty useless unless you like finding out which knobs do nothing yourself");
-            }
+        // Foldable mod parameter tree nodes
+        for (i32 i = 0; i < state.info.num_mods - 1; i++) {
+            mod_param_sliders(&state.info.mods[i], i, active->effects.masks, effect_mask, &changed_param);
         }
-        igEndTabBar();
+        inlines_param_sliders((i32)state.info.num_mods - 1, active->effects.masks, effect_mask, &changed_param);
     }
     igEnd();
 
