@@ -2972,6 +2972,7 @@ void frame(void)
                     " - 2022/10/17\n"
                     "   - 497\n"
                     "   - Less aggravating parameter/mod filtering on the left there\n"
+                    "   - Actually added ceejay/techyo this time\n"
                     " - 2022/10/3\n"
                     "   - 495\n"
                     " - 2022/04/15\n"

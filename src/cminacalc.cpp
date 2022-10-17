@@ -121,6 +121,8 @@ static void stupud_hack(TheGreatBazoinkazoinkInTheSky *ulbu, float *mod_cursor)
     for (const auto &p : ulbu->_fj._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_tt._params) *p.second = *mod_cursor++;
     for (const auto &p : ulbu->_tt2._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_diffz._tc._params) *p.second = *mod_cursor++;
+    for (const auto &p : ulbu->_diffz._cj._params) *p.second = *mod_cursor++;
 	for (const auto &p : BaseScalers) *p.second = *mod_cursor++;
 	for (const auto &p : ManualConstantInts) *p.second = *mod_cursor++;
 	for (const auto &p : ManualConstants) *p.second = *mod_cursor++;
@@ -175,6 +177,8 @@ struct {
     { "FlamJam",                    "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/FlamJam.h", FlamJam,  },
     { "TheThingLookerFinderThing",  "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing },
     { "TheThingLookerFinderThing2", "etterna/Etterna/MinaCalc/Agnostic/HA_PatternMods/TheThingFinder.h", TheThing2 },
+    { "Techyo",                     "etterna/Etterna/MinaCalc/SequencedBaseDiffCalc.h", Techyo },
+    { "Ceejay",                     "etterna/Etterna/MinaCalc/SequencedBaseDiffCalc.h", Ceejay },
     { "Base Scalers",               0, CalcPatternMod_Invalid },
     { "Global Integers",            0, CalcPatternMod_Invalid },
     { "Globals",                    0, CalcPatternMod_Invalid },
@@ -300,6 +304,8 @@ CalcInfo calc_info()
         &shalhoub._fj._params,
         &shalhoub._tt._params,
         &shalhoub._tt2._params,
+        &shalhoub._diffz._tc._params,
+        &shalhoub._diffz._cj._params,
         &BaseScalers,
         &ManualConstantInts,
         &ManualConstants,
@@ -347,7 +353,11 @@ CalcInfo calc_info()
     shalhoub.setup_dependent_mods();
 
     for (isize i = 0; i < num_params; i++) {
-        if (str_eq((char *)param_info[i].name, "window_param") || str_eq((char *)param_info[i].name, "intervals_to_consider")) {
+        if (str_eq((char *)param_info[i].name, "window_param")
+        // This is getting silly
+        || str_eq((char *)param_info[i].name, "intervals_to_consider")
+        || str_eq((char *)param_info[i].name, "chaos_comp_window")
+        || str_eq((char *)param_info[i].name, "tc_static_base_window")) {
             param_info[i].integer = true;
             param_info[i].optimizable = false;
             param_info[i].min = 0;

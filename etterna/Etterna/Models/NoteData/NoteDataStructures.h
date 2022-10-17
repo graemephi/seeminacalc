@@ -76,6 +76,10 @@ enum CalcPatternMod
 	// RanPropOffS,
 	// RanPropJack,
 	TotalPatternMod,
+	// SeeMinaCalc additions
+	Techyo,
+	Ceejay,
+	// End SeeMinaCalc additions
 	NUM_CalcPatternMod,
 	CalcPatternMod_Invalid,
 };
